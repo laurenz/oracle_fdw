@@ -1,0 +1,4 @@
+comment = 'foreign data wrapper for Oracle access'
+default_version = '1.0'
+module_pathname = '$libdir/oracle_fdw'
+relocatable = true
