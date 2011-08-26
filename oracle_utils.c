@@ -1476,7 +1476,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		dvoid *value = NULL;
 		sb4 value_len = 0;
 		ub2 value_type = SQLT_STR;
-		OCIDateTime *timest;
+		OCIDateTime **timest;
 		OCINumber *number;
 		char *num_format, *pos;
 
@@ -1523,8 +1523,11 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					value_type = SQLT_VNU;
 					break;
 				case BIND_TIMESTAMP:
+					/* timest must exist until the OCIStmtExecute call */
+					timest = (OCIDateTime **)oracleAlloc(sizeof(OCIDateTime *));
+
 					/* allocate timestamp descriptor */
-					if (OCIDescriptorAlloc((const dvoid *)session->envhp, (dvoid **)&timest,
+					if (OCIDescriptorAlloc((const dvoid *)session->envhp, (dvoid **)timest,
 						OCI_DTYPE_TIMESTAMP_TZ, 0, NULL) != OCI_SUCCESS)
 					{
 						oracleCloseStatement(session, NULL);
@@ -1537,7 +1540,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					if (checkerr(
 						OCIDateTimeFromText((dvoid *)session->userhp, session->errhp,
 							(const OraText *)param->value, strlen(param->value), (const OraText *)NULL, (ub1)0,
-							(const OraText *)NULL, (size_t)0, timest),
+							(const OraText *)NULL, (size_t)0, *timest),
 						(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
 						oracleCloseStatement(session, NULL);
@@ -1548,9 +1551,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					}
 
 					/* store in param->value to be able to free it later */
-					(OCIDateTime *)param->value = timest;
+					(OCIDateTime *)param->value = *timest;
 
-					(OCIDateTime **)value = &timest;
+					(OCIDateTime **)value = timest;
 					value_len = sizeof(OCIDateTime **);
 					value_type = SQLT_TIMESTAMP_TZ;
 					break;
