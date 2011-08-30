@@ -1,0 +1,7 @@
+Version 1.0
+  Bugfixes:
+  - Fix incorrect use of an automatic variable for binding timestamp parameters
+    in Oracle.
+
+Version 0.9 (beta), released 2011-08-25
+  - initial release
