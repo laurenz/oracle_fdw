@@ -1,8 +1,8 @@
 MODULE_big = oracle_fdw
 OBJS = oracle_fdw.o oracle_utils.o
-
 EXTENSION = oracle_fdw
 DATA = oracle_fdw--1.0.sql
+DOCS = README.oracle_fdw
 
 # Oracle's shared library is oci.dll on Windows and libclntsh elsewhere
 ORACLE_SHLIB=$(if $(findstring win32,$(PORTNAME)),oci,clntsh)
