@@ -1518,7 +1518,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 							oraMessage);
 					}
 
-					(OCINumber *)value = number;
+					value = (dvoid *)number;
 					value_len = sizeof(OCINumber);
 					value_type = SQLT_VNU;
 					break;
@@ -1551,9 +1551,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					}
 
 					/* store in param->value to be able to free it later */
-					(OCIDateTime *)param->value = *timest;
+					param->value = (char *)*timest;
 
-					(OCIDateTime **)value = timest;
+					value = (dvoid *)timest;
 					value_len = sizeof(OCIDateTime **);
 					value_type = SQLT_TIMESTAMP_TZ;
 					break;
