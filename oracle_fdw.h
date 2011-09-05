@@ -45,6 +45,8 @@ struct oraColumn
 	char *name;              /* name in Oracle */
 	oraType oratype;         /* data type in Oracle */
 	int scale;               /* "scale" type modifier, used for NUMBERs */
+	char *pgname;            /* PostgreSQL column name */
+	int pgattnum;            /* PostgreSQL attribute number */
 	Oid pgtype;              /* PostgreSQL data type */
 	int pgtypmod;            /* PostgreSQL type modifier */
 	int used;                /* is the column used in the query? */
@@ -59,7 +61,7 @@ struct oraTable
 	char *name;    /* name in Oracle */
 	char *pgname;  /* for error messages */
 	int ncols;     /* number of columns */
-	int npgcols;   /* number of columns in the corresponding PostgreSQL foreign table */
+	int npgcols;   /* number of columns (including dropped) in the PostgreSQL foreign table */
 	struct oraColumn **cols;
 };
 

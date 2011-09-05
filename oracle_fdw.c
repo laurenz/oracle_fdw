@@ -118,9 +118,10 @@ static void oracleEndForeignScan(ForeignScanState *node);
  */
 static void oracleGetOptions(Oid foreigntableid, List **options);
 static char *createQuery(List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList);
+static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 static char *getOracleWhereClause(Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
-static void checkDataTypes(Oid foreigntableid, struct oraTable *oraTable);
+static void checkDataTypes(struct oraTable *oraTable);
 static char *guessNlsLang(char *nls_lang);
 static List *serializePlanData(const char *dbserver, const char *user, const char *password, const char *nls_lang, const char *query, const struct oraTable *oraTable, const struct paramDesc *paramList);
 static Const *serializeString(const char *s);
@@ -262,7 +263,7 @@ _PG_init()
 
 /*
  * oraclePlanForeignScan
- *      Establish an Oracle connection, get a description of the
+ * 	    Establish an Oracle connection, get a description of the
  * 		remote table, constructs the query to issue against Oracle
  * 		and a list of parameters for the query, verify that column
  * 		data types can be converted, get Oracle's cost estimates if
@@ -343,12 +344,15 @@ oraclePlanForeignScan(Oid foreigntableid,
 	/* get remote table description */
 	oraTable = oracleDescribe(session, qualtable, pgtablename);
 
+	/* add PostgreSQL data to table description */
+	getColumnData(foreigntableid, oraTable);
+
 	/* construct Oracle query and get the list of parameters */
 	query = createQuery(baserel->reltargetlist, baserel->baserestrictinfo, oraTable, &paramList);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(foreigntableid, oraTable);
+	checkDataTypes(oraTable);
 
 	/* construct FdwPlan */
 	fdwplan = makeNode(FdwPlan);
@@ -384,9 +388,12 @@ oraclePlanForeignScan(Oid foreigntableid,
 
 	/* free oraTable */
 	pfree(oraTable->name);
+	pfree(oraTable->pgname);
 	for (i=0; i<oraTable->ncols; ++i)
 	{
 		pfree(oraTable->cols[i]->name);
+		if (oraTable->cols[i]->pgname != NULL)
+			pfree(oraTable->cols[i]->pgname);
 		pfree(oraTable->cols[i]);
 	}
 	pfree(oraTable);
@@ -476,8 +483,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 	int is_null, have_result;
 	HeapTuple tuple;
 	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
-	int i;
+	int j, index;
 	TimestampTz tstamp;
+	char *value = NULL;
+	long value_len = 0;
 
 	if (oracleIsStatementOpen(fdw_state->session))
 	{
@@ -592,87 +601,94 @@ oracleIterateForeignScan(ForeignScanState *node)
 		slot->tts_isnull = (bool *)palloc(sizeof(bool) * slot->tts_nvalid);
 
 		/* assign result values */
-		for (i=0; i<fdw_state->oraTable->npgcols; ++i)
+		index = -1;
+		for (j=0; j<fdw_state->oraTable->npgcols; ++j)
 		{
+			/* for dropped columns, insert a NULL */
+			if (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1)
+			{
+				slot->tts_isnull[j] = true;
+				slot->tts_values[j] = PointerGetDatum(NULL);
+				continue;
+			}
+			else
+				++index;
+
 			/*
 			 * Columns exceeding the length of the Oracle table will be NULL,
 			 * as well as columns that are not used in the query.
 			 */
-			if (i >= fdw_state->oraTable->ncols
-					|| fdw_state->oraTable->cols[i]->used == 0
-					|| fdw_state->oraTable->cols[i]->val_null == -1)
+			if (index >= fdw_state->oraTable->ncols
+					|| fdw_state->oraTable->cols[index]->used == 0
+					|| fdw_state->oraTable->cols[index]->val_null == -1)
 			{
-				slot->tts_isnull[i] = true;
-				slot->tts_values[i] = PointerGetDatum(NULL);
+				slot->tts_isnull[j] = true;
+				slot->tts_values[j] = PointerGetDatum(NULL);
+				continue;
+			}
+
+			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+			{
+				/* get the actual LOB contents (palloc'ed) */
+				oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, &value, &value_len);
 			}
 			else
 			{
-				char *value = NULL;
-				long value_len = 0;
-
-				if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
-						|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
-				{
-					/* get the actual LOB contents (palloc'ed) */
-					oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[i]->val, &value, &value_len);
-				}
-				else
-				{
-					/* for other data types, oraTable contains the results */
-					value = fdw_state->oraTable->cols[i]->val;
-					value_len = fdw_state->oraTable->cols[i]->val_len;
-				}
-
-				slot->tts_isnull[i] = false;
-				if (fdw_state->oraTable->cols[i]->pgtype == BYTEAOID)
-				{
-					/* binary columns are not converted */
-					bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
-					memcpy(VARDATA(result), value, value_len);
-					SET_VARSIZE(result, value_len + VARHDRSZ);
-
-					slot->tts_values[i] = PointerGetDatum(result);
-				}
-				else
-				{
-					regproc typinput;
-					HeapTuple tuple;
-					Datum dat;
-
-					/* find the appropriate conversion function */
-					tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[i]->pgtype));
-					if (!HeapTupleIsValid(tuple))
-						elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[i]->pgtype);
-					typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
-					ReleaseSysCache(tuple);
-
-					/* and call it */
-					dat = CStringGetDatum(value);
-					switch (fdw_state->oraTable->cols[i]->pgtype)
-					{
-						case BPCHAROID:
-						case VARCHAROID:
-						case TIMESTAMPOID:
-						case TIMESTAMPTZOID:
-						case INTERVALOID:
-						case NUMERICOID:
-							/* these functions require the type modifier */
-							slot->tts_values[i] = OidFunctionCall3(typinput,
-									dat,
-									ObjectIdGetDatum(InvalidOid),
-									Int32GetDatum(fdw_state->oraTable->cols[i]->pgtypmod));
-							break;
-						default:
-							/* the others don't */
-							slot->tts_values[i] = OidFunctionCall1(typinput, dat);
-					}
-				}
-
-				/* free the data buffer for LOBs */
-				if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
-						|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
-					pfree(value);
+				/* for other data types, oraTable contains the results */
+				value = fdw_state->oraTable->cols[index]->val;
+				value_len = fdw_state->oraTable->cols[index]->val_len;
 			}
+
+			slot->tts_isnull[j] = false;
+			if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
+			{
+				/* binary columns are not converted */
+				bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
+				memcpy(VARDATA(result), value, value_len);
+				SET_VARSIZE(result, value_len + VARHDRSZ);
+
+				slot->tts_values[j] = PointerGetDatum(result);
+			}
+			else
+			{
+				regproc typinput;
+				HeapTuple tuple;
+				Datum dat;
+
+				/* find the appropriate conversion function */
+				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
+				if (!HeapTupleIsValid(tuple))
+					elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
+				typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
+				ReleaseSysCache(tuple);
+
+				/* and call it */
+				dat = CStringGetDatum(value);
+				switch (fdw_state->oraTable->cols[index]->pgtype)
+				{
+					case BPCHAROID:
+					case VARCHAROID:
+					case TIMESTAMPOID:
+					case TIMESTAMPTZOID:
+					case INTERVALOID:
+					case NUMERICOID:
+						/* these functions require the type modifier */
+						slot->tts_values[j] = OidFunctionCall3(typinput,
+								dat,
+								ObjectIdGetDatum(InvalidOid),
+								Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
+						break;
+					default:
+						/* the others don't */
+						slot->tts_values[j] = OidFunctionCall1(typinput, dat);
+				}
+			}
+
+			/* free the data buffer for LOBs */
+			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+				pfree(value);
 		}
 	}
 	else
@@ -749,6 +765,57 @@ oracleGetOptions(Oid foreigntableid, List **options)
 	if (mapping != NULL)
 		*options = list_concat(*options, mapping->options);
 	*options = list_concat(*options, table->options);
+}
+
+/*
+ * getColumnData
+ * 		Get PostgreSQL column name and number, data type and data type modifier.
+ * 		Set the oraTable->npgcols.
+ */
+void
+getColumnData(Oid foreigntableid, struct oraTable *oraTable)
+{
+	HeapTuple tuple;
+	Relation att_rel;
+	SysScanDesc scan;
+	ScanKeyData key[2];
+	Form_pg_attribute att_tuple;
+	int index = 0;
+
+	/*
+	 * Scan pg_attribute for all columns of the foreign table.
+	 * This is an index scan over pg_attribute_relid_attnum_index where attnum>0
+	 */
+	att_rel = heap_open(AttributeRelationId, AccessShareLock);
+	ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(foreigntableid));
+	ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTGreaterStrategyNumber, F_INT2GT, Int16GetDatum((int2)0));
+	scan = systable_beginscan(att_rel, AttributeRelidNumIndexId, true, SnapshotNow, 2, key);
+
+	/* loop through columns */
+	oraTable->npgcols = 0;
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		++oraTable->npgcols;
+
+		att_tuple = (Form_pg_attribute)GETSTRUCT(tuple);
+		/* ignore dropped columns */
+		if (att_tuple->attisdropped)
+			continue;
+
+		++index;
+		/* get PostgreSQL column number and type */
+		if (index <= oraTable->ncols)
+		{
+			oraTable->cols[index-1]->pgattnum = att_tuple->attnum;
+			oraTable->cols[index-1]->pgtype = att_tuple->atttypid;
+			oraTable->cols[index-1]->pgtypmod = att_tuple->atttypmod;
+			oraTable->cols[index-1]->pgname = pstrdup(NameStr(att_tuple->attname));
+		}
+	}
+
+	/* end scan */
+	systable_endscan(scan);
+	heap_close(att_rel, AccessShareLock);
 }
 
 /*
@@ -895,7 +962,7 @@ char
  * getOracleWhereClause
  * 		Create and return an Oracle SQL WHERE clause from the expression.
  * 		If that is not possible, return NULL, else a palloc'ed string.
- *      As a side effect, all Params incorporated in the WHERE clause
+ * 	    As a side effect, all Params incorporated in the WHERE clause
  * 		will be stored in paramList.
  */
 char
@@ -919,6 +986,7 @@ char
 	Oid leftargtype, rightargtype, schema;
 	oraType oratype;
 	bool first_arg;
+	int index;
 
 	if (expr == NULL)
 		return NULL;
@@ -1080,12 +1148,25 @@ char
 			if (! (canHandleType(variable->vartype) || variable->vartype == BOOLOID))
 				return NULL;
 
+			/* get oraTable column index corresponding to this column (-1 if none) */
+			index = oraTable->ncols - 1;
+			while (index >= 0 && oraTable->cols[index]->pgattnum != variable->varattno)
+				--index;
+
+			/* if no Oracle column corresponds, translate as NULL */
+			if (index == -1)
+			{
+				initStringInfo(&result);
+				appendStringInfo(&result, "NULL");
+				break;
+			}
+
 			/*
 			 * Don't try to convert a column reference if the type is
 			 * converted from a non-string type in Oracle to a string type
 			 * in PostgreSQL because functions and operators won't work the same.
 			 */
-			oratype = oraTable->cols[variable->varattno - 1]->oratype;
+			oratype = oraTable->cols[index]->oratype;
 			if ((variable->vartype == TEXTOID
 					|| variable->vartype == BPCHAROID
 					|| variable->vartype == VARCHAROID)
@@ -1104,18 +1185,7 @@ char
 				appendStringInfo(&result, "(");
 			}
 
-			if (variable->varattno <= oraTable->ncols)
-			{
-				appendStringInfo(&result, "%s", oraTable->cols[variable->varattno - 1]->name);
-			}
-			else
-			{
-				/*
-				 * if the PostgreSQL table has more columns than the Oracle
-				 * table, convert these columns to NULL.
-				 */
-				appendStringInfo(&result, "NULL");
-			}
+			appendStringInfo(&result, "%s", oraTable->cols[index]->name);
 
 			/* work around the lack of booleans in Oracle */
 			if (variable->vartype == BOOLOID)
@@ -1716,6 +1786,8 @@ void
 getUsedColumns(Expr *expr, struct oraTable *oraTable)
 {
 	ListCell *cell;
+	Var *variable;
+	int index;
 
 	if (expr == NULL)
 		return;
@@ -1735,15 +1807,22 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 		case T_CurrentOfExpr:
 			break;
 		case T_Var:
-			if (((Var *)expr)->varattno <= oraTable->ncols)
-			{
-				oraTable->cols[((Var *)expr)->varattno - 1]->used = 1;
-			}
-			else
+			variable = (Var *)expr;
+
+			/* get oraTable column index corresponding to this column (-1 if none) */
+			index = oraTable->ncols - 1;
+			while (index >= 0 && oraTable->cols[index]->pgattnum != variable->varattno)
+				--index;
+
+			if (index == -1)
 			{
 				ereport(WARNING,
 						(errcode(ERRCODE_WARNING),
-						errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", ((Var *)expr)->varattno, oraTable->pgname)));
+						errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", variable->varattno, oraTable->pgname)));
+			}
+			else
+			{
+				oraTable->cols[index]->used = 1;
 			}
 			break;
 		case T_Aggref:
@@ -1925,52 +2004,13 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 
 /*
  * checkDataTypes
- * 		Gets PostgreSQL data types for the columns and stores them
- * 		in oraTable. If the data type cannot be converted or the
- * 		foreign table contains more columns than the Oracle table,
- * 		raise an error.
- * 		As a side effect, set the oraTable->npgcols
+ * 		Check that the Oracle data types of all used columns can be
+ * 		converted to the PostgreSQL data types, raise an error if not.
  */
 void
-checkDataTypes(Oid foreigntableid, struct oraTable *oraTable)
+checkDataTypes(struct oraTable *oraTable)
 {
-	HeapTuple tuple;
-	Relation att_rel;
-	SysScanDesc scan;
-	ScanKeyData key[2];
-	Form_pg_attribute att_tuple;
-	char **pgnames = palloc(sizeof(char *) * oraTable->ncols);
 	int i;
-
-	/*
-	 * Scan pg_attribute for all columns of the foreign table.
-	 * This is an index scan over pg_attribute_relid_attnum_index where attnum>0
-	 */
-	att_rel = heap_open(AttributeRelationId, AccessShareLock);
-	ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(foreigntableid));
-	ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTGreaterStrategyNumber, F_INT2GT, Int16GetDatum((int2)0));
-	scan = systable_beginscan(att_rel, AttributeRelidNumIndexId, true, SnapshotNow, 2, key);
-
-	/* loop through columns */
-	oraTable->npgcols = 0;
-	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
-	{
-		++oraTable->npgcols;
-
-		/* get PostgreSQL type */
-		if (oraTable->npgcols <= oraTable->ncols)
-		{
-			att_tuple = (Form_pg_attribute)GETSTRUCT(tuple);
-			oraTable->cols[oraTable->npgcols-1]->pgtype = att_tuple->atttypid;
-			oraTable->cols[oraTable->npgcols-1]->pgtypmod = att_tuple->atttypmod;
-			/* the column names are only needed for error messages */
-			pgnames[oraTable->npgcols-1] = pstrdup(NameStr(att_tuple->attname));
-		}
-	}
-
-	/* end scan */
-	systable_endscan(scan);
-	heap_close(att_rel, AccessShareLock);
 
 	/* loop through columns and compare type */
 	for (i=0; i<oraTable->ncols; ++i)
@@ -2032,14 +2072,8 @@ checkDataTypes(Oid foreigntableid, struct oraTable *oraTable)
 		/* otherwise, report an error */
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
-				errmsg("column \"%s\" of foreign table \"%s\" cannot be converted to from Oracle data type", pgnames[i], oraTable->pgname)));
+				errmsg("column \"%s\" of foreign table \"%s\" cannot be converted to from Oracle data type", oraTable->cols[i]->pgname, oraTable->pgname)));
 	}
-
-	/* free memory */
-	for (i=0; i<oraTable->ncols; ++i)
-		pfree(pgnames[i]);
-
-	pfree(pgnames);
 }
 
 /*
@@ -2200,6 +2234,8 @@ List
 		result = lappend(result, serializeString(oraTable->cols[i]->name));
 		result = lappend(result, serializeInt(oraTable->cols[i]->oratype));
 		result = lappend(result, serializeInt(oraTable->cols[i]->scale));
+		result = lappend(result, serializeString(oraTable->cols[i]->pgname));
+		result = lappend(result, serializeInt(oraTable->cols[i]->pgattnum));
 		result = lappend(result, serializeOid(oraTable->cols[i]->pgtype));
 		result = lappend(result, serializeInt(oraTable->cols[i]->pgtypmod));
 		result = lappend(result, serializeInt(oraTable->cols[i]->used));
@@ -2325,9 +2361,13 @@ deserializePlanData(List *list, char **dbserver, char **user, char **password, c
 		cell = lnext(cell);
 		(*state)->oraTable->cols[i]->scale = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
+		(*state)->oraTable->cols[i]->pgname = deserializeString(lfirst(cell));
+		cell = lnext(cell);
+		(*state)->oraTable->cols[i]->pgattnum = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		cell = lnext(cell);
 		(*state)->oraTable->cols[i]->pgtype = DatumGetObjectId(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->pgtypmod = DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		(*state)->oraTable->cols[i]->pgtypmod = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
 		(*state)->oraTable->cols[i]->used = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);

@@ -754,6 +754,8 @@ struct oraTable
 	{
 		/* allocate an oraColumn struct for the column */
 		reply->cols[i-1] = (struct oraColumn *)oracleAlloc(sizeof(struct oraColumn));
+		reply->cols[i-1]->pgname = NULL;
+		reply->cols[i-1]->pgattnum = 0;
 		reply->cols[i-1]->pgtype = 0;
 		reply->cols[i-1]->pgtypmod = 0;
 		reply->cols[i-1]->used = 0;
