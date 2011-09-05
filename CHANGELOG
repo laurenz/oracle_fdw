@@ -2,6 +2,14 @@ Version 1.0
   Bugfixes:
   - Fix incorrect use of an automatic variable for binding timestamp parameters
     in Oracle.
+  - Remove unnecessary lvalue casts.
+    These violate the C standard and cause errors on gcc 4.
+    Per report from Dominique Legendre.
+  - Fix lack of support for dropped columns in foreign table.
+    oracle_fdw incorrectly assumed that the n-th PostgreSQL column corresponds to
+    the n-th Oracle column. This leads to confusion in the presence of dropped
+    columns, which retain an entry in pg_attribute.
+    Per report from Dominique Legendre.
 
 Version 0.9 (beta), released 2011-08-25
   - initial release
