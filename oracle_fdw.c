@@ -2194,7 +2194,7 @@ char
 	return buf.data;
 }
 
-#define serializeInt(x) makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int4)(x)), 0, 1)
+#define serializeInt(x) makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)(x)), 0, 1)
 #define serializeOid(x) makeConst(OIDOID, -1, InvalidOid, 4, ObjectIdGetDatum(x), 0, 1)
 
 /*
@@ -2292,9 +2292,9 @@ Const
 *serializeLong(long i)
 {
 	if (sizeof(long) <= 4)
-		return makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int4)i), 1, 0);
+		return makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)i), 1, 0);
 	else
-		return makeConst(INT4OID, -1, InvalidOid, 8, Int64GetDatum((int8)i),
+		return makeConst(INT4OID, -1, InvalidOid, 8, Int64GetDatum((int64)i),
 #ifdef USE_FLOAT8_BYVAL
 				1,
 #else

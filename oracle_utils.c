@@ -105,7 +105,7 @@ oracleSession
 	struct envEntry *envp;
 	struct srvEntry *srvp;
 	struct connEntry *connp;
-	char pid[30], *nlscopy;
+	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
 
 	/* it's easier to deal with empty strings */

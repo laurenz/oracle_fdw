@@ -7,8 +7,11 @@ Version 1.0
     Per report from Dominique Legendre.
   - Fix lack of support for dropped columns in foreign table.
     oracle_fdw incorrectly assumed that the n-th PostgreSQL column corresponds to
-    the n-th Oracle column. This leads to confusion in the presence of dropped
+    the n-th Oracle column.  This leads to confusion in the presence of dropped
     columns, which retain an entry in pg_attribute.
+    Per report from Dominique Legendre.
+  - Fix typo that caused wrong and negative sizes being assumed for longer
+    Oracle columns.  This led to palloc() errors and Oracle fetch errors.
     Per report from Dominique Legendre.
 
 Version 0.9 (beta), released 2011-08-25
