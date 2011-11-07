@@ -869,9 +869,14 @@ struct oraTable
 				reply->cols[i-1]->val_size = charsize * 4 + 1;
 				break;
 			case SQLT_BLOB:
-			case SQLT_BFILE:
-				/* BLOB and BFILE */
+				/* BLOB */
 				reply->cols[i-1]->oratype = ORA_TYPE_BLOB;
+				/* for LOB columns, "val" will contain a pointer to the locator */
+				reply->cols[i-1]->val_size = sizeof(OCILobLocator *);
+				break;
+			case SQLT_BFILE:
+				/* BFILE */
+				reply->cols[i-1]->oratype = ORA_TYPE_BFILE;
 				/* for LOB columns, "val" will contain a pointer to the locator */
 				reply->cols[i-1]->val_size = sizeof(OCILobLocator *);
 				break;
@@ -1589,45 +1594,38 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			switch (oraTable->cols[i]->oratype)
 			{
 				case ORA_TYPE_BLOB:
-				case ORA_TYPE_BFILE:
 					type = SQLT_BLOB;
-
-					/* "val" will contain the pointer to the LOB locator */
-					if (checkerr(
-						OCIDescriptorAlloc((const dvoid *)session->envhp,
-							(dvoid **)oraTable->cols[i]->val,
-							OCI_DTYPE_LOB, 0, NULL),
-						(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
-					{
-						oracleCloseStatement(session, NULL);
-						oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
-							"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor",
-							oraMessage);
-					}
+					break;
+				case ORA_TYPE_BFILE:
+					type = SQLT_BFILE;
 					break;
 				case ORA_TYPE_CLOB:
 					type = SQLT_CLOB;
-
-					/* "val" will contain the pointer to the LOB locator */
-					if (checkerr(
-						OCIDescriptorAlloc((const dvoid *)session->envhp,
-							(dvoid **)oraTable->cols[i]->val,
-							OCI_DTYPE_LOB, 0, NULL),
-						(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
-					{
-						oracleCloseStatement(session, NULL);
-						oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
-							"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor",
-							oraMessage);
-					}
 					break;
 				case ORA_TYPE_RAW:
-					/* binary types are retrieved in binary form */
+					/* RAW is retrieved in binary form */
 					type = SQLT_BIN;
 					break;
 				default:
 					/* all other columns are converted to strings */
 					type = SQLT_STR;
+			}
+
+			/* check if it is a LOB column */
+			if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
+			{
+				/* allocate a LOB locator, store a pointer to it in "val" */
+				if (checkerr(
+					OCIDescriptorAlloc((const dvoid *)session->envhp,
+						(dvoid **)oraTable->cols[i]->val,
+						OCI_DTYPE_LOB, 0, NULL),
+					(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
+				{
+					oracleCloseStatement(session, NULL);
+					oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor",
+						oraMessage);
+				}
 			}
 
 			/* define result value */
@@ -1725,7 +1723,7 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
  * 		"oraTable" is passed so that all LOB locators can be freed in case of errors.
  */
 void
-oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, char **value, long *value_len)
+oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len)
 {
 	OCILobLocator *locp = *(OCILobLocator **)locptr;
 	ub4 amount;
@@ -1733,6 +1731,22 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, ch
 
 	/* initialize result buffer length */
 	*value_len = 0;
+
+	/* open the LOB if it is a BFILE */
+	if (type == ORA_TYPE_BFILE)
+	{
+		result = checkerr(
+			OCILobFileOpen(session->svchp, session->errhp, locp, OCI_FILE_READONLY),
+			(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+
+		if (result == OCI_ERROR)
+		{
+			oracleCloseStatement(session, oraTable);
+			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error fetching result: OCILobFileOpen failed to open BFILE",
+				oraMessage);
+		}
+	}
 
 	/* read the LOB in chunks */
 	do
@@ -1769,6 +1783,22 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, ch
 
 	/* string end for CLOBs */
 	(*value)[*value_len] = '\0';
+
+	/* close the LOB if it is a BFILE */
+	if (type == ORA_TYPE_BFILE)
+	{
+		result = checkerr(
+			OCILobFileClose(session->svchp, session->errhp, locp),
+			(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+
+		if (result == OCI_ERROR)
+		{
+			oracleCloseStatement(session, oraTable);
+			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error fetching result: OCILobFileClose failed to close BFILE",
+				oraMessage);
+		}
+	}
 }
 
 /*

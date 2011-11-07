@@ -37,6 +37,7 @@
 #include "utils/rel.h"
 #include "utils/tqual.h"
 #include "utils/syscache.h"
+#include "utils/timestamp.h"
 
 #include <string.h>
 
@@ -628,10 +629,11 @@ oracleIterateForeignScan(ForeignScanState *node)
 			}
 
 			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
 					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 			{
 				/* get the actual LOB contents (palloc'ed) */
-				oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, &value, &value_len);
+				oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
 			}
 			else
 			{

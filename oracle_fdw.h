@@ -109,7 +109,7 @@ extern void oracleEstimate(oracleSession *session, const char *query, double seq
 extern void oracleExplain(oracleSession *session, const char *query, int *nrows, char ***plan);
 extern int oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList);
 extern int oracleFetchNext(oracleSession *session, struct oraTable *oraTable);
-extern void oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, char **value, long *value_len);
+extern void oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len);
 
 /*
  * functions defined in oracle_fdw.c
