@@ -472,6 +472,7 @@ oracleCloseStatement(oracleSession *session, const struct oraTable *oraTable)
 		{
 			if (oraTable->cols[i]->used
 				&& (oraTable->cols[i]->oratype == ORA_TYPE_BLOB
+					|| oraTable->cols[i]->oratype == ORA_TYPE_BFILE
 					|| oraTable->cols[i]->oratype == ORA_TYPE_CLOB))
 			{
 				(void)OCIDescriptorFree((dvoid *)oraTable->cols[i]->val, OCI_DTYPE_LOB);

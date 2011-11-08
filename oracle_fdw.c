@@ -689,6 +689,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 
 			/* free the data buffer for LOBs */
 			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
 					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 				pfree(value);
 		}
