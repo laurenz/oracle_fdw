@@ -247,6 +247,11 @@ Then the software installation should be as simple as
 
   $ make install
 
+Since the Oracle client shared library is probably not in the standard
+library path, you have to make sure that the PostgreSQL server will be able
+to find it.  How this is done varies from operating system to operating
+system; on Linux you can set LD_LIBRARY_PATH or use /etc/ld.so.conf.
+
 To install the extension in a database, connect as superuser and
 
   CREATE EXTENSION oracle_fdw;
