@@ -4,6 +4,8 @@ Version 1.0.0
     to select such columns resulted in the error message
     'ORA-00932: inconsistent datatypes: expected %s got %s'.
     Bug report and patch by Dominique Legendre.
+  - Use a serializable transaction in Oracle to make sure that consistent
+    data are retrieved during a rescan.
 
 Version 0.9.1 (beta), released 2011-09-14
   Bugfixes:

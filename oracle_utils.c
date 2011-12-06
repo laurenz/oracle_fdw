@@ -101,6 +101,7 @@ oracleSession
 	OCISvcCtx *svchp = NULL;
 	OCIServer *srvhp = NULL;
 	OCISession *userhp = NULL;
+	OCITrans *txnhp = NULL;
 	oracleSession *session;
 	struct envEntry *envp;
 	struct srvEntry *srvp;
@@ -317,6 +318,29 @@ oracleSession
 				oraMessage);
 		}
 
+		/* create transaction handle */
+		if (checkerr(
+			OCIHandleAlloc((dvoid *) envhp, (dvoid **) &txnhp,
+				(ub4) OCI_HTYPE_TRANS,
+				(size_t) 0, (dvoid **) 0),
+			(dvoid *)envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
+		{
+			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+				"error connecting to Oracle: OCIHandleAlloc failed to allocate transaction handle",
+				oraMessage);
+		}
+
+		/* set transaction handle in service handle */
+		if (checkerr(
+			OCIAttrSet(svchp, OCI_HTYPE_SVCCTX, txnhp, 0,
+				OCI_ATTR_TRANS, errhp),
+			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+				"error connecting to Oracle: OCIAttrSet failed to set transaction handle in service handle",
+				oraMessage);
+		}
+
 		/* create session handle */
 		if (checkerr(
 			OCIHandleAlloc((dvoid *) envhp, (dvoid **) &userhp,
@@ -417,6 +441,16 @@ oracleSession
 		srvp->connlist = connp;
 	}
 
+	/* start a "serializable" (= repeatable read) transaction */
+    if (checkerr(
+        OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
+        (dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+    {
+        oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+            "error connecting to Oracle: OCITransStart failed to start a transaction",
+            oraMessage);
+    }
+
 	/* palloc a data structure containing server and session handle */
 	session = oracleAlloc(sizeof(struct oracleSession));
 	session->envhp = envhp;
@@ -439,6 +473,16 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 {
 	/* close the statement, if any */
 	oracleCloseStatement(session, oraTable);
+
+	/* commit the current transaction */
+    if (checkerr(
+        OCITransCommit(session->svchp, session->errhp, OCI_DEFAULT),
+        (dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+    {
+        oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+            "error committing transaction: OCITransCommit failed",
+            oraMessage);
+    }
 
 	/* close the session if requested */
 	if (close)
@@ -1874,6 +1918,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 	struct envEntry *envp;
 	struct srvEntry *srvp;
 	struct connEntry *connp, *prevconnp = NULL;
+	OCITrans *txnhp = NULL;
 
 	/* search environment handle in cache */
 	for (envp = envlist; envp != NULL; envp = envp->next)
@@ -1935,8 +1980,22 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 	/* free the session handle */
 	(void)OCIHandleFree((dvoid *)connp->userhp, OCI_HTYPE_SESSION);
 
+	/* get the transaction handle */
+	if (!silent && checkerr(
+		OCIAttrGet((dvoid *)connp->svchp, (ub4)OCI_HTYPE_SVCCTX,
+			(dvoid *)&txnhp, (ub4 *)0, (ub4)OCI_ATTR_TRANS, envp->errhp),
+		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			"error closing session: OCIAttrGet failed to get transaction handle",
+			oraMessage);
+	}
+
 	/* free the service handle */
 	(void)OCIHandleFree((dvoid *)connp->svchp, OCI_HTYPE_SVCCTX);
+
+	/* free the transaction handle */
+	(void)OCIHandleFree((dvoid *)txnhp, OCI_HTYPE_TRANS);
 
 	/* remove the session handle from the cache */
 	if (prevconnp == NULL)
