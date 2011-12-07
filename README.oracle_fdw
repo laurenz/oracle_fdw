@@ -252,6 +252,10 @@ library path, you have to make sure that the PostgreSQL server will be able
 to find it.  How this is done varies from operating system to operating
 system; on Linux you can set LD_LIBRARY_PATH or use /etc/ld.so.conf.
 
+Make sure that all necessary Oracle environment variables are set in the
+environment of the PostgreSQL server process (ORACLE_HOME if you don't use
+Instant Client, TNS_ADMIN if you have configuration files, etc.)
+
 To install the extension in a database, connect as superuser and
 
   CREATE EXTENSION oracle_fdw;
