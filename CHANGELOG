@@ -1,4 +1,4 @@
-Version 1.0.0
+Version 0.9.2 (beta), released 2011-12-30
   Bugfixes:
   - Fix handling of Oracle BFILE columns.  This was totally broken; attempts
     to select such columns resulted in the error message
