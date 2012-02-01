@@ -118,11 +118,11 @@ static void oracleEndForeignScan(ForeignScanState *node);
  * Helper functions
  */
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList);
+static char *createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
-static char *getOracleWhereClause(Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
+static char *getOracleWhereClause(oracleSession *session, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
-static void checkDataTypes(struct oraTable *oraTable);
+static void checkDataTypes(oracleSession *session, struct oraTable *oraTable);
 static char *guessNlsLang(char *nls_lang);
 static List *serializePlanData(const char *dbserver, const char *user, const char *password, const char *nls_lang, const char *query, const struct oraTable *oraTable, const struct paramDesc *paramList);
 static Const *serializeString(const char *s);
@@ -349,11 +349,11 @@ oraclePlanForeignScan(Oid foreigntableid,
 	getColumnData(foreigntableid, oraTable);
 
 	/* construct Oracle query and get the list of parameters */
-	query = createQuery(baserel->reltargetlist, baserel->baserestrictinfo, oraTable, &paramList);
+	query = createQuery(session, baserel->reltargetlist, baserel->baserestrictinfo, oraTable, &paramList);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(oraTable);
+	checkDataTypes(session, oraTable);
 
 	/* construct FdwPlan */
 	fdwplan = makeNode(FdwPlan);
@@ -530,7 +530,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 					/* find the cast function to the desired target type */
 					tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(TIMESTAMPTZOID), ObjectIdGetDatum(param->type));
 					if (!HeapTupleIsValid(tuple))
+					{
+						oracleReleaseSession(fdw_state->session, NULL, 0);
 						elog(ERROR, "cache lookup failed for cast from %u to %u", TIMESTAMPTZOID, param->type);
+					}
 					castfunc = ((Form_pg_cast)GETSTRUCT(tuple))->castfunc;
 					ReleaseSysCache(tuple);
 
@@ -563,7 +566,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 				/* get the type's output function */
 				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(param->type));
 				if (!HeapTupleIsValid(tuple))
+				{
+					oracleReleaseSession(fdw_state->session, NULL, 0);
 					elog(ERROR, "cache lookup failed for type %u", param->type);
+				}
 				typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
 				ReleaseSysCache(tuple);
 
@@ -661,7 +667,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 				/* find the appropriate conversion function */
 				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
 				if (!HeapTupleIsValid(tuple))
+				{
+					oracleReleaseSession(fdw_state->session, fdw_state->oraTable, 0);
 					elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
+				}
 				typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
 				ReleaseSysCache(tuple);
 
@@ -831,7 +840,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		As a side effect. we also mark the used columns in oraTable.
  */
 char
-*createQuery(List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList)
+*createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
@@ -881,7 +890,7 @@ char
 	foreach(cell, conditions)
 	{
 		/* try to convert each condition to Oracle SQL */
-		where = getOracleWhereClause(((RestrictInfo *)lfirst(cell))->clause, oraTable, paramList);
+		where = getOracleWhereClause(session, ((RestrictInfo *)lfirst(cell))->clause, oraTable, paramList);
 		if (where != NULL) {
 			if (first_col)
 			{
@@ -939,9 +948,12 @@ char
 	 * This is needed to find the query in Oracle's library cache for EXPLAIN.
 	 */
 	if (! pg_md5_hash(query.data, strlen(query.data), md5))
+	{
+		oracleReleaseSession(session, NULL, 0);
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
 				errmsg("out of memory")));
+	}
 
 	/* add comment with MD5 hash to query */
 	initStringInfo(&result);
@@ -969,7 +981,7 @@ char
  * 		will be stored in paramList.
  */
 char
-*getOracleWhereClause(Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList)
+*getOracleWhereClause(oracleSession *session, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList)
 {
 	char *opername, *left, *right, *arg, oprkind;
 	Const *constant;
@@ -1013,7 +1025,10 @@ char
 				/* get the type's output function */
 				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(constant->consttype));
 				if (!HeapTupleIsValid(tuple))
+				{
+					oracleReleaseSession(session, NULL, 0);
 					elog(ERROR, "cache lookup failed for type %u", constant->consttype);
+				}
 				typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
 				ReleaseSysCache(tuple);
 
@@ -1072,7 +1087,10 @@ char
 						break;
 					case INTERVALOID:
 						if (interval2tm(*DatumGetIntervalP(dat), &tm, &fsec) != 0)
+						{
+							oracleReleaseSession(session, NULL, 0);
 							elog(ERROR, "could not convert interval to tm");
+						}
 
 						/* only translate intervals that can be translated to INTERVAL DAY TO SECOND */
 						if (tm.tm_year != 0 || tm.tm_mon != 0)
@@ -1203,7 +1221,10 @@ char
 			/* get operator name, kind, argument type and schema */
 			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(oper->opno));
 			if (! HeapTupleIsValid(tuple))
+			{
+				oracleReleaseSession(session, NULL, 0);
 				elog(ERROR, "cache lookup failed for operator %u", oper->opno);
+			}
 			opername = pstrdup(((Form_pg_operator)GETSTRUCT(tuple))->oprname.data);
 			oprkind = ((Form_pg_operator)GETSTRUCT(tuple))->oprkind;
 			leftargtype = ((Form_pg_operator)GETSTRUCT(tuple))->oprleft;
@@ -1253,7 +1274,7 @@ char
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				left = getOracleWhereClause(linitial(oper->args), oraTable, paramList);
+				left = getOracleWhereClause(session, linitial(oper->args), oraTable, paramList);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -1263,7 +1284,7 @@ char
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					right = getOracleWhereClause(lsecond(oper->args), oraTable, paramList);
+					right = getOracleWhereClause(session, lsecond(oper->args), oraTable, paramList);
 					if (right == NULL)
 					{
 						pfree(left);
@@ -1341,19 +1362,22 @@ char
 			/* get argument type */
 			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(((DistinctExpr *)expr)->opno));
 			if (! HeapTupleIsValid(tuple))
+			{
+				oracleReleaseSession(session, NULL, 0);
 				elog(ERROR, "cache lookup failed for operator %u", ((DistinctExpr *)expr)->opno);
+			}
 			rightargtype = ((Form_pg_operator)GETSTRUCT(tuple))->oprright;
 			ReleaseSysCache(tuple);
 
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(linitial(((DistinctExpr *)expr)->args), oraTable, paramList);
+			left = getOracleWhereClause(session, linitial(((DistinctExpr *)expr)->args), oraTable, paramList);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(lsecond(((DistinctExpr *)expr)->args), oraTable, paramList);
+			right = getOracleWhereClause(session, lsecond(((DistinctExpr *)expr)->args), oraTable, paramList);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -1368,19 +1392,22 @@ char
 			/* get argument type */
 			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(((NullIfExpr *)expr)->opno));
 			if (! HeapTupleIsValid(tuple))
+			{
+				oracleReleaseSession(session, NULL, 0);
 				elog(ERROR, "cache lookup failed for operator %u", ((NullIfExpr *)expr)->opno);
+			}
 			rightargtype = ((Form_pg_operator)GETSTRUCT(tuple))->oprright;
 			ReleaseSysCache(tuple);
 
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(linitial(((NullIfExpr *)expr)->args), oraTable, paramList);
+			left = getOracleWhereClause(session, linitial(((NullIfExpr *)expr)->args), oraTable, paramList);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(lsecond(((NullIfExpr *)expr)->args), oraTable, paramList);
+			right = getOracleWhereClause(session, lsecond(((NullIfExpr *)expr)->args), oraTable, paramList);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -1394,7 +1421,7 @@ char
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			arg = getOracleWhereClause(linitial(boolexpr->args), oraTable, paramList);
+			arg = getOracleWhereClause(session, linitial(boolexpr->args), oraTable, paramList);
 			if (arg == NULL)
 				return NULL;
 
@@ -1405,7 +1432,7 @@ char
 
 			for_each_cell(cell, lnext(boolexpr->args->head))
 			{
-				arg = getOracleWhereClause((Expr *)lfirst(cell), oraTable, paramList);
+				arg = getOracleWhereClause(session, (Expr *)lfirst(cell), oraTable, paramList);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1420,10 +1447,10 @@ char
 
 			break;
 		case T_RelabelType:
-			return getOracleWhereClause(((RelabelType *)expr)->arg, oraTable, paramList);
+			return getOracleWhereClause(session, ((RelabelType *)expr)->arg, oraTable, paramList);
 			break;
 		case T_CoerceToDomain:
-			return getOracleWhereClause(((CoerceToDomain *)expr)->arg, oraTable, paramList);
+			return getOracleWhereClause(session, ((CoerceToDomain *)expr)->arg, oraTable, paramList);
 			break;
 		case T_CaseExpr:
 			caseexpr = (CaseExpr *)expr;
@@ -1437,7 +1464,7 @@ char
 			/* for the form "CASE arg WHEN ...", add first expression */
 			if (caseexpr->arg != NULL)
 			{
-				arg = getOracleWhereClause(caseexpr->arg, oraTable, paramList);
+				arg = getOracleWhereClause(session, caseexpr->arg, oraTable, paramList);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1458,12 +1485,12 @@ char
 				if (caseexpr->arg == NULL)
 				{
 					/* for CASE WHEN ..., use the whole expression */
-					arg = getOracleWhereClause(whenclause->expr, oraTable, paramList);
+					arg = getOracleWhereClause(session, whenclause->expr, oraTable, paramList);
 				}
 				else
 				{
 					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					arg = getOracleWhereClause(lsecond(((OpExpr *)whenclause->expr)->args), oraTable, paramList);
+					arg = getOracleWhereClause(session, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, paramList);
 				}
 
 				if (arg == NULL)
@@ -1478,7 +1505,7 @@ char
 				}
 
 				/* THEN */
-				arg = getOracleWhereClause(whenclause->result, oraTable, paramList);
+				arg = getOracleWhereClause(session, whenclause->result, oraTable, paramList);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1494,7 +1521,7 @@ char
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				arg = getOracleWhereClause(caseexpr->defresult, oraTable, paramList);
+				arg = getOracleWhereClause(session, caseexpr->defresult, oraTable, paramList);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1522,7 +1549,7 @@ char
 			first_arg = true;
 			foreach(cell, coalesceexpr->args)
 			{
-				arg = getOracleWhereClause((Expr *)lfirst(cell), oraTable, paramList);
+				arg = getOracleWhereClause(session, (Expr *)lfirst(cell), oraTable, paramList);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1545,7 +1572,7 @@ char
 
 			break;
 		case T_NullTest:
-			arg = getOracleWhereClause(((NullTest *)expr)->arg, oraTable, paramList);
+			arg = getOracleWhereClause(session, ((NullTest *)expr)->arg, oraTable, paramList);
 			if (arg == NULL)
 				return NULL;
 
@@ -1562,12 +1589,15 @@ char
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
-				return getOracleWhereClause(linitial(func->args), oraTable, paramList);
+				return getOracleWhereClause(session, linitial(func->args), oraTable, paramList);
 
 			/* get function name and schema */
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->funcid));
 			if (! HeapTupleIsValid(tuple))
+			{
+				oracleReleaseSession(session, NULL, 0);
 				elog(ERROR, "cache lookup failed for function %u", func->funcid);
+			}
 			opername = pstrdup(((Form_pg_proc)GETSTRUCT(tuple))->proname.data);
 			schema = ((Form_pg_proc)GETSTRUCT(tuple))->pronamespace;
 			ReleaseSysCache(tuple);
@@ -1640,7 +1670,7 @@ char
 				first_arg = true;
 				foreach(cell, func->args)
 				{
-					arg = getOracleWhereClause(lfirst(cell), oraTable, paramList);
+					arg = getOracleWhereClause(session, lfirst(cell), oraTable, paramList);
 					if (arg == NULL)
 					{
 						pfree(result.data);
@@ -1665,7 +1695,7 @@ char
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				left = getOracleWhereClause(linitial(func->args), oraTable, paramList);
+				left = getOracleWhereClause(session, linitial(func->args), oraTable, paramList);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -1685,7 +1715,7 @@ char
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					right = getOracleWhereClause(lsecond(func->args), oraTable, paramList);
+					right = getOracleWhereClause(session, lsecond(func->args), oraTable, paramList);
 					if (right == NULL)
 					{
 						pfree(opername);
@@ -2011,7 +2041,7 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
  * 		converted to the PostgreSQL data types, raise an error if not.
  */
 void
-checkDataTypes(struct oraTable *oraTable)
+checkDataTypes(oracleSession *session, struct oraTable *oraTable)
 {
 	int i;
 
@@ -2073,6 +2103,7 @@ checkDataTypes(struct oraTable *oraTable)
 			continue;
 
 		/* otherwise, report an error */
+		oracleReleaseSession(session, NULL, 0);
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
 				errmsg("column \"%s\" of foreign table \"%s\" cannot be converted to from Oracle data type", oraTable->cols[i]->pgname, oraTable->pgname)));
