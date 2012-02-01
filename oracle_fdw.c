@@ -264,7 +264,7 @@ _PG_init()
 
 /*
  * oraclePlanForeignScan
- * 	    Establish an Oracle connection, get a description of the
+ * 		Establish an Oracle connection, get a description of the
  * 		remote table, constructs the query to issue against Oracle
  * 		and a list of parameters for the query, verify that column
  * 		data types can be converted, get Oracle's cost estimates if
@@ -279,7 +279,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 					PlannerInfo *root,
 					RelOptInfo *baserel)
 {
-	FdwPlan    *fdwplan;
+	FdwPlan *fdwplan;
 	List *options;
 	ListCell *cell;
 	char *dbserver = NULL, *user = NULL, *password = NULL, *schema = NULL, *table = NULL,
@@ -965,7 +965,7 @@ char
  * getOracleWhereClause
  * 		Create and return an Oracle SQL WHERE clause from the expression.
  * 		If that is not possible, return NULL, else a palloc'ed string.
- * 	    As a side effect, all Params incorporated in the WHERE clause
+ * 		As a side effect, all Params incorporated in the WHERE clause
  * 		will be stored in paramList.
  */
 char

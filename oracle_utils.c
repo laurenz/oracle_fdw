@@ -442,14 +442,14 @@ oracleSession
 	}
 
 	/* start a "serializable" (= repeatable read) transaction */
-    if (checkerr(
-        OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
-        (dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-    {
-        oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
-            "error connecting to Oracle: OCITransStart failed to start a transaction",
-            oraMessage);
-    }
+	if (checkerr(
+		OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
+		(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			"error connecting to Oracle: OCITransStart failed to start a transaction",
+			oraMessage);
+	}
 
 	/* palloc a data structure containing server and session handle */
 	session = oracleAlloc(sizeof(struct oracleSession));
@@ -475,14 +475,14 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 	oracleCloseStatement(session, oraTable);
 
 	/* commit the current transaction */
-    if (checkerr(
-        OCITransCommit(session->svchp, session->errhp, OCI_DEFAULT),
-        (dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-    {
-        oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
-            "error committing transaction: OCITransCommit failed",
-            oraMessage);
-    }
+	if (checkerr(
+		OCITransCommit(session->svchp, session->errhp, OCI_DEFAULT),
+		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error committing transaction: OCITransCommit failed",
+			oraMessage);
+	}
 
 	/* close the session if requested */
 	if (close)
