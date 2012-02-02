@@ -108,6 +108,7 @@ oracleSession
 	struct connEntry *connp;
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
+	int trans_tries = 0;
 
 	/* it's easier to deal with empty strings */
 	if (!connectstring)
@@ -441,14 +442,39 @@ oracleSession
 		srvp->connlist = connp;
 	}
 
-	/* start a "serializable" (= repeatable read) transaction */
-	if (checkerr(
-		OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
-		(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	while (1)
 	{
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
-			"error connecting to Oracle: OCITransStart failed to start a transaction",
-			oraMessage);
+		/* start a "serializable" (= repeatable read) transaction */
+		if (checkerr(
+			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
+			(dvoid *)errhp, OCI_HTYPE_ERROR) == OCI_SUCCESS)
+		{
+			/* if that works, break out of loop */
+			break;
+		}
+		else
+		{
+			/* if there is an active transaction, rollback the first time */
+			if (errcode == 1453 && ++trans_tries < 2)
+			{
+				/* rollback the current transaction */
+				if (checkerr(
+					OCITransRollback((dvoid *)svchp, errhp, OCI_DEFAULT),
+					(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				{
+					oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error connecting to Oracle: OCITransRollback failed",
+						oraMessage);
+				}
+			}
+			else
+			{
+				/* if there is another problem or we already tried twice, error out */
+				oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+					"error connecting to Oracle: OCITransStart failed to start a transaction",
+					oraMessage);
+			}
+		}
 	}
 
 	/* palloc a data structure containing server and session handle */
@@ -1265,8 +1291,10 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* make sure there is no statement handle stored in session */
 	if (session->stmthp != NULL)
+	{
 		oracleReleaseSession(session, NULL, 0);
 		oracleError(FDW_ERROR, "%s", "oracleQueryPlan internal error: statement handle is not NULL");
+	}
 
 	/* create statement handle */
 	if (checkerr(
