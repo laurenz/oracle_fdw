@@ -120,3 +120,4 @@ extern void oracleFree(void *p);
 extern void oracleError(oraError sqlstate, const char *message, const char *detail);
 extern void oracleError_s(oraError sqlstate, const char *message, const char *arg, const char *detail);
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
+extern void oracleError_x(oraError sqlstate, const char *message);

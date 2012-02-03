@@ -808,7 +808,7 @@ struct oraTable
 		/* we must not reach this */
 		oracleReleaseSession(session, NULL, 0);
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-		oracleError(FDW_ERROR, "%s", "internal error describing remote table: unexpectedly found table");
+		oracleError_x(FDW_ERROR, "internal error describing remote table: unexpectedly found table");
 	}
 
 	/* allocate an oraTable struct for the results */
@@ -1293,7 +1293,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	if (session->stmthp != NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_ERROR, "%s", "oracleQueryPlan internal error: statement handle is not NULL");
+		oracleError_x(FDW_ERROR, "oracleQueryPlan internal error: statement handle is not NULL");
 	}
 
 	/* create statement handle */
@@ -1362,7 +1362,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	if ((p = strchr(query + 7, ' ')) == NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_ERROR, "%s", "oracleQueryPlan internal error: no space found in query");
+		oracleError_x(FDW_ERROR, "oracleQueryPlan internal error: no space found in query");
 	}
 	strncpy(query_head, query, p-query);
 	query_head[p-query] = '%';
@@ -1553,7 +1553,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	if (session->stmthp != NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_ERROR, "%s", "oracleExecuteQuery internal error: statement handle is not NULL");
+		oracleError_x(FDW_ERROR, "oracleExecuteQuery internal error: statement handle is not NULL");
 	}
 
 	/* create statement handle */
@@ -1826,7 +1826,7 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
 	if (session->stmthp == NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_ERROR, "%s", "oracleFetchNext internal error: statement handle is NULL");
+		oracleError_x(FDW_ERROR, "oracleFetchNext internal error: statement handle is NULL");
 	}
 
 	/* fetch the next result row */
@@ -2015,7 +2015,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		if (silent)
 			return;
 		else
-			oracleError(FDW_ERROR, "%s", "closeSession internal error: environment handle not found in cache");
+			oracleError_x(FDW_ERROR, "closeSession internal error: environment handle not found in cache");
 	}
 
 	/* search server handle in cache */
@@ -2030,7 +2030,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		if (silent)
 			return;
 		else
-			oracleError(FDW_ERROR, "%s", "closeSession internal error: server handle not found in cache");
+			oracleError_x(FDW_ERROR, "closeSession internal error: server handle not found in cache");
 	}
 
 	/* search connection in cache */
@@ -2047,7 +2047,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		if (silent)
 			return;
 		else
-			oracleError(FDW_ERROR, "%s", "closeSession internal error: user handle not found in cache");
+			oracleError_x(FDW_ERROR, "closeSession internal error: user handle not found in cache");
 	}
 
 	/* terminate the session */
@@ -2117,7 +2117,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 		if (silent)
 			return;
 		else
-			oracleError(FDW_ERROR, "%s", "disconnectServer internal error: environment handle not found in cache");
+			oracleError_x(FDW_ERROR, "disconnectServer internal error: environment handle not found in cache");
 	}
 
 	/* search server handle in cache */
@@ -2134,7 +2134,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 		if (silent)
 			return;
 		else
-			oracleError(FDW_ERROR, "%s", "disconnectServer internal error: server handle not found in cache");
+			oracleError_x(FDW_ERROR, "disconnectServer internal error: server handle not found in cache");
 	}
 
 	/* disconnect server */
@@ -2184,7 +2184,7 @@ removeEnvironment(OCIEnv *envhp)
 		if (silent)
 			return;
 		else
-			oracleError(FDW_ERROR, "%s", "removeEnvironment internal error: environment handle not found in cache");
+			oracleError_x(FDW_ERROR, "removeEnvironment internal error: environment handle not found in cache");
 	}
 
 	/* free the error handle */

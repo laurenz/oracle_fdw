@@ -2559,3 +2559,15 @@ oracleError_i(oraError sqlstate, const char *message, int arg)
 			(errcode(to_sqlstate(sqlstate)),
 			errmsg(message, arg)));
 }
+
+/*
+ * oracleError_x
+ * 		Report a PostgreSQL error without detail message.
+ */
+void
+oracleError_x(oraError sqlstate, const char *message)
+{
+	ereport(ERROR,
+			(errcode(to_sqlstate(sqlstate)),
+			errmsg("%s", message)));
+}
