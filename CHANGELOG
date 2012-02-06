@@ -1,9 +1,12 @@
 Version 1.0.0
   Bugfixes:
-  - Call oracleReleaseSession() before throwing errors.
-    This frees memory and ends the Oracle transaction, which avoids an error
-    message when the connection is reused and a new transaction is started.
-    Per report from Keith Fiske.
+  - After an error message, calls to the foreign server result in this error:
+      error connecting to Oracle: OCITransStart failed to start a transaction
+      ORA-01453: SET TRANSACTION must be first statement of transaction
+    The problem is that the previous transaction was not closed.
+    This used to go unnoticed, the problem now becomes manifest because we
+    explicitly start a serializable transaction.
+    Per reports from Keith Fiske and Bruno Voigt.
 
 Version 0.9.2 (beta), released 2011-12-30
   Bugfixes:
