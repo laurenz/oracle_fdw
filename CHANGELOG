@@ -1,4 +1,7 @@
 Version 1.0.0
+  Enhancements:
+  - Add support for PostgreSQL data type "uuid".
+
   Bugfixes:
   - After an error message, calls to the foreign server result in this error:
       error connecting to Oracle: OCITransStart failed to start a transaction

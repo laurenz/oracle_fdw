@@ -157,7 +157,7 @@ VARCHAR2                       | char, varchar, text
 NVARCHAR2                      | char, varchar, text
 CLOB                           | char, varchar, text
 CFILE                          | char, varchar, text
-RAW                            | bytea
+RAW                            | uuid, bytea
 BLOB                           | bytea
 BFILE                          | bytea
 NUMBER                         | numeric, float4, float8, char, varchar, text

@@ -1068,7 +1068,7 @@ struct oraTable
 				/* RAW(n) */
 				reply->cols[i-1]->oratype = ORA_TYPE_RAW;
 				/* use binary size for RAWs */
-				reply->cols[i-1]->val_size = bin_size;
+				reply->cols[i-1]->val_size = 2 * bin_size + 1;
 				break;
 			default:
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
@@ -1728,8 +1728,11 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					type = SQLT_CLOB;
 					break;
 				case ORA_TYPE_RAW:
-					/* RAW is retrieved in binary form */
-					type = SQLT_BIN;
+					/* RAW is retrieved as binary for bytea and as string for uuid */
+					if (oraTable->cols[i]->pgtype == UUIDOID)
+						type = SQLT_STR;
+					else
+						type = SQLT_BIN;
 					break;
 				default:
 					/* all other columns are converted to strings */

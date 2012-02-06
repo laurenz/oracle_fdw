@@ -2061,6 +2061,10 @@ checkDataTypes(oracleSession *session, struct oraTable *oraTable)
 				&& pgtype == BYTEAOID)
 			continue;
 
+		/* Oracle RAW can be converted to uuid */
+		if (oratype == ORA_TYPE_RAW && pgtype == UUIDOID)
+			continue;
+
 		/* all other Oracle types can be transformed to strings */
 		if (oratype != ORA_TYPE_OTHER
 				&& (pgtype == TEXTOID || pgtype == VARCHAROID || pgtype == BPCHAROID))

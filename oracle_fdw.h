@@ -40,6 +40,11 @@ typedef enum
 	ORA_TYPE_OTHER
 } oraType;
 
+/* PostgreSQL has no constant definition for the OID of type uuid */
+#ifndef UUIDOID
+#define UUIDOID 2950
+#endif
+
 struct oraColumn
 {
 	char *name;              /* name in Oracle */
