@@ -155,7 +155,7 @@ oracleSession
 			(dvoid *)envhp, OCI_HTYPE_ENV) != 0)
 		{
 			free(nlscopy);
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIEnvCreate failed to create environment handle",
 				oraMessage);
 		}
@@ -168,7 +168,7 @@ oracleSession
 			(dvoid *)envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 		{
 			free(nlscopy);
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIHandleAlloc failed to allocate error handle",
 				oraMessage);
 		}
@@ -211,7 +211,7 @@ oracleSession
 				(dvoid *)&is_connected, (ub4 *)0, (ub4)OCI_ATTR_SERVER_STATUS, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error connecting to Oracle: OCIAttrGet failed to get connection status",
 				oraMessage);
 		}
@@ -244,7 +244,7 @@ oracleSession
 				(size_t) 0, (dvoid **) 0),
 			(dvoid *)envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIHandleAlloc failed to allocate server handle",
 				oraMessage);
 		}
@@ -254,7 +254,7 @@ oracleSession
 			OCIServerAttach(srvhp, errhp, (text *)connectstring, strlen(connectstring), 0),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError_s(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_sd(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"connection for foreign table \"%s\" cannot be established", tablename,
 				oraMessage);
 		}
@@ -303,7 +303,7 @@ oracleSession
 			(dvoid *)envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 		{
 			free(nlscopy);
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIHandleAlloc failed to allocate service handle",
 				oraMessage);
 		}
@@ -314,7 +314,7 @@ oracleSession
 				OCI_ATTR_SERVER, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set server handle in service handle",
 				oraMessage);
 		}
@@ -326,7 +326,7 @@ oracleSession
 				(size_t) 0, (dvoid **) 0),
 			(dvoid *)envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIHandleAlloc failed to allocate transaction handle",
 				oraMessage);
 		}
@@ -337,7 +337,7 @@ oracleSession
 				OCI_ATTR_TRANS, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set transaction handle in service handle",
 				oraMessage);
 		}
@@ -349,7 +349,7 @@ oracleSession
 				(size_t) 0, (dvoid **) 0),
 			(dvoid *)envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIHandleAlloc failed to allocate session handle",
 				oraMessage);
 		}
@@ -363,7 +363,7 @@ oracleSession
 				OCI_ATTR_MODULE, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set module in session handle",
 				oraMessage);
 		}
@@ -374,7 +374,7 @@ oracleSession
 				OCI_ATTR_ACTION, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set action in session handle",
 				oraMessage);
 		}
@@ -385,7 +385,7 @@ oracleSession
 				OCI_ATTR_USERNAME, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set user name in session handle",
 				oraMessage);
 		}
@@ -396,7 +396,7 @@ oracleSession
 				OCI_ATTR_PASSWORD, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set password in session handle",
 				oraMessage);
 		}
@@ -407,7 +407,7 @@ oracleSession
 				(user[0] == '\0' ? OCI_CRED_EXT : OCI_CRED_RDBMS), OCI_DEFAULT),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError_s(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_sd(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"session for foreign table \"%s\" cannot be authenticated", tablename,
 				oraMessage);
 		}
@@ -418,7 +418,7 @@ oracleSession
 				OCI_ATTR_SESSION, errhp),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCIAttrSet failed to set session handle in service handle",
 				oraMessage);
 		}
@@ -462,7 +462,7 @@ oracleSession
 					OCITransRollback((dvoid *)svchp, errhp, OCI_DEFAULT),
 					(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 				{
-					oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error connecting to Oracle: OCITransRollback failed",
 						oraMessage);
 				}
@@ -470,7 +470,7 @@ oracleSession
 			else
 			{
 				/* if there is another problem or we already tried twice, error out */
-				oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+				oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 					"error connecting to Oracle: OCITransStart failed to start a transaction",
 					oraMessage);
 			}
@@ -505,7 +505,7 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 		OCITransCommit(session->svchp, session->errhp, OCI_DEFAULT),
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error committing transaction: OCITransCommit failed",
 			oraMessage);
 	}
@@ -631,7 +631,7 @@ struct oraTable
 		(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIHandleAlloc failed to allocate describe handle",
 			oraMessage);
 	}
@@ -644,7 +644,7 @@ struct oraTable
 	{
 		oracleReleaseSession(session, NULL, 0);
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIAttrSet failed to set public attribute in describe handle",
 			oraMessage);
 	}
@@ -664,11 +664,11 @@ struct oraTable
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			if (errcode == 4043)
-				oracleError_s(FDW_TABLE_NOT_FOUND,
+				oracleError_sd(FDW_TABLE_NOT_FOUND,
 					"remote table for \"%s\" does not exist or does not allow read access", pgname,
 					oraMessage);
 			else
-				oracleError(FDW_TABLE_NOT_FOUND,
+				oracleError_d(FDW_TABLE_NOT_FOUND,
 					"error describing remote table: OCIDescribeAny failed",
 					oraMessage);
 		}
@@ -681,7 +681,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get parameter descriptor",
 				oraMessage);
 		}
@@ -694,7 +694,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get object type",
 				oraMessage);
 		}
@@ -710,7 +710,7 @@ struct oraTable
 			{
 				oracleReleaseSession(session, NULL, 0);
 				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-				oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 					"error describing remote table: OCIAttrGet failed to get synonym name",
 					oraMessage);
 			}
@@ -725,7 +725,7 @@ struct oraTable
 			{
 				oracleReleaseSession(session, NULL, 0);
 				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-				oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 					"error describing remote table: OCIAttrGet failed to get synonym schema",
 					oraMessage);
 			}
@@ -740,7 +740,7 @@ struct oraTable
 			{
 				oracleReleaseSession(session, NULL, 0);
 				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-				oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 					"error describing remote table: OCIAttrGet failed to get synonym dblink",
 					oraMessage);
 			}
@@ -782,7 +782,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrSet failed to reset public attribute in describe handle",
 				oraMessage);
 		}
@@ -796,11 +796,11 @@ struct oraTable
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			if (errcode == 4043)
-				oracleError_s(FDW_TABLE_NOT_FOUND,
+				oracleError_sd(FDW_TABLE_NOT_FOUND,
 					"remote table for \"%s\" does not exist or does not allow read access", pgname,
 					oraMessage);
 			else
-				oracleError(FDW_TABLE_NOT_FOUND,
+				oracleError_d(FDW_TABLE_NOT_FOUND,
 					"error describing remote table: OCIDescribeAny failed",
 					oraMessage);
 		}
@@ -808,7 +808,7 @@ struct oraTable
 		/* we must not reach this */
 		oracleReleaseSession(session, NULL, 0);
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-		oracleError_x(FDW_ERROR, "internal error describing remote table: unexpectedly found table");
+		oracleError(FDW_ERROR, "internal error describing remote table: unexpectedly found table");
 	}
 
 	/* allocate an oraTable struct for the results */
@@ -826,7 +826,7 @@ struct oraTable
 	{
 		oracleReleaseSession(session, NULL, 0);
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIAttrGet failed to get number of columns",
 			oraMessage);
 	}
@@ -842,7 +842,7 @@ struct oraTable
 	{
 		oracleReleaseSession(session, NULL, 0);
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIAttrGet failed to get column list",
 			oraMessage);
 	}
@@ -868,7 +868,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIParamGet failed to get column data",
 				oraMessage);
 		}
@@ -881,7 +881,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column name",
 				oraMessage);
 		}
@@ -896,7 +896,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column type",
 				oraMessage);
 		}
@@ -909,7 +909,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get character set form",
 				oraMessage);
 		}
@@ -922,7 +922,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column length",
 				oraMessage);
 		}
@@ -935,7 +935,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column size",
 				oraMessage);
 		}
@@ -948,7 +948,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column precision",
 				oraMessage);
 		}
@@ -961,7 +961,7 @@ struct oraTable
 		{
 			oracleReleaseSession(session, NULL, 0);
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
-			oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column scale",
 				oraMessage);
 		}
@@ -1176,7 +1176,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 		if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error fetching result: OCIStmtFetch2 failed to fetch next result row",
 				oraMessage);
 		}
@@ -1209,7 +1209,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv(nls_lang) != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_LANG cannot be set.");
 	}
@@ -1218,7 +1218,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_DATE_FORMAT=YYYY-MM-DD HH24:MI:SS") != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_DATE_FORMAT cannot be set.");
 	}
@@ -1226,7 +1226,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_TIMESTAMP_FORMAT=YYYY-MM-DD HH24:MI:SS.FF") != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_TIMESTAMP_FORMAT cannot be set.");
 	}
@@ -1234,7 +1234,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_TIMESTAMP_TZ_FORMAT=YYYY-MM-DD HH24:MI:SS.FFTZH:TZM") != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_TIMESTAMP_TZ_FORMAT cannot be set.");
 	}
@@ -1242,7 +1242,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_NUMERIC_CHARACTERS=.,") != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_NUMERIC_CHARACTERS cannot be set.");
 	}
@@ -1250,7 +1250,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_CALENDAR=") != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_CALENDAR cannot be set.");
 	}
@@ -1258,7 +1258,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_NCHAR=") != 0)
 	{
 		free(nls_lang);
-		oracleError(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_NCHAR cannot be set.");
 	}
@@ -1293,7 +1293,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	if (session->stmthp != NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError_x(FDW_ERROR, "oracleQueryPlan internal error: statement handle is not NULL");
+		oracleError(FDW_ERROR, "oracleQueryPlan internal error: statement handle is not NULL");
 	}
 
 	/* create statement handle */
@@ -1303,7 +1303,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIHandleAlloc failed to allocate statement handle",
 			oraMessage);
 	}
@@ -1315,7 +1315,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
 			oraMessage);
 	}
@@ -1325,7 +1325,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIAttrSet failed to set prefetch memory in statement handle",
 			oraMessage);
 	}
@@ -1337,7 +1337,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIStmtPrepare failed to prepare remote query",
 			oraMessage);
 	}
@@ -1349,7 +1349,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query query: OCIStmtExecute failed to describe remote query",
 			oraMessage);
 	}
@@ -1362,7 +1362,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	if ((p = strchr(query + 7, ' ')) == NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError_x(FDW_ERROR, "oracleQueryPlan internal error: no space found in query");
+		oracleError(FDW_ERROR, "oracleQueryPlan internal error: no space found in query");
 	}
 	strncpy(query_head, query, p-query);
 	query_head[p-query] = '%';
@@ -1375,7 +1375,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIStmtPrepare failed to prepare remote query for sql_id",
 			oraMessage);
 	}
@@ -1391,7 +1391,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIBindByName failed to bind parameter",
 			oraMessage);
 	}
@@ -1407,7 +1407,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIDefineByPos failed to define result value",
 			oraMessage);
 	}
@@ -1421,7 +1421,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIDefineByPos failed to define result value",
 			oraMessage);
 	}
@@ -1436,11 +1436,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 		/* create a better message if we lack permissions on V$SQL */
 		if (errcode == 942)
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"no SELECT privilege on V$SQL in the remote database",
 				oraMessage);
 		else
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error describing query: OCIStmtExecute failed to execute remote query for sql_id",
 				oraMessage);
 	}
@@ -1456,7 +1456,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIStmtPrepare failed to prepare remote plan query",
 			oraMessage);
 	}
@@ -1472,7 +1472,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIBindByName failed to bind parameter",
 			oraMessage);
 	}
@@ -1487,7 +1487,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIBindByName failed to bind parameter",
 			oraMessage);
 	}
@@ -1504,7 +1504,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error describing query: OCIDefineByPos failed to define result value",
 				oraMessage);
 		}
@@ -1520,11 +1520,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 		/* create a better message if we lack permissions on V$SQL_PLAN */
 		if (errcode == 942)
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"no SELECT privilege on V$SQL_PLAN in the remote database",
 				oraMessage);
 		else
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error describing query: OCIStmtExecute failed to execute remote plan query",
 				oraMessage);
 	}
@@ -1553,7 +1553,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	if (session->stmthp != NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError_x(FDW_ERROR, "oracleExecuteQuery internal error: statement handle is not NULL");
+		oracleError(FDW_ERROR, "oracleExecuteQuery internal error: statement handle is not NULL");
 	}
 
 	/* create statement handle */
@@ -1563,7 +1563,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIHandleAlloc failed to allocate statement handle",
 			oraMessage);
 	}
@@ -1575,7 +1575,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
 			oraMessage);
 	}
@@ -1585,7 +1585,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIAttrSet failed to set prefetch memory in statement handle",
 			oraMessage);
 	}
@@ -1597,7 +1597,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIStmtPrepare failed to prepare remote query",
 			oraMessage);
 	}
@@ -1645,7 +1645,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 						(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
 						oracleReleaseSession(session, NULL, 0);
-						oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 							"error executing query: OCINumberFromText failed to convert parameter",
 							oraMessage);
 					}
@@ -1663,7 +1663,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 						OCI_DTYPE_TIMESTAMP_TZ, 0, NULL) != OCI_SUCCESS)
 					{
 						oracleReleaseSession(session, NULL, 0);
-						oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 							"error executing query: OCIDescriptorAlloc failed to allocate Timestamp descriptor",
 							"out of memory");
 					}
@@ -1677,7 +1677,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					{
 						oracleReleaseSession(session, NULL, 0);
 						(void)OCIDescriptorFree(timest, OCI_DTYPE_TIMESTAMP_TZ);
-						oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 							"error executing query: OCIDateTimeFromText failed to convert parameter",
 							oraMessage);
 					}
@@ -1703,7 +1703,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIBindByName failed to bind parameter",
 				oraMessage);
 		}
@@ -1750,7 +1750,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 				{
 					oracleReleaseSession(session, NULL, 0);
-					oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor",
 						oraMessage);
 				}
@@ -1766,7 +1766,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 				(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
 				oracleReleaseSession(session, NULL, 0);
-				oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+				oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 					"error executing query: OCIDefineByPos failed to define result value",
 					oraMessage);
 			}
@@ -1786,7 +1786,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIDefineByPos failed to define result value",
 				oraMessage);
 		}
@@ -1808,7 +1808,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIStmtExecute failed to execute remote query",
 			oraMessage);
 	}
@@ -1829,7 +1829,7 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
 	if (session->stmthp == NULL)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError_x(FDW_ERROR, "oracleFetchNext internal error: statement handle is NULL");
+		oracleError(FDW_ERROR, "oracleFetchNext internal error: statement handle is NULL");
 	}
 
 	/* fetch the next result row */
@@ -1840,7 +1840,7 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
 	if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 	{
 		oracleReleaseSession(session, NULL, 0);
-		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error fetching result: OCIStmtFetch2 failed to fetch next result row",
 			oraMessage);
 	}
@@ -1873,7 +1873,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		if (result == OCI_ERROR)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error fetching result: OCILobFileOpen failed to open BFILE",
 				oraMessage);
 		}
@@ -1902,7 +1902,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		if (result == OCI_ERROR)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error fetching result: OCILobRead failed to read LOB chunk",
 				oraMessage);
 		}
@@ -1925,7 +1925,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		if (result == OCI_ERROR)
 		{
 			oracleReleaseSession(session, NULL, 0);
-			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error fetching result: OCILobFileClose failed to close BFILE",
 				oraMessage);
 		}
@@ -2018,7 +2018,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		if (silent)
 			return;
 		else
-			oracleError_x(FDW_ERROR, "closeSession internal error: environment handle not found in cache");
+			oracleError(FDW_ERROR, "closeSession internal error: environment handle not found in cache");
 	}
 
 	/* search server handle in cache */
@@ -2033,7 +2033,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		if (silent)
 			return;
 		else
-			oracleError_x(FDW_ERROR, "closeSession internal error: server handle not found in cache");
+			oracleError(FDW_ERROR, "closeSession internal error: server handle not found in cache");
 	}
 
 	/* search connection in cache */
@@ -2050,7 +2050,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		if (silent)
 			return;
 		else
-			oracleError_x(FDW_ERROR, "closeSession internal error: user handle not found in cache");
+			oracleError(FDW_ERROR, "closeSession internal error: user handle not found in cache");
 	}
 
 	/* terminate the session */
@@ -2058,7 +2058,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 		OCISessionEnd(connp->svchp, envp->errhp, connp->userhp, OCI_DEFAULT),
 		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error closing session: OCISessionEnd failed to terminate session",
 			oraMessage);
 	}
@@ -2072,7 +2072,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 			(dvoid *)&txnhp, (ub4 *)0, (ub4)OCI_ATTR_TRANS, envp->errhp),
 		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error closing session: OCIAttrGet failed to get transaction handle",
 			oraMessage);
 	}
@@ -2120,7 +2120,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 		if (silent)
 			return;
 		else
-			oracleError_x(FDW_ERROR, "disconnectServer internal error: environment handle not found in cache");
+			oracleError(FDW_ERROR, "disconnectServer internal error: environment handle not found in cache");
 	}
 
 	/* search server handle in cache */
@@ -2137,7 +2137,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 		if (silent)
 			return;
 		else
-			oracleError_x(FDW_ERROR, "disconnectServer internal error: server handle not found in cache");
+			oracleError(FDW_ERROR, "disconnectServer internal error: server handle not found in cache");
 	}
 
 	/* disconnect server */
@@ -2145,7 +2145,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 		OCIServerDetach(srvp->srvhp, envp->errhp, OCI_DEFAULT),
 		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		oracleError(FDW_UNABLE_TO_CREATE_REPLY,
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error closing session: OCIServerDetach failed to detach from server",
 			oraMessage);
 	}
@@ -2187,7 +2187,7 @@ removeEnvironment(OCIEnv *envhp)
 		if (silent)
 			return;
 		else
-			oracleError_x(FDW_ERROR, "removeEnvironment internal error: environment handle not found in cache");
+			oracleError(FDW_ERROR, "removeEnvironment internal error: environment handle not found in cache");
 	}
 
 	/* free the error handle */

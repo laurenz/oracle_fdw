@@ -2527,11 +2527,11 @@ oracleFree(void *p)
 	(x==FDW_OUT_OF_MEMORY ? ERRCODE_FDW_OUT_OF_MEMORY : ERRCODE_FDW_ERROR)))))
 
 /*
- * oracleError
- * 		Report a PostgreSQL error with detail message.
+ * oracleError_d
+ * 		Report a PostgreSQL error with a detail message.
  */
 void
-oracleError(oraError sqlstate, const char *message, const char *detail)
+oracleError_d(oraError sqlstate, const char *message, const char *detail)
 {
 	ereport(ERROR,
 			(errcode(to_sqlstate(sqlstate)),
@@ -2540,11 +2540,11 @@ oracleError(oraError sqlstate, const char *message, const char *detail)
 }
 
 /*
- * oracleError_s
+ * oracleError_sd
  * 		Report a PostgreSQL error with a string argument and a detail message.
  */
 void
-oracleError_s(oraError sqlstate, const char *message, const char *arg, const char *detail)
+oracleError_sd(oraError sqlstate, const char *message, const char *arg, const char *detail)
 {
 	ereport(ERROR,
 			(errcode(to_sqlstate(sqlstate)),
@@ -2565,11 +2565,11 @@ oracleError_i(oraError sqlstate, const char *message, int arg)
 }
 
 /*
- * oracleError_x
+ * oracleError
  * 		Report a PostgreSQL error without detail message.
  */
 void
-oracleError_x(oraError sqlstate, const char *message)
+oracleError(oraError sqlstate, const char *message)
 {
 	ereport(ERROR,
 			(errcode(to_sqlstate(sqlstate)),

@@ -122,7 +122,7 @@ extern void oracleGetLob(oracleSession *session, struct oraTable *oraTable, void
 extern void *oracleAlloc(size_t size);
 extern void *oracleRealloc(void *p, size_t size);
 extern void oracleFree(void *p);
-extern void oracleError(oraError sqlstate, const char *message, const char *detail);
-extern void oracleError_s(oraError sqlstate, const char *message, const char *arg, const char *detail);
+extern void oracleError_d(oraError sqlstate, const char *message, const char *detail);
+extern void oracleError_sd(oraError sqlstate, const char *message, const char *arg, const char *detail);
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
-extern void oracleError_x(oraError sqlstate, const char *message);
+extern void oracleError(oraError sqlstate, const char *message);
