@@ -1,4 +1,4 @@
-Version 1.0.0
+Version 0.9.3 (beta), released 2012-02-07
   Enhancements:
   - Add support for PostgreSQL data type "uuid".
 
