@@ -1,3 +1,8 @@
+Version 1.0.0
+  Bugfixes:
+  - Fix uninitialized value that caused intermittent server crashes.
+    Per report from Bruno Voigt.
+
 Version 0.9.3 (beta), released 2012-02-07
   Enhancements:
   - Add support for PostgreSQL data type "uuid".

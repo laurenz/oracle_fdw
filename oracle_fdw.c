@@ -596,6 +596,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 
 	/* we return a virtual tuple */
 	slot->tts_mintuple = NULL;
+	slot->tts_shouldFreeMin = false;
 	slot->tts_buffer = InvalidBuffer;
 	slot->tts_tuple = NULL;
 	slot->tts_shouldFree = false;
