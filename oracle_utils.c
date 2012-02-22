@@ -497,8 +497,17 @@ oracleSession
 void
 oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int close)
 {
+	char save_oraMessage[ERRBUFSIZE];
+	sb4 save_errcode = 0;
+
 	/* close the statement, if any */
 	oracleCloseStatement(session, oraTable);
+
+	/* save error messages */
+	if (errcode != 0) {
+		save_errcode = errcode;
+		strncpy(save_oraMessage, oraMessage, ERRBUFSIZE);
+	}
 
 	/* commit the current transaction */
 	if (checkerr(
@@ -513,6 +522,12 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 	/* close the session if requested */
 	if (close)
 		closeSession(session->envhp, session->srvhp, session->userhp, 1);
+
+	/* restore error messages */
+	if (save_errcode != 0) {
+		errcode = save_errcode;
+		strncpy(oraMessage, save_oraMessage, ERRBUFSIZE);
+	}
 
 	oracleFree(session);
 }
