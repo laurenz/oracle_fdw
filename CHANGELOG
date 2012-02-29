@@ -2,8 +2,11 @@ Version 1.0.0
   Bugfixes:
   - Fix uninitialized value that caused intermittent server crashes.
     Per report from Bruno Voigt.
-  - Fix bug introduced in 0.9.3 that prevented Oracle errors from being
-    reported as DETAIL message.
+  - Rework the handling of errors and transactions.  Now an error should not
+    be able to cause an Oracle transaction to be left open.  This also fixes
+    a bug introduced in 0.9.3 that prevented Oracle errors from being
+    reported as DETAIL message.  Also, all foreign scans in one local query
+    will now be executed within one Oracle transaction if possible.
 
 Version 0.9.3 (beta), released 2012-02-07
   Enhancements:

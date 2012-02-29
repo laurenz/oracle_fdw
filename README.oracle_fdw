@@ -307,6 +307,13 @@ Planning
 Oracle's planner does not give good cost estimates (you can only get the
 estimated execution time in second granularity, and it is never less than
 one).  So by default, oracle_fdw does not use these estimates.
+See the description of the "plan_costs" option above.
+
+Even without that, the current implementation of oracle_fdw requires
+calls to the Oracle server for every foreign table during query planning.
+That means that there might be a noticeable performance improvement
+if query plans are cached, for example by using prepared statements or
+PL/pgSQL functions.
 
 LDAP libraries
 --------------
