@@ -131,6 +131,7 @@ static void deserializePlanData(List *list, char **dbserver, char **user, char *
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
 static void exitHook(int code, Datum arg);
+static char *setParameters(struct paramDesc *paramList, EState *execstate);
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -497,14 +498,10 @@ TupleTableSlot *
 oracleIterateForeignScan(ForeignScanState *node)
 {
 	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
-	struct paramDesc *param;
 	EState *execstate = node->ss.ps.state;
-	Datum datum;
-	int is_null, have_result;
-	HeapTuple tuple;
+	int have_result;
 	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
 	int j, index;
-	TimestampTz tstamp;
 	char *value = NULL;
 	long value_len = 0;
 
@@ -519,97 +516,11 @@ oracleIterateForeignScan(ForeignScanState *node)
 		}
 		else
 		{
-			bool first_param = true;
-			StringInfoData info;  /* list of parameters for DEBUG message */
-			initStringInfo(&info);
-
-			/*
-		 	* There is no open statement yet.
-		 	* Run the query and get the first result row.
-		 	*/
-
-			/* iterate parameter list and fill values */
-			for (param=fdw_state->paramList; param; param=param->next)
-			{
-				if (strcmp(param->name, ":now") == 0)
-				{
-					/*
-				 	* This parameter will be set to the transaction start timestamp.
-				 	*/
-					regproc castfunc;
-
-					/* get transaction start timestamp */
-					tstamp = GetCurrentTransactionStartTimestamp();
-
-					if (param->type == TIMESTAMPTZOID)
-					{
-						/* no need to cast */
-						datum = TimestampGetDatum(tstamp);
-					}
-					else
-					{
-						/* find the cast function to the desired target type */
-						tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(TIMESTAMPTZOID), ObjectIdGetDatum(param->type));
-						if (!HeapTupleIsValid(tuple))
-						{
-							elog(ERROR, "cache lookup failed for cast from %u to %u", TIMESTAMPTZOID, param->type);
-						}
-						castfunc = ((Form_pg_cast)GETSTRUCT(tuple))->castfunc;
-						ReleaseSysCache(tuple);
-
-						/* cast */
-						datum = OidFunctionCall1(castfunc, TimestampGetDatum(tstamp));
-					}
-					is_null = 0;
-				}
-				else if (param->isExtern)
-				{
-					/* external parameters are numbered from 1 on */
-					datum = execstate->es_param_list_info->params[param->number-1].value;
-					is_null = execstate->es_param_list_info->params[param->number-1].isnull;
-				}
-				else
-				{
-					/* internal parameters are numbered from 0 on */
-					datum = execstate->es_param_exec_vals[param->number].value;
-					is_null = execstate->es_param_exec_vals[param->number].isnull;
-				}
-
-				if (is_null)
-				{
-					param->value = NULL;
-				}
-				else
-				{
-					regproc typoutput;
-
-					/* get the type's output function */
-					tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(param->type));
-					if (!HeapTupleIsValid(tuple))
-					{
-						elog(ERROR, "cache lookup failed for type %u", param->type);
-					}
-					typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
-					ReleaseSysCache(tuple);
-
-					/* convert the parameter value into a string */
-					param->value = DatumGetCString(OidFunctionCall1(typoutput, datum));
-				}
-
-				/* build a parameter list for the DEBUG message */
-				if (first_param)
-				{
-					first_param = false;
-					appendStringInfo(&info, ", parameters %s=\"%s\"", param->name, param->value);
-				}
-				else
-				{
-					appendStringInfo(&info, ", %s=\"%s\"", param->name, param->value);
-				}
-			}
+			/* fill the parameter list with the actual values in execstate */
+			char *paramInfo = setParameters(fdw_state->paramList, execstate);
 
 			/* execute the Oracle statement and fetch the first row */
-			elog(DEBUG1, "oracle_fdw: executing query in foreign scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), info.data);
+			elog(DEBUG1, "oracle_fdw: executing query in foreign scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
 			have_result = oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList);
 		}
 
@@ -654,6 +565,9 @@ oracleIterateForeignScan(ForeignScanState *node)
 					continue;
 				}
 
+				slot->tts_isnull[j] = false;
+
+				/* get the data and its length */
 				if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
 						|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
 						|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
@@ -668,7 +582,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 					value_len = fdw_state->oraTable->cols[index]->val_len;
 				}
 
-				slot->tts_isnull[j] = false;
+				/* fill the TupleSlot with the data (after conversion if necessary) */
 				if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
 				{
 					/* binary columns are not converted */
@@ -2513,6 +2427,111 @@ void
 exitHook(int code, Datum arg)
 {
 	oracleShutdown();
+}
+
+/*
+ * setParameters
+ * 		Set the current values of the parameters in execstate into paramList.
+ * 		Return a string containing the parameters set for a DEBUG message.
+ */
+char *
+setParameters(struct paramDesc *paramList, EState *execstate)
+{
+	struct paramDesc *param;
+	Datum datum;
+	HeapTuple tuple;
+	TimestampTz tstamp;
+	int is_null;
+	bool first_param = true;
+	StringInfoData info;  /* list of parameters for DEBUG message */
+	initStringInfo(&info);
+
+	/*
+ 	* There is no open statement yet.
+ 	* Run the query and get the first result row.
+ 	*/
+
+	/* iterate parameter list and fill values */
+	for (param=paramList; param; param=param->next)
+	{
+		if (strcmp(param->name, ":now") == 0)
+		{
+			/*
+		 	* This parameter will be set to the transaction start timestamp.
+		 	*/
+			regproc castfunc;
+
+			/* get transaction start timestamp */
+			tstamp = GetCurrentTransactionStartTimestamp();
+
+			if (param->type == TIMESTAMPTZOID)
+			{
+				/* no need to cast */
+				datum = TimestampGetDatum(tstamp);
+			}
+			else
+			{
+				/* find the cast function to the desired target type */
+				tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(TIMESTAMPTZOID), ObjectIdGetDatum(param->type));
+				if (!HeapTupleIsValid(tuple))
+				{
+					elog(ERROR, "cache lookup failed for cast from %u to %u", TIMESTAMPTZOID, param->type);
+				}
+				castfunc = ((Form_pg_cast)GETSTRUCT(tuple))->castfunc;
+				ReleaseSysCache(tuple);
+
+				/* cast */
+				datum = OidFunctionCall1(castfunc, TimestampGetDatum(tstamp));
+			}
+			is_null = 0;
+		}
+		else if (param->isExtern)
+		{
+			/* external parameters are numbered from 1 on */
+			datum = execstate->es_param_list_info->params[param->number-1].value;
+			is_null = execstate->es_param_list_info->params[param->number-1].isnull;
+		}
+		else
+		{
+			/* internal parameters are numbered from 0 on */
+			datum = execstate->es_param_exec_vals[param->number].value;
+			is_null = execstate->es_param_exec_vals[param->number].isnull;
+		}
+
+		if (is_null)
+		{
+			param->value = NULL;
+		}
+		else
+		{
+			regproc typoutput;
+
+			/* get the type's output function */
+			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(param->type));
+			if (!HeapTupleIsValid(tuple))
+			{
+				elog(ERROR, "cache lookup failed for type %u", param->type);
+			}
+			typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
+			ReleaseSysCache(tuple);
+
+			/* convert the parameter value into a string */
+			param->value = DatumGetCString(OidFunctionCall1(typoutput, datum));
+		}
+
+		/* build a parameter list for the DEBUG message */
+		if (first_param)
+		{
+			first_param = false;
+			appendStringInfo(&info, ", parameters %s=\"%s\"", param->name, param->value);
+		}
+		else
+		{
+			appendStringInfo(&info, ", %s=\"%s\"", param->name, param->value);
+		}
+	}
+
+	return info.data;
 }
 
 /*
