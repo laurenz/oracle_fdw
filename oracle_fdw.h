@@ -126,3 +126,4 @@ extern void oracleError_d(oraError sqlstate, const char *message, const char *de
 extern void oracleError_sd(oraError sqlstate, const char *message, const char *arg, const char *detail);
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
+extern void oracleDebug2(const char *message);

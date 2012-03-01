@@ -246,7 +246,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 Datum
 oracle_close_connections(PG_FUNCTION_ARGS)
 {
-	elog(DEBUG1, "oracle_fdw: closing all Oracle connections");
+	elog(DEBUG1, "oracle_fdw: close all Oracle connections");
 	oracleCloseConnections();
 
 	PG_RETURN_VOID();
@@ -323,7 +323,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 				(errcode(ERRCODE_FDW_OPTION_NAME_NOT_FOUND),
 				errmsg("required option \"%s\" in foreign table \"%s\" missing", OPT_TABLE, pgtablename)));
 
-	elog(DEBUG1, "oracle_fdw: planning foreign table scan for %d", foreigntableid);
+	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
@@ -434,6 +434,8 @@ oracleExplainForeignScan(ForeignScanState *node, ExplainState *es)
 	char **plan;
 	int nrows, i;
 
+	elog(DEBUG1, "oracle_fdw: explain foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+
 	/* show query */
 	ExplainPropertyText("Oracle query", fdw_state->query, es);
 
@@ -477,7 +479,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 	deserializePlanData(fdwplan->fdw_private, &dbserver, &user, &password, &nls_lang, (struct OracleFdwExecutionState **)&node->fdw_state);
 	fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
 
-	elog(DEBUG1, "oracle_fdw: begin foreign scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	elog(DEBUG1, "oracle_fdw: begin foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	/* connect to Oracle database, don't start transaction for explain only */
 	fdw_state->session = oracleGetSession(dbserver, user, password, nls_lang, fdw_state->oraTable->pgname,
@@ -509,7 +511,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 	{
 		if (oracleIsStatementOpen(fdw_state->session))
 		{
-			elog(DEBUG2, "oracle_fdw: get next row in foreign scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+			elog(DEBUG2, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 			/* fetch the next result row */
 			have_result = oracleFetchNext(fdw_state->session, fdw_state->oraTable);
@@ -520,7 +522,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 			char *paramInfo = setParameters(fdw_state->paramList, execstate);
 
 			/* execute the Oracle statement and fetch the first row */
-			elog(DEBUG1, "oracle_fdw: executing query in foreign scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
+			elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
 			have_result = oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList);
 		}
 
@@ -665,7 +667,7 @@ oracleEndForeignScan(ForeignScanState *node)
 {
 	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
 
-	elog(DEBUG1, "oracle_fdw: end foreign scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	elog(DEBUG1, "oracle_fdw: end foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	/* release the Oracle session */
 	oracleReleaseSession(fdw_state->session, fdw_state->oraTable, 0, 0);
@@ -681,7 +683,7 @@ oracleReScanForeignScan(ForeignScanState *node)
 {
 	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
 
-	elog(DEBUG1, "oracle_fdw: restart foreign scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	elog(DEBUG1, "oracle_fdw: restart foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	PG_TRY();
 	{
@@ -2168,7 +2170,7 @@ char
 		appendStringInfo(&buf, "NLS_LANG=%s", nls_lang);
 	}
 
-	elog(DEBUG1, "oracle_fdw: setting %s", buf.data);
+	elog(DEBUG1, "oracle_fdw: set %s", buf.data);
 
 	return buf.data;
 }
@@ -2620,4 +2622,14 @@ oracleError(oraError sqlstate, const char *message)
 	ereport(ERROR,
 			(errcode(to_sqlstate(sqlstate)),
 			errmsg("%s", message)));
+}
+
+/*
+ * oracleDebug2
+ * 		Report a PostgreSQL message at level DEBUG2.
+ */
+void
+oracleDebug2(const char *message)
+{
+	elog(DEBUG2, message);
 }

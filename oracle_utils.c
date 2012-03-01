@@ -446,6 +446,8 @@ oracleSession
 
 	if (transaction && connp->usecount == 0)
 	{
+		oracleDebug2("oracle_fdw: begin serializable remote transaction");
+
 		/* start a "serializable" (= repeatable read) transaction */
 		if (checkerr(
 			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
@@ -517,6 +519,8 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 	/* commit the current transaction */
 	if (connp->usecount == 0)
 	{
+		oracleDebug2("oracle_fdw: commit remote transaction");
+
 		if (checkerr(
 			OCITransCommit(session->svchp, session->errhp, OCI_DEFAULT),
 			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
