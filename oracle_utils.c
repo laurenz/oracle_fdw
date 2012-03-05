@@ -442,6 +442,9 @@ oracleSession
 		connp->usecount = 0;
 		connp->next = srvp->connlist;
 		srvp->connlist = connp;
+
+		/* register callback for rolled back PostgreSQL transactions */
+		oracleRegisterCallback(connp);
 	}
 
 	if (transaction && connp->usecount == 0)
@@ -1897,6 +1900,33 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 }
 
 /*
+ * oracleCleanupTransaction
+ * 		Try to find the session in the cache, return 1 if found, 0 if not.
+ * 		If the session is found, issue a rollback and set usecount to zero.
+ */
+void
+oracleCleanupTransaction(void *arg)
+{
+	struct envEntry *envp;
+	struct srvEntry *srvp;
+	struct connEntry *connp = NULL;
+
+	/* search session handle in cache */
+	for (envp = envlist; envp != NULL; envp = envp->next)
+		for (srvp = envp->srvlist; srvp != NULL; srvp = srvp->next)
+			for (connp = srvp->connlist; connp != NULL; connp = connp->next)
+				if (connp == arg)
+				{
+					connp->usecount = 0;
+
+					oracleDebug2("oracle_fdw: rollback remote transaction");
+
+					/* rollback and ignore errors */
+					OCITransRollback(connp->svchp, envp->errhp, OCI_DEFAULT);
+				}
+}
+
+/*
  * checkerr
  * 		Call OCIErrorGet to get error message and error code.
  */
@@ -2056,6 +2086,9 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 	/* close the server session if desired and this is the last session */
 	if (disconnect && srvp->connlist == NULL)
 		disconnectServer(envhp, srvhp);
+
+	/* unregister callback for rolled back transactions */
+	oracleUnregisterCallback(connp);
 
 	/* free the memory */
 	free(connp->user);

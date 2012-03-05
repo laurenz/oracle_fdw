@@ -115,10 +115,13 @@ extern void oracleExplain(oracleSession *session, const char *query, int *nrows,
 extern int oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList);
 extern int oracleFetchNext(oracleSession *session, struct oraTable *oraTable);
 extern void oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len);
+extern void oracleCleanupTransaction(void *arg);
 
 /*
  * functions defined in oracle_fdw.c
  */
+extern void oracleRegisterCallback(void *arg);
+extern void oracleUnregisterCallback(void *arg);
 extern void *oracleAlloc(size_t size);
 extern void *oracleRealloc(void *p, size_t size);
 extern void oracleFree(void *p);

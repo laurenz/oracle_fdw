@@ -35,6 +35,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/resowner.h"
 #include "utils/tqual.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
@@ -130,6 +131,7 @@ static Const *serializeLong(long i);
 static void deserializePlanData(List *list, char **dbserver, char **user, char **password, char **nls_lang, struct OracleFdwExecutionState **state);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
+static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
 static void exitHook(int code, Datum arg);
 static char *setParameters(struct paramDesc *paramList, EState *execstate);
 
@@ -331,63 +333,54 @@ oraclePlanForeignScan(Oid foreigntableid,
 	/* connect to Oracle database */
 	session = oracleGetSession(dbserver, user, password, nls_lang, pgtablename, 0);
 
-	PG_TRY();
+	/* (optionally) qualified table name for Oracle */
+	if (schema == NULL)
 	{
-		/* (optionally) qualified table name for Oracle */
-		if (schema == NULL)
-		{
-			qualtable = table;
-		}
-		else
-		{
-			initStringInfo(&buf);
-			appendStringInfo(&buf, "%s.%s", schema, table);
-			qualtable = buf.data;
-		}
-
-		/* get remote table description */
-		oraTable = oracleDescribe(session, qualtable, pgtablename);
-
-		/* add PostgreSQL data to table description */
-		getColumnData(foreigntableid, oraTable);
-
-		/* construct Oracle query and get the list of parameters */
-		query = createQuery(session, baserel->reltargetlist, baserel->baserestrictinfo, oraTable, &paramList);
-		elog(DEBUG1, "oracle_fdw: remote query is: %s", query);
-
-		/* get PostgreSQL column data types, check that they match Oracle's */
-		checkDataTypes(session, oraTable);
-
-		/* construct FdwPlan */
-		fdwplan = makeNode(FdwPlan);
-
-		/* get Oracle's (bad) estimate only if plan_costs is set */
-		if (plan_costs != NULL
-				&& (strcmp(plan_costs, "on") == 0
-				|| strcmp(plan_costs, "ON") == 0
-				|| strcmp(plan_costs, "yes") == 0
-				|| strcmp(plan_costs, "YES") == 0
-				|| strcmp(plan_costs, "true") == 0
-				|| strcmp(plan_costs, "TRUE") == 0))
-		{
-			/* get Oracle's cost estimates for the query */
-			oracleEstimate(session, query, seq_page_cost, BLCKSZ, &fdwplan->startup_cost, &fdwplan->total_cost, &baserel->rows, &baserel->width);
-		}
-		else
-		{
-			/* otherwise, use a random "high" value */
-			fdwplan->startup_cost = fdwplan->total_cost = 10000.0;
-		}
-
-		/* "serialize" all necessary information in the private area */
-		fdwplan->fdw_private = serializePlanData(dbserver, user, password, nls_lang, query, oraTable, paramList);
+		qualtable = table;
 	}
-	PG_CATCH();
+	else
 	{
-		oracleReleaseSession(session, NULL, 0, 1);
-		PG_RE_THROW();
+		initStringInfo(&buf);
+		appendStringInfo(&buf, "%s.%s", schema, table);
+		qualtable = buf.data;
 	}
-	PG_END_TRY();
+
+	/* get remote table description */
+	oraTable = oracleDescribe(session, qualtable, pgtablename);
+
+	/* add PostgreSQL data to table description */
+	getColumnData(foreigntableid, oraTable);
+
+	/* construct Oracle query and get the list of parameters */
+	query = createQuery(session, baserel->reltargetlist, baserel->baserestrictinfo, oraTable, &paramList);
+	elog(DEBUG1, "oracle_fdw: remote query is: %s", query);
+
+	/* get PostgreSQL column data types, check that they match Oracle's */
+	checkDataTypes(session, oraTable);
+
+	/* construct FdwPlan */
+	fdwplan = makeNode(FdwPlan);
+
+	/* get Oracle's (bad) estimate only if plan_costs is set */
+	if (plan_costs != NULL
+			&& (strcmp(plan_costs, "on") == 0
+			|| strcmp(plan_costs, "ON") == 0
+			|| strcmp(plan_costs, "yes") == 0
+			|| strcmp(plan_costs, "YES") == 0
+			|| strcmp(plan_costs, "true") == 0
+			|| strcmp(plan_costs, "TRUE") == 0))
+	{
+		/* get Oracle's cost estimates for the query */
+		oracleEstimate(session, query, seq_page_cost, BLCKSZ, &fdwplan->startup_cost, &fdwplan->total_cost, &baserel->rows, &baserel->width);
+	}
+	else
+	{
+		/* otherwise, use a random "high" value */
+		fdwplan->startup_cost = fdwplan->total_cost = 10000.0;
+	}
+
+	/* "serialize" all necessary information in the private area */
+	fdwplan->fdw_private = serializePlanData(dbserver, user, password, nls_lang, query, oraTable, paramList);
 
 	/* release Oracle session (will be cached) */
 	oracleReleaseSession(session, NULL, 0, 0);
@@ -441,17 +434,8 @@ oracleExplainForeignScan(ForeignScanState *node, ExplainState *es)
 
 	if (es->verbose)
 	{
-		PG_TRY();
-		{
-			/* get the EXPLAIN PLAN */
-			oracleExplain(fdw_state->session, fdw_state->query, &nrows, &plan);
-		}
-		PG_CATCH();
-		{
-			oracleReleaseSession(fdw_state->session, NULL, 0, 1);
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
+		/* get the EXPLAIN PLAN */
+		oracleExplain(fdw_state->session, fdw_state->query, &nrows, &plan);
 
 		/* add it to explain text */
 		for (i=0; i<nrows; ++i)
@@ -507,153 +491,144 @@ oracleIterateForeignScan(ForeignScanState *node)
 	char *value = NULL;
 	long value_len = 0;
 
-	PG_TRY();
+	if (oracleIsStatementOpen(fdw_state->session))
 	{
-		if (oracleIsStatementOpen(fdw_state->session))
+		elog(DEBUG2, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+
+		/* fetch the next result row */
+		have_result = oracleFetchNext(fdw_state->session, fdw_state->oraTable);
+	}
+	else
+	{
+		/* fill the parameter list with the actual values in execstate */
+		char *paramInfo = setParameters(fdw_state->paramList, execstate);
+
+		/* execute the Oracle statement and fetch the first row */
+		elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
+		have_result = oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList);
+	}
+
+	/* we return a virtual tuple */
+	slot->tts_mintuple = NULL;
+	slot->tts_shouldFreeMin = false;
+	slot->tts_buffer = InvalidBuffer;
+	slot->tts_tuple = NULL;
+	slot->tts_shouldFree = false;
+
+	if (have_result)
+	{
+		slot->tts_isempty = false;
+		slot->tts_nvalid = fdw_state->oraTable->npgcols;
+		slot->tts_values = (Datum *)palloc(sizeof(Datum) * slot->tts_nvalid);
+		slot->tts_isnull = (bool *)palloc(sizeof(bool) * slot->tts_nvalid);
+
+		/* assign result values */
+		index = -1;
+		for (j=0; j<fdw_state->oraTable->npgcols; ++j)
 		{
-			elog(DEBUG2, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
-
-			/* fetch the next result row */
-			have_result = oracleFetchNext(fdw_state->session, fdw_state->oraTable);
-		}
-		else
-		{
-			/* fill the parameter list with the actual values in execstate */
-			char *paramInfo = setParameters(fdw_state->paramList, execstate);
-
-			/* execute the Oracle statement and fetch the first row */
-			elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
-			have_result = oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList);
-		}
-
-		/* we return a virtual tuple */
-		slot->tts_mintuple = NULL;
-		slot->tts_shouldFreeMin = false;
-		slot->tts_buffer = InvalidBuffer;
-		slot->tts_tuple = NULL;
-		slot->tts_shouldFree = false;
-
-		if (have_result)
-		{
-			slot->tts_isempty = false;
-			slot->tts_nvalid = fdw_state->oraTable->npgcols;
-			slot->tts_values = (Datum *)palloc(sizeof(Datum) * slot->tts_nvalid);
-			slot->tts_isnull = (bool *)palloc(sizeof(bool) * slot->tts_nvalid);
-
-			/* assign result values */
-			index = -1;
-			for (j=0; j<fdw_state->oraTable->npgcols; ++j)
+			/* for dropped columns, insert a NULL */
+			if (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1)
 			{
-				/* for dropped columns, insert a NULL */
-				if (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1)
-				{
-					slot->tts_isnull[j] = true;
-					slot->tts_values[j] = PointerGetDatum(NULL);
-					continue;
-				}
-				else
-					++index;
-
-				/*
-			 	* Columns exceeding the length of the Oracle table will be NULL,
-			 	* as well as columns that are not used in the query.
-			 	*/
-				if (index >= fdw_state->oraTable->ncols
-						|| fdw_state->oraTable->cols[index]->used == 0
-						|| fdw_state->oraTable->cols[index]->val_null == -1)
-				{
-					slot->tts_isnull[j] = true;
-					slot->tts_values[j] = PointerGetDatum(NULL);
-					continue;
-				}
-
-				slot->tts_isnull[j] = false;
-
-				/* get the data and its length */
-				if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
-						|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
-						|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
-				{
-					/* get the actual LOB contents (palloc'ed) */
-					oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
-				}
-				else
-				{
-					/* for other data types, oraTable contains the results */
-					value = fdw_state->oraTable->cols[index]->val;
-					value_len = fdw_state->oraTable->cols[index]->val_len;
-				}
-
-				/* fill the TupleSlot with the data (after conversion if necessary) */
-				if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
-				{
-					/* binary columns are not converted */
-					bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
-					memcpy(VARDATA(result), value, value_len);
-					SET_VARSIZE(result, value_len + VARHDRSZ);
-
-					slot->tts_values[j] = PointerGetDatum(result);
-				}
-				else
-				{
-					regproc typinput;
-					HeapTuple tuple;
-					Datum dat;
-
-					/* find the appropriate conversion function */
-					tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
-					if (!HeapTupleIsValid(tuple))
-					{
-						elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
-					}
-					typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
-					ReleaseSysCache(tuple);
-
-					/* and call it */
-					dat = CStringGetDatum(value);
-					switch (fdw_state->oraTable->cols[index]->pgtype)
-					{
-						case BPCHAROID:
-						case VARCHAROID:
-						case TIMESTAMPOID:
-						case TIMESTAMPTZOID:
-						case INTERVALOID:
-						case NUMERICOID:
-							/* these functions require the type modifier */
-							slot->tts_values[j] = OidFunctionCall3(typinput,
-									dat,
-									ObjectIdGetDatum(InvalidOid),
-									Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
-							break;
-						default:
-							/* the others don't */
-							slot->tts_values[j] = OidFunctionCall1(typinput, dat);
-					}
-				}
-
-				/* free the data buffer for LOBs */
-				if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
-						|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
-						|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
-					pfree(value);
+				slot->tts_isnull[j] = true;
+				slot->tts_values[j] = PointerGetDatum(NULL);
+				continue;
 			}
-		}
-		else
-		{
-			/* if there are no more results, return an empty tuple */
-			slot->tts_isempty = true;
-			slot->tts_nvalid = 0;
+			else
+				++index;
 
-			/* close the statement */
-			oracleCloseStatement(fdw_state->session, fdw_state->oraTable);
+			/*
+		 	* Columns exceeding the length of the Oracle table will be NULL,
+		 	* as well as columns that are not used in the query.
+		 	*/
+			if (index >= fdw_state->oraTable->ncols
+					|| fdw_state->oraTable->cols[index]->used == 0
+					|| fdw_state->oraTable->cols[index]->val_null == -1)
+			{
+				slot->tts_isnull[j] = true;
+				slot->tts_values[j] = PointerGetDatum(NULL);
+				continue;
+			}
+
+			slot->tts_isnull[j] = false;
+
+			/* get the data and its length */
+			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+			{
+				/* get the actual LOB contents (palloc'ed) */
+				oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
+			}
+			else
+			{
+				/* for other data types, oraTable contains the results */
+				value = fdw_state->oraTable->cols[index]->val;
+				value_len = fdw_state->oraTable->cols[index]->val_len;
+			}
+
+			/* fill the TupleSlot with the data (after conversion if necessary) */
+			if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
+			{
+				/* binary columns are not converted */
+				bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
+				memcpy(VARDATA(result), value, value_len);
+				SET_VARSIZE(result, value_len + VARHDRSZ);
+
+				slot->tts_values[j] = PointerGetDatum(result);
+			}
+			else
+			{
+				regproc typinput;
+				HeapTuple tuple;
+				Datum dat;
+
+				/* find the appropriate conversion function */
+				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
+				if (!HeapTupleIsValid(tuple))
+				{
+					elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
+				}
+				typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
+				ReleaseSysCache(tuple);
+
+				/* and call it */
+				dat = CStringGetDatum(value);
+				switch (fdw_state->oraTable->cols[index]->pgtype)
+				{
+					case BPCHAROID:
+					case VARCHAROID:
+					case TIMESTAMPOID:
+					case TIMESTAMPTZOID:
+					case INTERVALOID:
+					case NUMERICOID:
+						/* these functions require the type modifier */
+						slot->tts_values[j] = OidFunctionCall3(typinput,
+								dat,
+								ObjectIdGetDatum(InvalidOid),
+								Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
+						break;
+					default:
+						/* the others don't */
+						slot->tts_values[j] = OidFunctionCall1(typinput, dat);
+				}
+			}
+
+			/* free the data buffer for LOBs */
+			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+				pfree(value);
 		}
 	}
-	PG_CATCH();
+	else
 	{
-		oracleReleaseSession(fdw_state->session, NULL, 0, 1);
-		PG_RE_THROW();
+		/* if there are no more results, return an empty tuple */
+		slot->tts_isempty = true;
+		slot->tts_nvalid = 0;
+
+		/* close the statement */
+		oracleCloseStatement(fdw_state->session, fdw_state->oraTable);
 	}
-	PG_END_TRY();
 
 	return slot;
 }
@@ -685,17 +660,8 @@ oracleReScanForeignScan(ForeignScanState *node)
 
 	elog(DEBUG1, "oracle_fdw: restart foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
-	PG_TRY();
-	{
-		/* close open Oracle statement if there is one */
-		oracleCloseStatement(fdw_state->session, fdw_state->oraTable);
-	}
-	PG_CATCH();
-	{
-		oracleReleaseSession(fdw_state->session, NULL, 0, 1);
-		PG_RE_THROW();
-	}
-	PG_END_TRY();
+	/* close open Oracle statement if there is one */
+	oracleCloseStatement(fdw_state->session, fdw_state->oraTable);
 }
 
 /*
@@ -2421,6 +2387,17 @@ deserializeLong(Const *constant)
 }
 
 /*
+ * cleanupTransaction
+ * 		If the transaction was rolled back, close remote transaction.
+ */
+void
+cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg)
+{
+	if (! isCommit && phase == RESOURCE_RELEASE_AFTER_LOCKS && CurrentResourceOwner == CurTransactionResourceOwner)
+		oracleCleanupTransaction(arg);
+}
+
+/*
  * exitHook
  * 		Close all Oracle connections on process exit.
  */
@@ -2534,6 +2511,26 @@ setParameters(struct paramDesc *paramList, EState *execstate)
 	}
 
 	return info.data;
+}
+
+/*
+ * oracleRegisterCallback
+ * 		Register a callback for rolled back PostgreSQL transactions.
+ */
+void
+oracleRegisterCallback(void *arg)
+{
+	RegisterResourceReleaseCallback(cleanupTransaction, arg);
+}
+
+/*
+ * oracleUnregisterCallback
+ * 		Unregister a callback for rolled back PostgreSQL transactions.
+ */
+void
+oracleUnregisterCallback(void *arg)
+{
+	UnregisterResourceReleaseCallback(cleanupTransaction, arg);
 }
 
 /*
