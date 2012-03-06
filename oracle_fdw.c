@@ -493,7 +493,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 
 	if (oracleIsStatementOpen(fdw_state->session))
 	{
-		elog(DEBUG2, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+		elog(DEBUG3, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 		/* fetch the next result row */
 		have_result = oracleFetchNext(fdw_state->session, fdw_state->oraTable);
@@ -2393,7 +2393,8 @@ deserializeLong(Const *constant)
 void
 cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg)
 {
-	if (! isCommit && phase == RESOURCE_RELEASE_AFTER_LOCKS && CurrentResourceOwner == CurTransactionResourceOwner)
+	if (! isCommit && isTopLevel && phase == RESOURCE_RELEASE_AFTER_LOCKS
+			&& CurrentResourceOwner == CurTransactionResourceOwner)
 		oracleCleanupTransaction(arg);
 }
 

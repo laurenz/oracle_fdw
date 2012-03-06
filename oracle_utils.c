@@ -510,8 +510,10 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 		if (connp->userhp == session->userhp)
 			break;
 	}
+
+	/* if session does not exist in cache, it was already closed */
 	if (connp == NULL)
-		oracleError(FDW_ERROR, "internal error releasing session: session not found in cache");
+		return;
 
 	/* if this is the end, reduce usecount to zero to force commit */
 	if (error || close)
@@ -1915,7 +1917,7 @@ oracleCleanupTransaction(void *arg)
 	for (envp = envlist; envp != NULL; envp = envp->next)
 		for (srvp = envp->srvlist; srvp != NULL; srvp = srvp->next)
 			for (connp = srvp->connlist; connp != NULL; connp = connp->next)
-				if (connp == arg)
+				if (connp == arg && connp->usecount > 0)
 				{
 					connp->usecount = 0;
 
