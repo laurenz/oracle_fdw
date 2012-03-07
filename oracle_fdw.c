@@ -28,6 +28,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/cost.h"
+#include "optimizer/pathnode.h"
 #include "port.h"
 #include "storage/ipc.h"
 #include "storage/lock.h"
@@ -43,6 +44,12 @@
 #include <string.h>
 
 #include "oracle_fdw.h"
+
+#if PG_VERSION_NUM < 90200
+#define OLD_FDW_API
+#else
+#undef OLD_FDW_API
+#endif
 
 PG_MODULE_MAGIC;
 
@@ -108,7 +115,11 @@ extern void _PG_init(void);
 /*
  * FDW callback routines
  */
+#ifdef OLD_FDW_API
 static FdwPlan *oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
+#else
+static void oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
+#endif
 static void oracleExplainForeignScan(ForeignScanState *node, ExplainState *es);
 static void oracleBeginForeignScan(ForeignScanState *node, int eflags);
 static TupleTableSlot *oracleIterateForeignScan(ForeignScanState *node);
@@ -277,13 +288,16 @@ _PG_init()
  * 		remote table description, the query and the parameter info
  * 		are stored ("serialized") in its fdw_private field.
  */
+#ifdef OLD_FDW_API
 FdwPlan *
+#else
+void
+#endif
 oraclePlanForeignScan(Oid foreigntableid,
 					PlannerInfo *root,
 					RelOptInfo *baserel)
 {
-	FdwPlan *fdwplan;
-	List *options;
+	List *options, *fdw_private;
 	ListCell *cell;
 	char *dbserver = NULL, *user = NULL, *password = NULL, *schema = NULL, *table = NULL,
 		*nls_lang = NULL, *plan_costs = NULL, *qualtable, *query, *pgtablename;
@@ -291,6 +305,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	struct oraTable *oraTable;
 	struct paramDesc *paramList = NULL, *l, *l1;
 	StringInfoData buf;
+	Cost startup_cost, total_cost;
 	int i;
 
 	pgtablename = get_rel_name(foreigntableid);
@@ -358,9 +373,6 @@ oraclePlanForeignScan(Oid foreigntableid,
 	/* get PostgreSQL column data types, check that they match Oracle's */
 	checkDataTypes(session, oraTable);
 
-	/* construct FdwPlan */
-	fdwplan = makeNode(FdwPlan);
-
 	/* get Oracle's (bad) estimate only if plan_costs is set */
 	if (plan_costs != NULL
 			&& (strcmp(plan_costs, "on") == 0
@@ -371,16 +383,16 @@ oraclePlanForeignScan(Oid foreigntableid,
 			|| strcmp(plan_costs, "TRUE") == 0))
 	{
 		/* get Oracle's cost estimates for the query */
-		oracleEstimate(session, query, seq_page_cost, BLCKSZ, &fdwplan->startup_cost, &fdwplan->total_cost, &baserel->rows, &baserel->width);
+		oracleEstimate(session, query, seq_page_cost, BLCKSZ, &startup_cost, &total_cost, &baserel->rows, &baserel->width);
 	}
 	else
 	{
 		/* otherwise, use a random "high" value */
-		fdwplan->startup_cost = fdwplan->total_cost = 10000.0;
+		startup_cost = total_cost = 10000.0;
 	}
 
 	/* "serialize" all necessary information in the private area */
-	fdwplan->fdw_private = serializePlanData(dbserver, user, password, nls_lang, query, oraTable, paramList);
+	fdw_private = serializePlanData(dbserver, user, password, nls_lang, query, oraTable, paramList);
 
 	/* release Oracle session (will be cached) */
 	oracleReleaseSession(session, NULL, 0, 0);
@@ -412,7 +424,25 @@ oraclePlanForeignScan(Oid foreigntableid,
 		l = l1;
 	}
 
-	return fdwplan;
+	{
+#ifdef OLD_FDW_API
+		/* construct FdwPlan */
+		FdwPlan *fdwplan = makeNode(FdwPlan);
+		fdwplan->startup_cost = startup_cost;
+		fdwplan->total_cost = total_cost;
+		fdwplan->fdw_private = fdw_private;
+
+		return fdwplan;
+#else
+		add_path(baserel,
+			(Path *)create_foreignscan_path(
+				root, baserel, baserel->rows,
+				startup_cost, total_cost,
+				NIL, NULL, NIL, fdw_private));
+
+		return;
+#endif
+	}
 }
 
 /*
@@ -455,12 +485,16 @@ oracleExplainForeignScan(ForeignScanState *node, ExplainState *es)
 void
 oracleBeginForeignScan(ForeignScanState *node, int eflags)
 {
+#ifdef OLD_FDW_API
+	List *fdw_private = ((FdwPlan *)((ForeignScan *)node->ss.ps.plan)->fdwplan)->fdw_private;
+#else
+	List *fdw_private = ((ForeignScan *)node->ss.ps.plan)->fdw_private;
+#endif
 	char *dbserver, *user, *password, *nls_lang;
-	FdwPlan *fdwplan = (FdwPlan *)((ForeignScan *)node->ss.ps.plan)->fdwplan;
 	struct OracleFdwExecutionState *fdw_state;
 
 	/* deserialize private plan data */
-	deserializePlanData(fdwplan->fdw_private, &dbserver, &user, &password, &nls_lang, (struct OracleFdwExecutionState **)&node->fdw_state);
+	deserializePlanData(fdw_private, &dbserver, &user, &password, &nls_lang, (struct OracleFdwExecutionState **)&node->fdw_state);
 	fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
 
 	elog(DEBUG1, "oracle_fdw: begin foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
@@ -2629,5 +2663,5 @@ oracleError(oraError sqlstate, const char *message)
 void
 oracleDebug2(const char *message)
 {
-	elog(DEBUG2, message);
+	elog(DEBUG2, "%s", message);
 }
