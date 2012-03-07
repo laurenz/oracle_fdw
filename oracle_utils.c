@@ -64,17 +64,15 @@ static struct envEntry
 } *envlist = NULL;
 
 /*
- * used to hide the Oracle types
+ * Represents one Oracle connection, points to cached entries.
  * This is necessary to be able to pass them back to
  * oracle_fdw.c without having to #include oci.h there.
  */
 struct oracleSession
 {
-	OCIEnv *envhp;
-	OCIError *errhp;
-	OCISvcCtx *svchp;
-	OCIServer *srvhp;
-	OCISession *userhp;
+	struct envEntry *envp;
+	struct srvEntry *srvp;
+	struct connEntry *connp;
 	OCIStmt *stmthp;
 };
 
@@ -462,13 +460,11 @@ oracleSession
 		}
 	}
 
-	/* palloc a data structure containing server and session handle */
+	/* palloc a data structure pointing to the cached entries */
 	session = oracleAlloc(sizeof(struct oracleSession));
-	session->envhp = envhp;
-	session->errhp = errhp;
-	session->svchp = svchp;
-	session->srvhp = srvhp;
-	session->userhp = userhp;
+	session->envp = envp;
+	session->srvp = srvp;
+	session->connp = connp;
 	session->stmthp = NULL;
 
 	/* increase session use count after anything that could cause an error */
@@ -487,48 +483,23 @@ oracleSession
 void
 oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int close, int error)
 {
-	struct envEntry *envp;
-	struct srvEntry *srvp;
-	struct connEntry *connp;
-
 	/* close the statement, if any */
 	oracleCloseStatement(session, oraTable);
 
-	/* lookup session handle in cache */
-	for (envp = envlist; envp != NULL; envp = envp->next)
-	{
-		if (envp->envhp == session->envhp)
-			break;
-	}
-	for (srvp = envp->srvlist; srvp != NULL; srvp = srvp->next)
-	{
-		if (srvp->srvhp == session->srvhp)
-			break;
-	}
-	for (connp = srvp->connlist; connp != NULL; connp = connp->next)
-	{
-		if (connp->userhp == session->userhp)
-			break;
-	}
-
-	/* if session does not exist in cache, it was already closed */
-	if (connp == NULL)
-		return;
-
 	/* if this is the end, reduce usecount to zero to force commit */
 	if (error || close)
-		connp->usecount = 0;
+		session->connp->usecount = 0;
 	else
-		--connp->usecount;
+		--session->connp->usecount;
 
 	/* commit the current transaction */
-	if (connp->usecount == 0)
+	if (session->connp->usecount == 0)
 	{
 		oracleDebug2("oracle_fdw: commit remote transaction");
 
 		if (checkerr(
-			OCITransCommit(session->svchp, session->errhp, OCI_DEFAULT),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCITransCommit(session->connp->svchp, session->envp->errhp, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error committing transaction: OCITransCommit failed",
@@ -538,7 +509,7 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 
 	/* close the session if requested */
 	if (close)
-		closeSession(session->envhp, session->srvhp, session->userhp, 1);
+		closeSession(session->envp->envhp, session->srvp->srvhp, session->connp->userhp, 1);
 
 	oracleFree(session);
 }
@@ -652,9 +623,9 @@ struct oraTable
 
 	/* create describe handle */
 	if (checkerr(
-		OCIHandleAlloc((dvoid *)session->envhp, (dvoid **)&dschp,
+		OCIHandleAlloc((dvoid *)session->envp->envhp, (dvoid **)&dschp,
 			(ub4)OCI_HTYPE_DESCRIBE, (size_t)0, (dvoid **)0),
-		(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
+		(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIHandleAlloc failed to allocate describe handle",
@@ -664,8 +635,8 @@ struct oraTable
 	/* set attribute so that global synonyms are searched too */
 	if (checkerr(
 		OCIAttrSet(dschp, OCI_HTYPE_DESCRIBE, (dvoid *)&on, 0,
-			OCI_ATTR_DESC_PUBLIC, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCI_ATTR_DESC_PUBLIC, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -681,9 +652,9 @@ struct oraTable
 	do {
 		/* describe table */
 		if (checkerr(
-			OCIDescribeAny(session->svchp, session->errhp, (dvoid *)mytablename,
+			OCIDescribeAny(session->connp->svchp, session->envp->errhp, (dvoid *)mytablename,
 				(ub4)strlen(mytablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_UNK, dschp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			if (errcode == 4043)
@@ -699,8 +670,8 @@ struct oraTable
 		/* get parameter descriptor */
 		if (checkerr(
 			OCIAttrGet((dvoid *)dschp, (ub4) OCI_HTYPE_DESCRIBE,
-				(dvoid *)&parmp, (ub4 *)0, (ub4)OCI_ATTR_PARAM, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(dvoid *)&parmp, (ub4 *)0, (ub4)OCI_ATTR_PARAM, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -711,8 +682,8 @@ struct oraTable
 		/* get type of described object */
 		if (checkerr(
 			OCIAttrGet((dvoid *)parmp, (ub4) OCI_DTYPE_PARAM,
-				(dvoid *)&objtyp, (ub4 *)0, (ub4)OCI_ATTR_PTYPE, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(dvoid *)&objtyp, (ub4 *)0, (ub4)OCI_ATTR_PTYPE, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -726,8 +697,8 @@ struct oraTable
 			/* referenced table name */
 			if (checkerr(
 				OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_NAME, session->errhp),
-				(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_NAME, session->envp->errhp),
+				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
 				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -740,8 +711,8 @@ struct oraTable
 			/* referenced table schema */
 			if (checkerr(
 				OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_SCHEMA_NAME, session->errhp),
-				(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_SCHEMA_NAME, session->envp->errhp),
+				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
 				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -754,8 +725,8 @@ struct oraTable
 			/* referenced table database link */
 			if (checkerr(
 				OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_LINK, session->errhp),
-				(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_LINK, session->envp->errhp),
+				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
 				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -795,8 +766,8 @@ struct oraTable
 		/* reset the attribute to search global synonyms */
 		if (checkerr(
 			OCIAttrSet(dschp, OCI_HTYPE_DESCRIBE, (dvoid *)&on, 0,
-				OCI_ATTR_DESC_PUBLIC, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				OCI_ATTR_DESC_PUBLIC, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -806,9 +777,9 @@ struct oraTable
 
 		/* this attempt to describe the table will produce a meaningful error */
 		if (checkerr(
-			OCIDescribeAny(session->svchp, session->errhp, (dvoid *)tablename,
+			OCIDescribeAny(session->connp->svchp, session->envp->errhp, (dvoid *)tablename,
 				(ub4)strlen(tablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_TABLE, dschp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			if (errcode == 4043)
@@ -836,8 +807,8 @@ struct oraTable
 	/* get the number of columns */
 	if (checkerr(
 		OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-			(dvoid *)&ncols, (ub4 *)0, (ub4)OCI_ATTR_NUM_COLS, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			(dvoid *)&ncols, (ub4 *)0, (ub4)OCI_ATTR_NUM_COLS, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -851,8 +822,8 @@ struct oraTable
 	/* get the parameter descriptor for the list of columns */
 	if (checkerr(
 		OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-			&collist, (ub4 *)0, (ub4)OCI_ATTR_LIST_COLUMNS, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			&collist, (ub4 *)0, (ub4)OCI_ATTR_LIST_COLUMNS, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -876,8 +847,8 @@ struct oraTable
 
 		/* get the parameter descriptor for the column */
 		if (checkerr(
-			OCIParamGet(collist, OCI_DTYPE_PARAM, session->errhp, (dvoid *)&colp, i),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCIParamGet(collist, OCI_DTYPE_PARAM, session->envp->errhp, (dvoid *)&colp, i),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -888,8 +859,8 @@ struct oraTable
 		/* get the column name */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&ident,
-				&ident_size, (ub4)OCI_ATTR_NAME, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				&ident_size, (ub4)OCI_ATTR_NAME, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -902,8 +873,8 @@ struct oraTable
 		/* get the data type */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&oraType,
-				(ub4 *)0, (ub4)OCI_ATTR_DATA_TYPE, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(ub4 *)0, (ub4)OCI_ATTR_DATA_TYPE, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -914,8 +885,8 @@ struct oraTable
 		/* get the character set form */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&csfrm,
-				(ub4 *)0, (ub4)OCI_ATTR_CHARSET_FORM, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(ub4 *)0, (ub4)OCI_ATTR_CHARSET_FORM, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -926,8 +897,8 @@ struct oraTable
 		/* get the number of characters for string fields */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&charsize,
-				(ub4 *)0, (ub4)OCI_ATTR_CHAR_SIZE, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(ub4 *)0, (ub4)OCI_ATTR_CHAR_SIZE, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -938,8 +909,8 @@ struct oraTable
 		/* get the binary length for RAW fields */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&bin_size,
-				(ub4 *)0, (ub4)OCI_ATTR_DATA_SIZE, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(ub4 *)0, (ub4)OCI_ATTR_DATA_SIZE, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -950,8 +921,8 @@ struct oraTable
 		/* get the precision */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&precision,
-				(ub4 *)0, (ub4)OCI_ATTR_PRECISION, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(ub4 *)0, (ub4)OCI_ATTR_PRECISION, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -962,8 +933,8 @@ struct oraTable
 		/* get the scale */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&scale,
-				(ub4 *)0, (ub4)OCI_ATTR_SCALE, session->errhp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(ub4 *)0, (ub4)OCI_ATTR_SCALE, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -1175,8 +1146,8 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 
 		/* fetch next row */
 		result = checkerr(
-			OCIStmtFetch2(session->stmthp, session->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+			OCIStmtFetch2(session->stmthp, session->envp->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 		{
@@ -1301,9 +1272,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* create statement handle */
 	if (checkerr(
-		OCIHandleAlloc((dvoid *)session->envhp, (dvoid **)&(session->stmthp),
+		OCIHandleAlloc((dvoid *)session->envp->envhp, (dvoid **)&(session->stmthp),
 			(ub4)OCI_HTYPE_STMT, (size_t)0, (dvoid **)0),
-		(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
+		(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIHandleAlloc failed to allocate statement handle",
@@ -1313,8 +1284,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	/* set prefetch options */
 	if (checkerr(
 		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
-			OCI_ATTR_PREFETCH_ROWS, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCI_ATTR_PREFETCH_ROWS, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
@@ -1322,8 +1293,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 	if (checkerr(
 		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_memory, 0,
-			OCI_ATTR_PREFETCH_MEMORY, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCI_ATTR_PREFETCH_MEMORY, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIAttrSet failed to set prefetch memory in statement handle",
@@ -1332,9 +1303,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* prepare the query */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->errhp, (text *)query, (ub4) strlen(query),
+		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIStmtPrepare failed to prepare remote query",
@@ -1343,9 +1314,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* parse and describe the query, store it in the library cache */
 	if (checkerr(
-		OCIStmtExecute(session->svchp, session->stmthp, session->errhp, (ub4)0, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)0, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DESCRIBE_ONLY),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query query: OCIStmtExecute failed to describe remote query",
@@ -1367,9 +1338,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* prepare */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->errhp, (text *)sql_id_query,
+		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)sql_id_query,
 			(ub4) strlen(sql_id_query), (ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIStmtPrepare failed to prepare remote query for sql_id",
@@ -1380,11 +1351,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	bndhp = NULL;
 	ind3 = 0;
 	if (checkerr(
-		OCIBindByName(session->stmthp, &bndhp, session->errhp, (text *)":sql",
+		OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":sql",
 			(sb4)4, (dvoid *)query_head, (sb4)(strlen(query_head) + 1),
 			SQLT_STR, (dvoid *)&ind3,
 			NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIBindByName failed to bind parameter",
@@ -1395,11 +1366,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	defnhp = NULL;
 	sql_id[19] = '\0';
 	if (checkerr(
-		OCIDefineByPos(session->stmthp, &defnhp, session->errhp, (ub4)1,
+		OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
 			(dvoid *)sql_id, (sb4)19,
 			SQLT_STR, (dvoid *)&ind1,
 			(ub2 *)&len1, NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIDefineByPos failed to define result value",
@@ -1408,11 +1379,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	defnhp = NULL;
 	if (checkerr(
-		OCIDefineByPos(session->stmthp, &defnhp, session->errhp, (ub4)2,
+		OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)2,
 			(dvoid *)&child_nr, (sb4)sizeof(int),
 			SQLT_INT, (dvoid *)&ind2,
 			(ub2 *)&len2, NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIDefineByPos failed to define result value",
@@ -1421,9 +1392,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* execute */
 	if (checkerr(
-		OCIStmtExecute(session->svchp, session->stmthp, session->errhp, (ub4)1, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 
 		/* create a better message if we lack permissions on V$SQL */
@@ -1443,9 +1414,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* prepare */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->errhp, (text *)desc_query,
+		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)desc_query,
 			(ub4) strlen(desc_query), (ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIStmtPrepare failed to prepare remote plan query",
@@ -1456,11 +1427,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	bndhp = NULL;
 	ind1 = 0;
 	if (checkerr(
-		OCIBindByName(session->stmthp, &bndhp, session->errhp, (text *)":sql_id",
+		OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":sql_id",
 			(sb4)7, (dvoid *)sql_id, (sb4)strlen(sql_id) + 1,
 			SQLT_STR, (dvoid *)&ind1,
 			NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIBindByName failed to bind parameter",
@@ -1470,11 +1441,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	bndhp = NULL;
 	ind2 = 0;
 	if (checkerr(
-		OCIBindByName(session->stmthp, &bndhp, session->errhp, (text *)":child_number",
+		OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":child_number",
 			(sb4)13, (dvoid *)&child_nr, (sb4)sizeof(int),
 			SQLT_INT, (dvoid *)&ind2,
 			NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIBindByName failed to bind parameter",
@@ -1486,11 +1457,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	{
 		defnhp = NULL;
 		if (checkerr(
-			OCIDefineByPos(session->stmthp, &defnhp, session->errhp, (ub4)(i + 1),
+			OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)(i + 1),
 				(dvoid *)res[i], res_size[i],
 				res_type[i], (dvoid *)&res_ind[i],
 				&res_len[i], NULL, OCI_DEFAULT),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error describing query: OCIDefineByPos failed to define result value",
@@ -1500,9 +1471,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* execute */
 	if (checkerr(
-		OCIStmtExecute(session->svchp, session->stmthp, session->errhp, (ub4)1, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 
 		/* create a better message if we lack permissions on V$SQL_PLAN */
@@ -1544,9 +1515,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 
 	/* create statement handle */
 	if (checkerr(
-		OCIHandleAlloc((dvoid *)session->envhp, (dvoid **)&(session->stmthp),
+		OCIHandleAlloc((dvoid *)session->envp->envhp, (dvoid **)&(session->stmthp),
 			(ub4)OCI_HTYPE_STMT, (size_t)0, (dvoid **)0),
-		(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
+		(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIHandleAlloc failed to allocate statement handle",
@@ -1556,8 +1527,8 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	/* set prefetch options */
 	if (checkerr(
 		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
-			OCI_ATTR_PREFETCH_ROWS, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCI_ATTR_PREFETCH_ROWS, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
@@ -1565,8 +1536,8 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	}
 	if (checkerr(
 		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_memory, 0,
-			OCI_ATTR_PREFETCH_MEMORY, session->errhp),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			OCI_ATTR_PREFETCH_MEMORY, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIAttrSet failed to set prefetch memory in statement handle",
@@ -1575,9 +1546,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 
 	/* prepare the statement */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->errhp, (text *)query, (ub4) strlen(query),
+		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIStmtPrepare failed to prepare remote query",
@@ -1621,10 +1592,10 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 
 					/* convert parameter string to NUMBER */
 					if (checkerr(
-						OCINumberFromText(session->errhp, (const OraText *)param->value,
+						OCINumberFromText(session->envp->errhp, (const OraText *)param->value,
 							(ub4)value_len, (const OraText *)num_format, (ub4)value_len, 
 							(const OraText *)NULL, (ub4)0, number),
-						(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
 						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 							"error executing query: OCINumberFromText failed to convert parameter",
@@ -1640,7 +1611,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					timest = (OCIDateTime **)oracleAlloc(sizeof(OCIDateTime *));
 
 					/* allocate timestamp descriptor */
-					if (OCIDescriptorAlloc((const dvoid *)session->envhp, (dvoid **)timest,
+					if (OCIDescriptorAlloc((const dvoid *)session->envp->envhp, (dvoid **)timest,
 						OCI_DTYPE_TIMESTAMP_TZ, 0, NULL) != OCI_SUCCESS)
 					{
 						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
@@ -1650,10 +1621,10 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 
 					/* convert parameter string to TIMESTAMP WITH TIME ZONE */
 					if (checkerr(
-						OCIDateTimeFromText((dvoid *)session->userhp, session->errhp,
+						OCIDateTimeFromText((dvoid *)session->connp->userhp, session->envp->errhp,
 							(const OraText *)param->value, strlen(param->value), (const OraText *)NULL, (ub1)0,
 							(const OraText *)NULL, (size_t)0, *timest),
-						(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
 						(void)OCIDescriptorFree(timest, OCI_DTYPE_TIMESTAMP_TZ);
 						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
@@ -1676,10 +1647,10 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		}
 
 		if (checkerr(
-			OCIBindByName(session->stmthp, &bndhp, session->errhp, (text *)param->name,
+			OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)param->name,
 				(sb4)strlen(param->name), value, value_len, value_type,
 				(dvoid *)&indicator, NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIBindByName failed to bind parameter",
@@ -1722,10 +1693,10 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			{
 				/* allocate a LOB locator, store a pointer to it in "val" */
 				if (checkerr(
-					OCIDescriptorAlloc((const dvoid *)session->envhp,
+					OCIDescriptorAlloc((const dvoid *)session->envp->envhp,
 						(dvoid **)oraTable->cols[i]->val,
 						OCI_DTYPE_LOB, 0, NULL),
-					(dvoid *)session->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
+					(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
 				{
 					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor",
@@ -1736,11 +1707,11 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			/* define result value */
 			defnhp = NULL;
 			if (checkerr(
-				OCIDefineByPos(session->stmthp, &defnhp, session->errhp, (ub4)++col_pos,
+				OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)++col_pos,
 					(dvoid *)oraTable->cols[i]->val, (sb4)oraTable->cols[i]->val_size,
 					type, (dvoid *)&oraTable->cols[i]->val_null,
 					(ub2 *)&oraTable->cols[i]->val_len, NULL, OCI_DEFAULT),
-				(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
 				oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 					"error executing query: OCIDefineByPos failed to define result value",
@@ -1756,10 +1727,10 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		 * Define dummy result columnn.
 		 */
 		if (checkerr(
-			OCIDefineByPos(session->stmthp, &defnhp, session->errhp, (ub4)1,
+			OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
 				(dvoid *)dummy, dummy_size, SQLT_STR, (dvoid *)&dummy_null,
 				NULL, NULL, OCI_DEFAULT),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIDefineByPos failed to define result value",
@@ -1769,9 +1740,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 
 	/* execute the query and get the first result row */
 	result = checkerr(
-		OCIStmtExecute(session->svchp, session->stmthp, session->errhp, (ub4)1, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 	/* free timestamp descriptors of parameters */
 	for (param=paramList; param; param=param->next)
@@ -1807,8 +1778,8 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
 
 	/* fetch the next result row */
 	result = checkerr(
-		OCIStmtFetch2(session->stmthp, session->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
-		(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+		OCIStmtFetch2(session->stmthp, session->envp->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 	if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 	{
@@ -1839,8 +1810,8 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 	if (type == ORA_TYPE_BFILE)
 	{
 		result = checkerr(
-			OCILobFileOpen(session->svchp, session->errhp, locp, OCI_FILE_READONLY),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+			OCILobFileOpen(session->connp->svchp, session->envp->errhp, locp, OCI_FILE_READONLY),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result == OCI_ERROR)
 		{
@@ -1866,9 +1837,9 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		 */
 		amount = 0;
 		result = checkerr(
-			OCILobRead(session->svchp, session->errhp, locp, &amount, (ub4)1,
+			OCILobRead(session->connp->svchp, session->envp->errhp, locp, &amount, (ub4)1,
 				(dvoid *)(*value + *value_len), LOB_CHUNK_SIZE, NULL, NULL, (ub2)0, 0),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result == OCI_ERROR)
 		{
@@ -1889,8 +1860,8 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 	if (type == ORA_TYPE_BFILE)
 	{
 		result = checkerr(
-			OCILobFileClose(session->svchp, session->errhp, locp),
-			(dvoid *)session->errhp, OCI_HTYPE_ERROR);
+			OCILobFileClose(session->connp->svchp, session->envp->errhp, locp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result == OCI_ERROR)
 		{
@@ -2205,3 +2176,8 @@ removeEnvironment(OCIEnv *envhp)
 	free(envp->nls_lang);
 	free(envp);
 }
+
+/*
+ * allocHandle
+ * 		Allocate and return an Oracle handle, keep it in a cached list
+ */
