@@ -395,7 +395,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	fdw_private = serializePlanData(dbserver, user, password, nls_lang, query, oraTable, paramList);
 
 	/* release Oracle session (will be cached) */
-	oracleReleaseSession(session, NULL, 0, 0);
+	oracleReleaseSession(session, 0, 0);
 
 	/* free query */
 	if (schema != NULL)
@@ -661,7 +661,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 		slot->tts_nvalid = 0;
 
 		/* close the statement */
-		oracleCloseStatement(fdw_state->session, fdw_state->oraTable);
+		oracleCloseStatement(fdw_state->session);
 	}
 
 	return slot;
@@ -679,7 +679,7 @@ oracleEndForeignScan(ForeignScanState *node)
 	elog(DEBUG1, "oracle_fdw: end foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	/* release the Oracle session */
-	oracleReleaseSession(fdw_state->session, fdw_state->oraTable, 0, 0);
+	oracleReleaseSession(fdw_state->session, 0, 0);
 }
 
 /*
@@ -695,7 +695,7 @@ oracleReScanForeignScan(ForeignScanState *node)
 	elog(DEBUG1, "oracle_fdw: restart foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	/* close open Oracle statement if there is one */
-	oracleCloseStatement(fdw_state->session, fdw_state->oraTable);
+	oracleCloseStatement(fdw_state->session);
 }
 
 /*

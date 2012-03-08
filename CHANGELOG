@@ -11,6 +11,7 @@ Version 1.0.0
     reported as DETAIL message.  Also, all foreign scans in one local query
     will now be executed within one Oracle transaction if they belong to
     the same Oracle session.
+  - Rework memory management to exclude memory leaks under all circumstances.
 
 Version 0.9.3 (beta), released 2012-02-07
   Enhancements:

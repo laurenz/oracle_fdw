@@ -33,8 +33,22 @@ static char oraMessage[ERRBUFSIZE];
 static sb4 errcode;
 
 /*
- * cache for connection, server and environment handles
- * "envlist" is the starting point
+ * Linked list for temporary Oracle handles and descriptors.
+ * Stores statement and describe handles as well as timetamp and LOB descriptors.
+ * Other handles are stored in the handle cache below.
+ */
+
+struct handleEntry
+{
+	dvoid *handlep;
+	ub4 type;
+	int isDescriptor;
+	struct handleEntry *next;
+};
+
+/*
+ * Linked list for connection, server and environment handles.
+ * "envlist" is the starting point.
  * Oracle sessions can be multiplexed over one server connection.
  */
 struct connEntry
@@ -42,6 +56,7 @@ struct connEntry
 	char *user;
 	OCISvcCtx *svchp;
 	OCISession *userhp;
+	struct handleEntry *handlelist;
 	int usecount;
 	struct connEntry *next;
 };
@@ -86,6 +101,8 @@ static char *copyOraText(const OraText *string, ub4 size, int quote);
 static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect);
 static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
+static void allocHandle(dvoid **handlep, ub4 type, int isDescriptor, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
+static void freeHandle(dvoid *handlep, struct connEntry *connp);
 
 /*
  * oracleGetSession
@@ -437,6 +454,7 @@ oracleSession
 		}
 		connp->svchp = svchp;
 		connp->userhp = userhp;
+		connp->handlelist = NULL;
 		connp->usecount = 0;
 		connp->next = srvp->connlist;
 		srvp->connlist = connp;
@@ -475,16 +493,16 @@ oracleSession
 
 /*
  * oracleReleaseSession
- * 		Release the statement handle
+ * 		Release the statement handle.
  * 		If "close" is true, close the session and remove the cache entry.
  * 		If "error" is true, end transaction and set session use count to zero.
- * 		The "oraTable" argument is passed to oracleCloseStatement.
+ * 		If the use count becomes zero, commit and free all handles and descriptors.
  */
 void
-oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int close, int error)
+oracleReleaseSession(oracleSession *session, int close, int error)
 {
 	/* close the statement, if any */
-	oracleCloseStatement(session, oraTable);
+	oracleCloseStatement(session);
 
 	/* if this is the end, reduce usecount to zero to force commit */
 	if (error || close)
@@ -495,6 +513,10 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 	/* commit the current transaction */
 	if (session->connp->usecount == 0)
 	{
+		/* free handles */
+		while (session->connp->handlelist != NULL)
+			freeHandle(session->connp->handlelist->handlep, session->connp);
+
 		oracleDebug2("oracle_fdw: commit remote transaction");
 
 		if (checkerr(
@@ -517,36 +539,16 @@ oracleReleaseSession(oracleSession *session, struct oraTable *oraTable, int clos
 /*
  * oracleCloseStatement
  * 		Close any open statement associated with the session.
- * 		If the second argument is not NULL, free the LOB descriptors in it.
  */
 void
-oracleCloseStatement(oracleSession *session, const struct oraTable *oraTable)
+oracleCloseStatement(oracleSession *session)
 {
-	int i;
-
 	/* free statement handle, if it exists */
 	if (session->stmthp != NULL)
 	{
-		/* no error messages */
-		(void)OCIHandleFree((dvoid *)session->stmthp, OCI_HTYPE_STMT);
+		/* free the statement handle */
+		freeHandle(session->stmthp, session->connp);
 		session->stmthp = NULL;
-	}
-
-	if (oraTable != NULL)
-	{
-		/* free all LOB descriptors stored with the columns */
-		for (i=0; i<oraTable->ncols; ++i)
-		{
-			if (oraTable->cols[i]->used
-				&& oraTable->cols[i]->val != NULL
-				&& (oraTable->cols[i]->oratype == ORA_TYPE_BLOB
-					|| oraTable->cols[i]->oratype == ORA_TYPE_BFILE
-					|| oraTable->cols[i]->oratype == ORA_TYPE_CLOB))
-			{
-				(void)OCIDescriptorFree((dvoid *)oraTable->cols[i]->val, OCI_DTYPE_LOB);
-				oraTable->cols[i]->val = NULL;
-			}
-		}
 	}
 }
 
@@ -621,16 +623,10 @@ struct oraTable
 	int i, synonym_len;
 	int synonym_redirections = 10;	/* avoid endless loop in synonym lookup */
 
-	/* create describe handle */
-	if (checkerr(
-		OCIHandleAlloc((dvoid *)session->envp->envhp, (dvoid **)&dschp,
-			(ub4)OCI_HTYPE_DESCRIBE, (size_t)0, (dvoid **)0),
-		(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-			"error describing remote table: OCIHandleAlloc failed to allocate describe handle",
-			oraMessage);
-	}
+	/* create and remember describe handle */
+	allocHandle((void **)&dschp, OCI_HTYPE_DESCRIBE, 0, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_REPLY,
+		"error describing remote table: OCIHandleAlloc failed to allocate describe handle");
 
 	/* set attribute so that global synonyms are searched too */
 	if (checkerr(
@@ -638,7 +634,6 @@ struct oraTable
 			OCI_ATTR_DESC_PUBLIC, session->envp->errhp),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIAttrSet failed to set public attribute in describe handle",
 			oraMessage);
@@ -656,7 +651,6 @@ struct oraTable
 				(ub4)strlen(mytablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_UNK, dschp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			if (errcode == 4043)
 				oracleError_sd(FDW_TABLE_NOT_FOUND,
 					"remote table for \"%s\" does not exist or does not allow read access", pgname,
@@ -673,7 +667,6 @@ struct oraTable
 				(dvoid *)&parmp, (ub4 *)0, (ub4)OCI_ATTR_PARAM, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get parameter descriptor",
 				oraMessage);
@@ -685,7 +678,6 @@ struct oraTable
 				(dvoid *)&objtyp, (ub4 *)0, (ub4)OCI_ATTR_PTYPE, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get object type",
 				oraMessage);
@@ -700,7 +692,6 @@ struct oraTable
 					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_NAME, session->envp->errhp),
 				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
-				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 					"error describing remote table: OCIAttrGet failed to get synonym name",
 					oraMessage);
@@ -714,7 +705,6 @@ struct oraTable
 					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_SCHEMA_NAME, session->envp->errhp),
 				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
-				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 					"error describing remote table: OCIAttrGet failed to get synonym schema",
 					oraMessage);
@@ -728,7 +718,6 @@ struct oraTable
 					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_LINK, session->envp->errhp),
 				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
-				(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 					"error describing remote table: OCIAttrGet failed to get synonym dblink",
 					oraMessage);
@@ -769,7 +758,6 @@ struct oraTable
 				OCI_ATTR_DESC_PUBLIC, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrSet failed to reset public attribute in describe handle",
 				oraMessage);
@@ -781,7 +769,6 @@ struct oraTable
 				(ub4)strlen(tablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_TABLE, dschp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			if (errcode == 4043)
 				oracleError_sd(FDW_TABLE_NOT_FOUND,
 					"remote table for \"%s\" does not exist or does not allow read access", pgname,
@@ -793,7 +780,6 @@ struct oraTable
 		}
 
 		/* we must not reach this */
-		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError(FDW_ERROR, "internal error describing remote table: unexpectedly found table");
 	}
 
@@ -810,7 +796,6 @@ struct oraTable
 			(dvoid *)&ncols, (ub4 *)0, (ub4)OCI_ATTR_NUM_COLS, session->envp->errhp),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIAttrGet failed to get number of columns",
 			oraMessage);
@@ -825,7 +810,6 @@ struct oraTable
 			&collist, (ub4 *)0, (ub4)OCI_ATTR_LIST_COLUMNS, session->envp->errhp),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error describing remote table: OCIAttrGet failed to get column list",
 			oraMessage);
@@ -850,7 +834,6 @@ struct oraTable
 			OCIParamGet(collist, OCI_DTYPE_PARAM, session->envp->errhp, (dvoid *)&colp, i),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIParamGet failed to get column data",
 				oraMessage);
@@ -862,7 +845,6 @@ struct oraTable
 				&ident_size, (ub4)OCI_ATTR_NAME, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column name",
 				oraMessage);
@@ -876,7 +858,6 @@ struct oraTable
 				(ub4 *)0, (ub4)OCI_ATTR_DATA_TYPE, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column type",
 				oraMessage);
@@ -888,7 +869,6 @@ struct oraTable
 				(ub4 *)0, (ub4)OCI_ATTR_CHARSET_FORM, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get character set form",
 				oraMessage);
@@ -900,7 +880,6 @@ struct oraTable
 				(ub4 *)0, (ub4)OCI_ATTR_CHAR_SIZE, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column length",
 				oraMessage);
@@ -912,7 +891,6 @@ struct oraTable
 				(ub4 *)0, (ub4)OCI_ATTR_DATA_SIZE, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column size",
 				oraMessage);
@@ -924,7 +902,6 @@ struct oraTable
 				(ub4 *)0, (ub4)OCI_ATTR_PRECISION, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column precision",
 				oraMessage);
@@ -936,7 +913,6 @@ struct oraTable
 				(ub4 *)0, (ub4)OCI_ATTR_SCALE, session->envp->errhp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column scale",
 				oraMessage);
@@ -1056,7 +1032,7 @@ struct oraTable
 	}
 
 	/* free describe handle, this takes care of the parameter handles */
-	(void)OCIHandleFree((dvoid *)dschp, OCI_HTYPE_DESCRIBE);
+	freeHandle(dschp, session->connp);
 
 	return reply;
 }
@@ -1092,7 +1068,7 @@ oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, 
 	oracleQueryPlan(session, query, desc_query, 3, res, res_size, res_type, res_len, res_ind);
 
 	/* close the statement */
-	oracleCloseStatement(session, NULL);
+	oracleCloseStatement(session);
 
 	/*
 	 * Guess startup_cost and total_cost from Oracle's "time".
@@ -1159,7 +1135,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 	while (result != OCI_NO_DATA);
 
 	/* close the statement */
-	oracleCloseStatement(session, NULL);
+	oracleCloseStatement(session);
 }
 
 /*
@@ -1271,15 +1247,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* create statement handle */
-	if (checkerr(
-		OCIHandleAlloc((dvoid *)session->envp->envhp, (dvoid **)&(session->stmthp),
-			(ub4)OCI_HTYPE_STMT, (size_t)0, (dvoid **)0),
-		(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error describing query: OCIHandleAlloc failed to allocate statement handle",
-			oraMessage);
-	}
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION,
+		"error describing query: OCIHandleAlloc failed to allocate statement handle");
 
 	/* set prefetch options */
 	if (checkerr(
@@ -1514,15 +1484,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	}
 
 	/* create statement handle */
-	if (checkerr(
-		OCIHandleAlloc((dvoid *)session->envp->envhp, (dvoid **)&(session->stmthp),
-			(ub4)OCI_HTYPE_STMT, (size_t)0, (dvoid **)0),
-		(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error executing query: OCIHandleAlloc failed to allocate statement handle",
-			oraMessage);
-	}
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION,
+		"error executing query: OCIHandleAlloc failed to allocate statement handle");
 
 	/* set prefetch options */
 	if (checkerr(
@@ -1611,13 +1575,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 					timest = (OCIDateTime **)oracleAlloc(sizeof(OCIDateTime *));
 
 					/* allocate timestamp descriptor */
-					if (OCIDescriptorAlloc((const dvoid *)session->envp->envhp, (dvoid **)timest,
-						OCI_DTYPE_TIMESTAMP_TZ, 0, NULL) != OCI_SUCCESS)
-					{
-						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-							"error executing query: OCIDescriptorAlloc failed to allocate Timestamp descriptor",
-							"out of memory");
-					}
+					allocHandle((void **)timest, OCI_DTYPE_TIMESTAMP_TZ, 1, session->envp->envhp, session->connp,
+						FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIDescriptorAlloc failed to allocate Timestamp descriptor");
 
 					/* convert parameter string to TIMESTAMP WITH TIME ZONE */
 					if (checkerr(
@@ -1626,7 +1586,6 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 							(const OraText *)NULL, (size_t)0, *timest),
 						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
-						(void)OCIDescriptorFree(timest, OCI_DTYPE_TIMESTAMP_TZ);
 						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 							"error executing query: OCIDateTimeFromText failed to convert parameter",
 							oraMessage);
@@ -1692,16 +1651,9 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
 			{
 				/* allocate a LOB locator, store a pointer to it in "val" */
-				if (checkerr(
-					OCIDescriptorAlloc((const dvoid *)session->envp->envhp,
-						(dvoid **)oraTable->cols[i]->val,
-						OCI_DTYPE_LOB, 0, NULL),
-					(dvoid *)session->envp->envhp, OCI_HTYPE_ENV) != OCI_SUCCESS)
-				{
-					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor",
-						oraMessage);
-				}
+				allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
+					FDW_UNABLE_TO_CREATE_EXECUTION,
+					"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 			}
 
 			/* define result value */
@@ -1743,13 +1695,6 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
-
-	/* free timestamp descriptors of parameters */
-	for (param=paramList; param; param=param->next)
-	{
-		if (param->bindType == BIND_TIMESTAMP)
-			(void)OCIDescriptorFree((dvoid *)param->value, OCI_DTYPE_TIMESTAMP_TZ);
-	}
 
 	if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 	{
@@ -1876,6 +1821,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
  * oracleCleanupTransaction
  * 		Try to find the session in the cache, return 1 if found, 0 if not.
  * 		If the session is found, issue a rollback and set usecount to zero.
+ * 		Allocated Oracle handles are freed.
  */
 void
 oracleCleanupTransaction(void *arg)
@@ -1896,6 +1842,10 @@ oracleCleanupTransaction(void *arg)
 
 					/* rollback and ignore errors */
 					OCITransRollback(connp->svchp, envp->errhp, OCI_DEFAULT);
+
+					/* free handles */
+					while (connp->handlelist != NULL)
+						freeHandle(connp->handlelist->handlep, connp);
 				}
 }
 
@@ -2179,5 +2129,75 @@ removeEnvironment(OCIEnv *envhp)
 
 /*
  * allocHandle
- * 		Allocate and return an Oracle handle, keep it in a cached list
+ * 		Allocate an Oracle handle or descriptor, keep it in the cached list.
  */
+
+void
+allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
+{
+	struct handleEntry *entry;
+	sword rc;
+
+	/* create entry for linked list */
+	if ((entry = malloc(sizeof(struct handleEntry))) == NULL)
+	{
+		oracleError_i(FDW_OUT_OF_MEMORY,
+			"error allocating handle: failed to allocate %d bytes of memory",
+			sizeof(struct handleEntry));
+	}
+
+	if (isDescriptor)
+		rc = OCIDescriptorAlloc((const dvoid *)envhp, handlepp, type, (size_t)0, NULL);
+	else
+		rc = OCIHandleAlloc((const dvoid *)envhp, handlepp, type, (size_t)0, NULL);
+
+	if (rc != OCI_SUCCESS)
+	{
+		free(entry);
+		oracleError(error, errmsg);
+	}
+
+	/* add handle to linked list */
+	entry->handlep = *handlepp;
+	entry->type = type;
+	entry->isDescriptor = isDescriptor;
+	entry->next = connp->handlelist;
+	connp->handlelist = entry;
+}
+
+/*
+ * freeHandle
+ * 		Free an Oracle handle or descriptor, remove it from the cached list.
+ */
+
+void
+freeHandle(dvoid *handlep, struct connEntry *connp)
+{
+	struct handleEntry *entry, *preventry = NULL;
+
+	/* find it in the linked list */
+	for (entry = connp->handlelist; entry != NULL; entry = entry->next)
+	{
+		if (entry->handlep == handlep)
+			break;
+
+		preventry = entry;
+	}
+
+	if (entry == NULL)
+		oracleError(FDW_ERROR, "internal error freeing handle: not found in cache");
+
+	/* free the handle */
+	if (entry->isDescriptor)
+		(void)OCIDescriptorFree(handlep, entry->type);
+	else
+		(void)OCIHandleFree(handlep, entry->type);
+
+	/* remove it */
+	if (preventry == NULL)
+		connp->handlelist = entry->next;
+	else
+		preventry->next = entry->next;
+
+	free(entry);
+}
