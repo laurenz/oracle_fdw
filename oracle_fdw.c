@@ -27,8 +27,11 @@
 #include "libpq/md5.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
+#include "nodes/pg_list.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
+#include "optimizer/planmain.h"
+#include "optimizer/restrictinfo.h"
 #include "port.h"
 #include "storage/ipc.h"
 #include "storage/lock.h"
@@ -87,13 +90,20 @@ static struct OracleFdwOption valid_options[] = {
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
 
 /*
- * FDW-specific information for ForeignScanState.fdw_state.
+ * FDW-specific information for RelOptInfo.fdw_private and ForeignScanState.fdw_state.
  */
-struct OracleFdwExecutionState {
-	oracleSession *session;       /* encapsulates the active Oracle session */
-	char *query;                  /* query we issue against Oracle */
-	struct paramDesc *paramList;  /* description of parameters needed for the query */
-	struct oraTable *oraTable;    /* description of the remote Oracle table */
+struct OracleFdwState {
+	char *dbserver;                /* Oracle connect string */
+	char *user;                    /* Oracle username */
+	char *password;                /* Oracle password */
+	char *nls_lang;                /* Oracle locale information */
+	oracleSession *session;        /* encapsulates the active Oracle session */
+	char *query;                   /* query we issue against Oracle */
+	struct paramDesc *paramList;   /* description of parameters needed for the query */
+	struct oraTable *oraTable;     /* description of the remote Oracle table */
+	Cost startup_cost;             /* only needed for planning */
+	Cost total_cost;               /* only needed for planning */
+	RestrictInfo **ignoreClauses;  /* only needed for planning */
 };
 
 /*
@@ -118,7 +128,9 @@ extern void _PG_init(void);
 #ifdef OLD_FDW_API
 static FdwPlan *oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
 #else
-static void oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
+static void oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
+static void oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
+static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses);
 #endif
 static void oracleExplainForeignScan(ForeignScanState *node, ExplainState *es);
 static void oracleBeginForeignScan(ForeignScanState *node, int eflags);
@@ -129,17 +141,18 @@ static void oracleEndForeignScan(ForeignScanState *node);
 /*
  * Helper functions
  */
+static struct OracleFdwState *getFdwState(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList);
+static char *createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, RestrictInfo ***ignoreClauses);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 static char *getOracleWhereClause(oracleSession *session, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataTypes(oracleSession *session, struct oraTable *oraTable);
 static char *guessNlsLang(char *nls_lang);
-static List *serializePlanData(const char *dbserver, const char *user, const char *password, const char *nls_lang, const char *query, const struct oraTable *oraTable, const struct paramDesc *paramList);
+static List *serializePlanData(struct OracleFdwState *fdwState);
 static Const *serializeString(const char *s);
 static Const *serializeLong(long i);
-static void deserializePlanData(List *list, char **dbserver, char **user, char **password, char **nls_lang, struct OracleFdwExecutionState **state);
+static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
 static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
@@ -155,7 +168,13 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 {
 	FdwRoutine *fdwroutine = makeNode(FdwRoutine);
 
+#ifdef OLD_FDW_API
 	fdwroutine->PlanForeignScan = oraclePlanForeignScan;
+#else
+	fdwroutine->GetForeignRelSize = oracleGetForeignRelSize;
+	fdwroutine->GetForeignPaths = oracleGetForeignPaths;
+	fdwroutine->GetForeignPlan = oracleGetForeignPlan;
+#endif
 	fdwroutine->ExplainForeignScan = oracleExplainForeignScan;
 	fdwroutine->BeginForeignScan = oracleBeginForeignScan;
 	fdwroutine->IterateForeignScan = oracleIterateForeignScan;
@@ -276,174 +295,89 @@ _PG_init()
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 }
 
+#ifdef OLD_FDW_API
 /*
  * oraclePlanForeignScan
- * 		Establish an Oracle connection, get a description of the
- * 		remote table, construct the query to issue against Oracle
- * 		and a list of parameters for the query, verify that column
- * 		data types can be converted, get Oracle's cost estimates if
- * 		desired.
- *
- * 		A FdwPlan is created and the connection information, the
- * 		remote table description, the query and the parameter info
- * 		are stored ("serialized") in its fdw_private field.
+ * 		Get an OracleFdwState for this foreign scan.
+ * 		A FdwPlan is created and the state is are stored
+ * 		("serialized") in its fdw_private field.
  */
-#ifdef OLD_FDW_API
 FdwPlan *
-#else
-void
-#endif
 oraclePlanForeignScan(Oid foreigntableid,
 					PlannerInfo *root,
 					RelOptInfo *baserel)
 {
-	List *options, *fdw_private;
-	ListCell *cell;
-	char *dbserver = NULL, *user = NULL, *password = NULL, *schema = NULL, *table = NULL,
-		*nls_lang = NULL, *plan_costs = NULL, *qualtable, *query, *pgtablename;
-	oracleSession *session;
-	struct oraTable *oraTable;
-	struct paramDesc *paramList = NULL, *l, *l1;
-	StringInfoData buf;
-	Cost startup_cost, total_cost;
-	int i;
-
-	pgtablename = get_rel_name(foreigntableid);
+	struct OracleFdwState *fdwState;
+	FdwPlan *fdwplan;
+	List *fdw_private;
 
 	/*
-	 * Get all relevant options from the foreign table, the user mapping,
-	 * the foreign server and the foreign data wrapper.
+	 * Get everything we need for planning and executing the query.
+	 * This will also set baserel->width and baserel->rows if desired.
 	 */
-	oracleGetOptions(foreigntableid, &options);
-	foreach(cell, options)
-	{
-		DefElem *def = (DefElem *) lfirst(cell);
-		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
-			nls_lang = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_DBSERVER) == 0)
-			dbserver = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_USER) == 0)
-			user = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_PASSWORD) == 0)
-			password = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_SCHEMA) == 0)
-			schema = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_TABLE) == 0)
-			table = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0)
-			plan_costs = ((Value *) (def->arg))->val.str;
-	}
-
-	/* check if options are ok */
-	if (table == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_FDW_OPTION_NAME_NOT_FOUND),
-				errmsg("required option \"%s\" in foreign table \"%s\" missing", OPT_TABLE, pgtablename)));
-
-	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
-
-	/* guess a good NLS_LANG environment setting */
-	nls_lang = guessNlsLang(nls_lang);
-
-	/* connect to Oracle database */
-	session = oracleGetSession(dbserver, user, password, nls_lang, pgtablename, 0);
-
-	/* (optionally) qualified table name for Oracle */
-	if (schema == NULL)
-	{
-		qualtable = table;
-	}
-	else
-	{
-		initStringInfo(&buf);
-		appendStringInfo(&buf, "%s.%s", schema, table);
-		qualtable = buf.data;
-	}
-
-	/* get remote table description */
-	oraTable = oracleDescribe(session, qualtable, pgtablename);
-
-	/* add PostgreSQL data to table description */
-	getColumnData(foreigntableid, oraTable);
-
-	/* construct Oracle query and get the list of parameters */
-	query = createQuery(session, baserel->reltargetlist, baserel->baserestrictinfo, oraTable, &paramList);
-	elog(DEBUG1, "oracle_fdw: remote query is: %s", query);
-
-	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(session, oraTable);
-
-	/* get Oracle's (bad) estimate only if plan_costs is set */
-	if (plan_costs != NULL
-			&& (strcmp(plan_costs, "on") == 0
-			|| strcmp(plan_costs, "ON") == 0
-			|| strcmp(plan_costs, "yes") == 0
-			|| strcmp(plan_costs, "YES") == 0
-			|| strcmp(plan_costs, "true") == 0
-			|| strcmp(plan_costs, "TRUE") == 0))
-	{
-		/* get Oracle's cost estimates for the query */
-		oracleEstimate(session, query, seq_page_cost, BLCKSZ, &startup_cost, &total_cost, &baserel->rows, &baserel->width);
-	}
-	else
-	{
-		/* otherwise, use a random "high" value */
-		startup_cost = total_cost = 10000.0;
-	}
+	fdwState = getFdwState(foreigntableid, root, baserel);
 
 	/* "serialize" all necessary information in the private area */
-	fdw_private = serializePlanData(dbserver, user, password, nls_lang, query, oraTable, paramList);
+	fdw_private = serializePlanData(fdwState);
 
-	/* release Oracle session (will be cached) */
-	oracleReleaseSession(session, 0, 0);
+	/* construct FdwPlan */
+	fdwplan = makeNode(FdwPlan);
+	fdwplan->startup_cost = fdwState->startup_cost;
+	fdwplan->total_cost = fdwState->total_cost;
+	fdwplan->fdw_private = fdw_private;
 
-	/* free query */
-	if (schema != NULL)
-		pfree(qualtable);
-	pfree(query);
-
-	/* free oraTable */
-	pfree(oraTable->name);
-	pfree(oraTable->pgname);
-	for (i=0; i<oraTable->ncols; ++i)
-	{
-		pfree(oraTable->cols[i]->name);
-		if (oraTable->cols[i]->pgname != NULL)
-			pfree(oraTable->cols[i]->pgname);
-		pfree(oraTable->cols[i]);
-	}
-	pfree(oraTable);
-
-	/* free parameter list */
-	l = paramList;
-	while (l)
-	{
-		pfree(l->name);
-		l1 = l->next;
-		pfree(l);
-		l = l1;
-	}
-
-	{
-#ifdef OLD_FDW_API
-		/* construct FdwPlan */
-		FdwPlan *fdwplan = makeNode(FdwPlan);
-		fdwplan->startup_cost = startup_cost;
-		fdwplan->total_cost = total_cost;
-		fdwplan->fdw_private = fdw_private;
-
-		return fdwplan;
-#else
-		add_path(baserel,
-			(Path *)create_foreignscan_path(
-				root, baserel, baserel->rows,
-				startup_cost, total_cost,
-				NIL, NULL, NIL, fdw_private));
-
-		return;
-#endif
-	}
+	return fdwplan;
 }
+#else
+void
+oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
+{
+	struct OracleFdwState *fdwState;
+
+	/*
+	 * Get everything we need for planning and executing the query.
+	 * This will also set baserel->width and baserel->rows if desired.
+	 */
+	fdwState = getFdwState(foreigntableid, root, baserel);
+
+	/* store the state so that the other planning functions can use it */
+	baserel->fdw_private = (void *)fdwState;
+}
+
+void
+oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
+{
+	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
+
+	/* Create a ForeignPath node and add it as only possible path */
+	add_path(baserel,
+		(Path *)create_foreignscan_path(root, baserel, baserel->rows,
+				fdwState->startup_cost, fdwState->total_cost,
+				NIL, NULL, NIL, NIL));
+}
+
+ForeignScan
+*oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses)
+{
+	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
+	List *fdw_private;
+	int i;
+
+	/* "serialize" all necessary information for the path private area */
+	fdw_private = serializePlanData(fdwState);
+
+	/* remove those clauses that are checked by Oracle */
+	if (fdwState->ignoreClauses != NULL)
+		for (i=0; fdwState->ignoreClauses[i]!=NULL; ++i)
+			scan_clauses = list_delete_ptr(scan_clauses, fdwState->ignoreClauses[i]);
+
+	/* remove the RestrictInfo node from all remaining clauses */
+	scan_clauses = extract_actual_clauses(scan_clauses, false);
+
+	/* Create the ForeignScan node */
+	return make_foreignscan(tlist, scan_clauses, baserel->relid, NIL, fdw_private);
+}
+#endif
 
 /*
  * oracleExplainForeignScan
@@ -453,7 +387,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 void
 oracleExplainForeignScan(ForeignScanState *node, ExplainState *es)
 {
-	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
+	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 	char **plan;
 	int nrows, i;
 
@@ -490,17 +424,16 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 #else
 	List *fdw_private = ((ForeignScan *)node->ss.ps.plan)->fdw_private;
 #endif
-	char *dbserver, *user, *password, *nls_lang;
-	struct OracleFdwExecutionState *fdw_state;
+	struct OracleFdwState *fdw_state;
 
 	/* deserialize private plan data */
-	deserializePlanData(fdw_private, &dbserver, &user, &password, &nls_lang, (struct OracleFdwExecutionState **)&node->fdw_state);
-	fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
+	fdw_state = deserializePlanData(fdw_private);
+	node->fdw_state = (void *)fdw_state;
 
 	elog(DEBUG1, "oracle_fdw: begin foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	/* connect to Oracle database, don't start transaction for explain only */
-	fdw_state->session = oracleGetSession(dbserver, user, password, nls_lang, fdw_state->oraTable->pgname,
+	fdw_state->session = oracleGetSession(fdw_state->dbserver, fdw_state->user, fdw_state->password, fdw_state->nls_lang, fdw_state->oraTable->pgname,
 			(eflags & EXEC_FLAG_EXPLAIN_ONLY) ? 0 : 1);
 }
 
@@ -520,7 +453,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
 	EState *execstate = node->ss.ps.state;
 	int have_result;
-	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
+	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 	int j, index;
 	char *value = NULL;
 	long value_len = 0;
@@ -674,7 +607,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 void
 oracleEndForeignScan(ForeignScanState *node)
 {
-	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
+	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 
 	elog(DEBUG1, "oracle_fdw: end foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
@@ -690,12 +623,127 @@ oracleEndForeignScan(ForeignScanState *node)
 void
 oracleReScanForeignScan(ForeignScanState *node)
 {
-	struct OracleFdwExecutionState *fdw_state = (struct OracleFdwExecutionState *)node->fdw_state;
+	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 
 	elog(DEBUG1, "oracle_fdw: restart foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 	/* close open Oracle statement if there is one */
 	oracleCloseStatement(fdw_state->session);
+}
+
+/*
+ * getFdwState
+ * 		Get all information necessary for planning and executing the foreign scan:
+ * 		Establish an Oracle connection, get a description of the
+ * 		remote table, construct the query to issue against Oracle
+ * 		and a list of parameters for the query, verify that column
+ * 		data types can be converted, get Oracle's cost estimates if
+ * 		desired.
+ * 		As a side effect, baserel->width and baserel->rows are set if desired.
+ */
+static
+struct OracleFdwState *getFdwState(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel)
+{
+	struct OracleFdwState *fdwState = palloc(sizeof(struct OracleFdwState));
+	char *pgtablename = get_rel_name(foreigntableid);
+	List *options;
+	ListCell *cell;
+	char *schema = NULL, *table = NULL, *plan_costs = NULL, *qualtable;
+	StringInfoData buf;
+
+	fdwState->nls_lang = NULL;
+	fdwState->dbserver = NULL;
+	fdwState->user = NULL;
+	fdwState->password = NULL;
+	fdwState->paramList = NULL;
+	fdwState->ignoreClauses = NULL;
+
+	/*
+	 * Get all relevant options from the foreign table, the user mapping,
+	 * the foreign server and the foreign data wrapper.
+	 */
+	oracleGetOptions(foreigntableid, &options);
+	foreach(cell, options)
+	{
+		DefElem *def = (DefElem *) lfirst(cell);
+		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
+			fdwState->nls_lang = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_DBSERVER) == 0)
+			fdwState->dbserver = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_USER) == 0)
+			fdwState->user = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_PASSWORD) == 0)
+			fdwState->password = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_SCHEMA) == 0)
+			schema = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_TABLE) == 0)
+			table = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0)
+			plan_costs = ((Value *) (def->arg))->val.str;
+	}
+
+	/* check if options are ok */
+	if (table == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_OPTION_NAME_NOT_FOUND),
+				errmsg("required option \"%s\" in foreign table \"%s\" missing", OPT_TABLE, pgtablename)));
+
+	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
+
+	/* guess a good NLS_LANG environment setting */
+	fdwState->nls_lang = guessNlsLang(fdwState->nls_lang);
+
+	/* connect to Oracle database */
+	fdwState->session = oracleGetSession(fdwState->dbserver, fdwState->user, fdwState->password, fdwState->nls_lang, pgtablename, 0);
+
+	/* (optionally) qualified table name for Oracle */
+	if (schema == NULL)
+	{
+		qualtable = table;
+	}
+	else
+	{
+		initStringInfo(&buf);
+		appendStringInfo(&buf, "%s.%s", schema, table);
+		qualtable = buf.data;
+	}
+
+	/* get remote table description */
+	fdwState->oraTable = oracleDescribe(fdwState->session, qualtable, pgtablename);
+
+	/* add PostgreSQL data to table description */
+	getColumnData(foreigntableid, fdwState->oraTable);
+
+	/* construct Oracle query and get the list of parameters and ignorable RestrictInfos */
+	fdwState->query = createQuery(fdwState->session, baserel->reltargetlist, baserel->baserestrictinfo, fdwState->oraTable, &(fdwState->paramList), &(fdwState->ignoreClauses));
+	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+
+	/* get PostgreSQL column data types, check that they match Oracle's */
+	checkDataTypes(fdwState->session, fdwState->oraTable);
+
+	/* get Oracle's (bad) estimate only if plan_costs is set */
+	if (plan_costs != NULL
+			&& (strcmp(plan_costs, "on") == 0
+			|| strcmp(plan_costs, "ON") == 0
+			|| strcmp(plan_costs, "yes") == 0
+			|| strcmp(plan_costs, "YES") == 0
+			|| strcmp(plan_costs, "true") == 0
+			|| strcmp(plan_costs, "TRUE") == 0))
+	{
+		/* get Oracle's cost estimates for the query */
+		oracleEstimate(fdwState->session, fdwState->query, seq_page_cost, BLCKSZ, &(fdwState->startup_cost), &(fdwState->total_cost), &baserel->rows, &baserel->width);
+	}
+	else
+	{
+		/* otherwise, use a random "high" value */
+		fdwState->startup_cost = fdwState->total_cost = 10000.0;
+	}
+
+	/* release Oracle session (will be cached) */
+	oracleReleaseSession(fdwState->session, 0, 0);
+	fdwState->session = NULL;
+
+	return fdwState;
 }
 
 /*
@@ -788,14 +836,15 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		b) has all the WHERE clauses that can safely be translated to Oracle.
  * 		Untranslatable WHERE clauses are omitted since PostgreSQL will check
  * 		them anyway.
+ * 		A NULL-terminated array of eliminated WHERE RestrictInfos is constructed.
  * 		As a side effect. we also mark the used columns in oraTable.
  */
 char
-*createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList)
+*createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, RestrictInfo ***ignoreClauses)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
-	int i;
+	int i, clause_count = 0;
 	char *where, *wherecopy, *p, md5[33];
 	StringInfoData query, result;
 	struct paramDesc *param, *prev_param = NULL;
@@ -836,6 +885,13 @@ char
 		appendStringInfo(&query, "NULL");
 	appendStringInfo(&query, " FROM %s", oraTable->name);
 
+	/* allocate enough space for ignoreClauses */
+	if (conditions != NIL)
+	{
+		*ignoreClauses = (RestrictInfo **)palloc(sizeof(RestrictInfo *) * (list_length(conditions) + 1));
+		(*ignoreClauses)[0] = NULL;
+	}
+
 	/* append WHERE clauses */
 	first_col = true;
 	foreach(cell, conditions)
@@ -843,6 +899,7 @@ char
 		/* try to convert each condition to Oracle SQL */
 		where = getOracleWhereClause(session, ((RestrictInfo *)lfirst(cell))->clause, oraTable, paramList);
 		if (where != NULL) {
+			/* append new WHERE clause to query string */
 			if (first_col)
 			{
 				first_col = false;
@@ -853,6 +910,10 @@ char
 				appendStringInfo(&query, " AND %s", where);
 			}
 			pfree(where);
+
+			/* add the RestrictInfo to the list of ignorable ones */
+			(*ignoreClauses)[clause_count] = (RestrictInfo *)lfirst(cell);
+			(*ignoreClauses)[++clause_count] = NULL;
 		}
 	}
 
@@ -2185,51 +2246,51 @@ char
  */
 
 List
-*serializePlanData(const char *dbserver, const char *user, const char *password, const char *nls_lang, const char *query, const struct oraTable *oraTable, const struct paramDesc *paramList)
+*serializePlanData(struct OracleFdwState *fdwState)
 {
 	List *result = NIL;
 	int i, len = 0;
 	const struct paramDesc *param;
 
 	/* dbserver */
-	result = lappend(result, serializeString(dbserver));
+	result = lappend(result, serializeString(fdwState->dbserver));
 	/* user name */
-	result = lappend(result, serializeString(user));
+	result = lappend(result, serializeString(fdwState->user));
 	/* password */
-	result = lappend(result, serializeString(password));
+	result = lappend(result, serializeString(fdwState->password));
 	/* nls_lang */
-	result = lappend(result, serializeString(nls_lang));
+	result = lappend(result, serializeString(fdwState->nls_lang));
 	/* query */
-	result = lappend(result, serializeString(query));
+	result = lappend(result, serializeString(fdwState->query));
 	/* Oracle table data */
-	result = lappend(result, serializeString(oraTable->name));
+	result = lappend(result, serializeString(fdwState->oraTable->name));
 	/* PostgreSQL table name */
-	result = lappend(result, serializeString(oraTable->pgname));
+	result = lappend(result, serializeString(fdwState->oraTable->pgname));
 	/* number of columns in Oracle table */
-	result = lappend(result, serializeInt(oraTable->ncols));
+	result = lappend(result, serializeInt(fdwState->oraTable->ncols));
 	/* number of columns in PostgreSQL table */
-	result = lappend(result, serializeInt(oraTable->npgcols));
+	result = lappend(result, serializeInt(fdwState->oraTable->npgcols));
 	/* column data */
-	for (i=0; i<oraTable->ncols; ++i)
+	for (i=0; i<fdwState->oraTable->ncols; ++i)
 	{
-		result = lappend(result, serializeString(oraTable->cols[i]->name));
-		result = lappend(result, serializeInt(oraTable->cols[i]->oratype));
-		result = lappend(result, serializeInt(oraTable->cols[i]->scale));
-		result = lappend(result, serializeString(oraTable->cols[i]->pgname));
-		result = lappend(result, serializeInt(oraTable->cols[i]->pgattnum));
-		result = lappend(result, serializeOid(oraTable->cols[i]->pgtype));
-		result = lappend(result, serializeInt(oraTable->cols[i]->pgtypmod));
-		result = lappend(result, serializeInt(oraTable->cols[i]->used));
-		result = lappend(result, serializeLong(oraTable->cols[i]->val_size));
+		result = lappend(result, serializeString(fdwState->oraTable->cols[i]->name));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->oratype));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->scale));
+		result = lappend(result, serializeString(fdwState->oraTable->cols[i]->pgname));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgattnum));
+		result = lappend(result, serializeOid(fdwState->oraTable->cols[i]->pgtype));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgtypmod));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->used));
+		result = lappend(result, serializeLong(fdwState->oraTable->cols[i]->val_size));
 		/* don't serialize val, val_len and val_null */
 	}
 	/* find length of parameter list */
-	for (param=paramList; param; param=param->next)
+	for (param=fdwState->paramList; param; param=param->next)
 		++len;
 	/* serialize length */
 	result = lappend(result, serializeInt(len));
 	/* parameter list entries */
-	for (param=paramList; param; param=param->next)
+	for (param=fdwState->paramList; param; param=param->next)
 	{
 		result = lappend(result, serializeString(param->name));
 		result = lappend(result, serializeInt(param->number));
@@ -2238,6 +2299,7 @@ List
 		/* don't serialize value */
 		result = lappend(result, serializeInt(param->isExtern));
 	}
+	/* don't serialize startup_cost and total_cost */
 
 	return result;
 }
@@ -2289,75 +2351,79 @@ Const
  * 		Extract the data structures from a List created by serializePlanData.
  */
 
-void
-deserializePlanData(List *list, char **dbserver, char **user, char **password, char **nls_lang, struct OracleFdwExecutionState **state)
+struct OracleFdwState
+*deserializePlanData(List *list)
 {
+	struct OracleFdwState *state = palloc(sizeof(struct OracleFdwState));
 	ListCell *cell = list_head(list);
 	int i, len;
 	struct paramDesc *param;
 
-	/* fdw_state */
-	*state = (struct OracleFdwExecutionState *)palloc(sizeof(struct OracleFdwExecutionState));
-	(*state)->session = NULL;
+	/* session will be set upon connect */
+	state->session = NULL;
+	/* these fields are not needed during execution */
+	state->startup_cost = 0;
+	state->total_cost = 0;
+	state->ignoreClauses = NULL;
 
 	/* dbserver */
-	*dbserver = deserializeString(lfirst(cell));
+	state->dbserver = deserializeString(lfirst(cell));
 	cell = lnext(cell);
 
 	/* user */
-	*user = deserializeString(lfirst(cell));
+	state->user = deserializeString(lfirst(cell));
 	cell = lnext(cell);
 
 	/* password */
-	*password = deserializeString(lfirst(cell));
+	state->password = deserializeString(lfirst(cell));
 	cell = lnext(cell);
 
 	/* nls_lang */
-	*nls_lang = deserializeString(lfirst(cell));
+	state->nls_lang = deserializeString(lfirst(cell));
 	cell = lnext(cell);
 
 	/* query */
-	(*state)->query = deserializeString(lfirst(cell));
+	state->query = deserializeString(lfirst(cell));
 	cell = lnext(cell);
 
 	/* table data */
-	(*state)->oraTable = (struct oraTable *)palloc(sizeof(struct oraTable));
-	(*state)->oraTable->name = deserializeString(lfirst(cell));
+	state->oraTable = (struct oraTable *)palloc(sizeof(struct oraTable));
+	state->oraTable->name = deserializeString(lfirst(cell));
 	cell = lnext(cell);
-	(*state)->oraTable->pgname = deserializeString(lfirst(cell));
+	state->oraTable->pgname = deserializeString(lfirst(cell));
 	cell = lnext(cell);
-	(*state)->oraTable->ncols = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+	state->oraTable->ncols = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 	cell = lnext(cell);
-	(*state)->oraTable->npgcols = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+	state->oraTable->npgcols = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 	cell = lnext(cell);
-	(*state)->oraTable->cols = (struct oraColumn **)palloc(sizeof(struct oraColumn *) * (*state)->oraTable->ncols);
+	state->oraTable->cols = (struct oraColumn **)palloc(sizeof(struct oraColumn *) * state->oraTable->ncols);
 
 	/* loop columns */
-	for (i=0; i<(*state)->oraTable->ncols; ++i)
+	for (i=0; i<state->oraTable->ncols; ++i)
 	{
-		(*state)->oraTable->cols[i] = (struct oraColumn *)palloc(sizeof(struct oraColumn));
-		(*state)->oraTable->cols[i]->name = deserializeString(lfirst(cell));
+		state->oraTable->cols[i] = (struct oraColumn *)palloc(sizeof(struct oraColumn));
+		state->oraTable->cols[i]->name = deserializeString(lfirst(cell));
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->oratype = (oraType)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		state->oraTable->cols[i]->oratype = (oraType)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->scale = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		state->oraTable->cols[i]->scale = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->pgname = deserializeString(lfirst(cell));
+		state->oraTable->cols[i]->pgname = deserializeString(lfirst(cell));
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->pgattnum = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		state->oraTable->cols[i]->pgattnum = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->pgtype = DatumGetObjectId(((Const *)lfirst(cell))->constvalue);
+		state->oraTable->cols[i]->pgtype = DatumGetObjectId(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->pgtypmod = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		state->oraTable->cols[i]->pgtypmod = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->used = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		state->oraTable->cols[i]->used = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		(*state)->oraTable->cols[i]->val_size = deserializeLong(lfirst(cell));
+		state->oraTable->cols[i]->val_size = deserializeLong(lfirst(cell));
 		cell = lnext(cell);
 		/* allocate memory for the result value */
-		(*state)->oraTable->cols[i]->val = (char *)palloc((*state)->oraTable->cols[i]->val_size);
-		(*state)->oraTable->cols[i]->val_len = 0;
-		(*state)->oraTable->cols[i]->val_null = 1;
+		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size);
+		state->oraTable->cols[i]->val_len = 0;
+		state->oraTable->cols[i]->val_null = 1;
 	}
 
 	/* length of parameter list */
@@ -2365,7 +2431,7 @@ deserializePlanData(List *list, char **dbserver, char **user, char **password, c
 	cell = lnext(cell);
 
 	/* parameter table entries */
-	(*state)->paramList = NULL;
+	state->paramList = NULL;
 	for (i=0; i<len; ++i)
 	{
 		param = (struct paramDesc *)palloc(sizeof(struct paramDesc));
@@ -2380,9 +2446,11 @@ deserializePlanData(List *list, char **dbserver, char **user, char **password, c
 		param->value = NULL;
 		param->isExtern = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = lnext(cell);
-		param->next = (*state)->paramList;
-		(*state)->paramList = param;
+		param->next = state->paramList;
+		state->paramList = param;
 	}
+
+	return state;
 }
 
 /*

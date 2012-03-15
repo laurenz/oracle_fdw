@@ -1,6 +1,8 @@
 Version 1.0.0
   Enhancements:
   - Support the new foreign data wrapper API introduced in 9.2.
+    In PostgreSQL 9.2 and above, WHERE conditions that get pushed down to
+    Oracle will not be checked a second time.
 
   Bugfixes:
   - Fix uninitialized value that caused intermittent server crashes.
