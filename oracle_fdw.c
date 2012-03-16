@@ -101,9 +101,10 @@ struct OracleFdwState {
 	char *query;                   /* query we issue against Oracle */
 	struct paramDesc *paramList;   /* description of parameters needed for the query */
 	struct oraTable *oraTable;     /* description of the remote Oracle table */
-	Cost startup_cost;             /* only needed for planning */
-	Cost total_cost;               /* only needed for planning */
-	RestrictInfo **ignoreClauses;  /* only needed for planning */
+	Cost startup_cost;             /* cost estimate, only needed for planning */
+	Cost total_cost;               /* cost estimate, only needed for planning */
+	RestrictInfo **ignoreClauses;  /* WHERE conditions we push into Oracle, only needed for planning */
+	unsigned int rowcount;         /* rows already read from Oracle */
 };
 
 /*
@@ -435,6 +436,9 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 	/* connect to Oracle database, don't start transaction for explain only */
 	fdw_state->session = oracleGetSession(fdw_state->dbserver, fdw_state->user, fdw_state->password, fdw_state->nls_lang, fdw_state->oraTable->pgname,
 			(eflags & EXEC_FLAG_EXPLAIN_ONLY) ? 0 : 1);
+
+	/* initialize row count to zero */
+	fdw_state->rowcount = 0;
 }
 
 /*
@@ -488,6 +492,9 @@ oracleIterateForeignScan(ForeignScanState *node)
 		slot->tts_nvalid = fdw_state->oraTable->npgcols;
 		slot->tts_values = (Datum *)palloc(sizeof(Datum) * slot->tts_nvalid);
 		slot->tts_isnull = (bool *)palloc(sizeof(bool) * slot->tts_nvalid);
+
+		/* increase row count */
+		++fdw_state->rowcount;
 
 		/* assign result values */
 		index = -1;
@@ -548,6 +555,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 				regproc typinput;
 				HeapTuple tuple;
 				Datum dat;
+				MemoryContext savecontext = CurrentMemoryContext;
 
 				/* find the appropriate conversion function */
 				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
@@ -559,25 +567,54 @@ oracleIterateForeignScan(ForeignScanState *node)
 				ReleaseSysCache(tuple);
 
 				/* and call it */
-				dat = CStringGetDatum(value);
-				switch (fdw_state->oraTable->cols[index]->pgtype)
+				PG_TRY();
 				{
-					case BPCHAROID:
-					case VARCHAROID:
-					case TIMESTAMPOID:
-					case TIMESTAMPTZOID:
-					case INTERVALOID:
-					case NUMERICOID:
-						/* these functions require the type modifier */
-						slot->tts_values[j] = OidFunctionCall3(typinput,
+					dat = CStringGetDatum(value);
+					switch (fdw_state->oraTable->cols[index]->pgtype)
+					{
+						case BPCHAROID:
+						case VARCHAROID:
+						case TIMESTAMPOID:
+						case TIMESTAMPTZOID:
+						case INTERVALOID:
+						case NUMERICOID:
+							/* these functions require the type modifier */
+							slot->tts_values[j] = OidFunctionCall3(typinput,
 								dat,
-								ObjectIdGetDatum(InvalidOid),
+										ObjectIdGetDatum(InvalidOid),
 								Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
-						break;
-					default:
-						/* the others don't */
-						slot->tts_values[j] = OidFunctionCall1(typinput, dat);
+							break;
+						default:
+							/* the others don't */
+							slot->tts_values[j] = OidFunctionCall1(typinput, dat);
+					}
 				}
+				PG_CATCH();
+				{
+					/* there was an error during conversion */
+					StringInfoData msg;
+					ErrorData *edata;
+
+					/* switch back to the saved memory context */
+					MemoryContextSwitchTo(savecontext);
+					edata = CopyErrorData();
+					FlushErrorState();
+
+					/* construct an error message that indicates where the problem happened */
+            		initStringInfo(&msg);
+					appendStringInfo(&msg, "Error converting column \"%s\" for foreign table scan of \"%s\", row %u",
+						fdw_state->oraTable->cols[index]->pgname,
+						fdw_state->oraTable->pgname,
+						fdw_state->rowcount);
+
+					/* the original error message will become a detail */
+					edata->detail = edata->message;
+					edata->message = msg.data;
+
+					/* rethrow the modified error */
+					ReThrowError(edata);
+				}
+				PG_END_TRY();
 			}
 
 			/* free the data buffer for LOBs */
@@ -629,6 +666,9 @@ oracleReScanForeignScan(ForeignScanState *node)
 
 	/* close open Oracle statement if there is one */
 	oracleCloseStatement(fdw_state->session);
+
+	/* reset row count to zero */
+	fdw_state->rowcount = 0;
 }
 
 /*
@@ -2365,6 +2405,7 @@ struct OracleFdwState
 	state->startup_cost = 0;
 	state->total_cost = 0;
 	state->ignoreClauses = NULL;
+	state->rowcount = 0;
 
 	/* dbserver */
 	state->dbserver = deserializeString(lfirst(cell));
