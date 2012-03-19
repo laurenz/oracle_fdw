@@ -1,4 +1,4 @@
-Version 1.0.0
+Version 0.9.4 (beta), released 2012-03-19
   Enhancements:
   - Support the new foreign data wrapper API introduced in 9.2.
     In PostgreSQL 9.2 and above, WHERE conditions that get pushed down to
