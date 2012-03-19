@@ -231,21 +231,26 @@ Installation
 oracle_fdw has been written as a PostgreSQL extension and uses the Extension
 Building Infrastructure "PGXS".  It should be easy to install.
 
-You will need the configured source tree (if your PostgreSQL was installed
-with packages, install the development package).
+You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
+installed with packages, install the development package).
 You need to install Oracle's headers as well (SDK package for Instant
 Client).
 
 Make sure that PostgreSQL is configured "--without-ldap" (at least the server).
 See "Problems" below.
 
-Make sure that "pg_config" is in the PATH.
+Make sure that "pg_config" is in the PATH (test with "pg_config --pgxs").
 Set the environment variable ORACLE_HOME to the location of the Oracle
 installation.
 
+Unpack the source code of oracle_fdw and change into the directory.
 Then the software installation should be as simple as
 
+  $ make
   $ make install
+
+For the second step you need write permission to PostgreSQL's shared library
+directory.
 
 Since the Oracle client shared library is probably not in the standard
 library path, you have to make sure that the PostgreSQL server will be able
