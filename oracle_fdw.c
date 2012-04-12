@@ -35,6 +35,8 @@
 #include "port.h"
 #include "storage/ipc.h"
 #include "storage/lock.h"
+#include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
@@ -105,6 +107,7 @@ struct OracleFdwState {
 	Cost total_cost;               /* cost estimate, only needed for planning */
 	RestrictInfo **ignoreClauses;  /* WHERE conditions we push into Oracle, only needed for planning */
 	unsigned int rowcount;         /* rows already read from Oracle */
+	int columnindex;               /* currently processed column for error context */
 };
 
 /*
@@ -159,6 +162,7 @@ static long deserializeLong(Const *constant);
 static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
 static void exitHook(int code, Datum arg);
 static char *setParameters(struct paramDesc *paramList, EState *execstate);
+static void errorContextCallback(void *arg);
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -461,6 +465,11 @@ oracleIterateForeignScan(ForeignScanState *node)
 	int j, index;
 	char *value = NULL;
 	long value_len = 0;
+	ErrorContextCallback errcontext;
+
+	/* initialize error context callback, install it only during conversions */
+	errcontext.callback = errorContextCallback;
+	errcontext.arg = (void *)fdw_state;
 
 	if (oracleIsStatementOpen(fdw_state->session))
 	{
@@ -555,7 +564,6 @@ oracleIterateForeignScan(ForeignScanState *node)
 				regproc typinput;
 				HeapTuple tuple;
 				Datum dat;
-				MemoryContext savecontext = CurrentMemoryContext;
 
 				/* find the appropriate conversion function */
 				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
@@ -567,54 +575,34 @@ oracleIterateForeignScan(ForeignScanState *node)
 				ReleaseSysCache(tuple);
 
 				/* and call it */
-				PG_TRY();
+				dat = CStringGetDatum(value);
+
+				/* install error context callback */
+				errcontext.previous = error_context_stack;
+				error_context_stack = &errcontext;
+				fdw_state->columnindex = index;
+
+				switch (fdw_state->oraTable->cols[index]->pgtype)
 				{
-					dat = CStringGetDatum(value);
-					switch (fdw_state->oraTable->cols[index]->pgtype)
-					{
-						case BPCHAROID:
-						case VARCHAROID:
-						case TIMESTAMPOID:
-						case TIMESTAMPTZOID:
-						case INTERVALOID:
-						case NUMERICOID:
-							/* these functions require the type modifier */
-							slot->tts_values[j] = OidFunctionCall3(typinput,
-								dat,
-										ObjectIdGetDatum(InvalidOid),
-								Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
-							break;
-						default:
-							/* the others don't */
-							slot->tts_values[j] = OidFunctionCall1(typinput, dat);
-					}
+					case BPCHAROID:
+					case VARCHAROID:
+					case TIMESTAMPOID:
+					case TIMESTAMPTZOID:
+					case INTERVALOID:
+					case NUMERICOID:
+						/* these functions require the type modifier */
+						slot->tts_values[j] = OidFunctionCall3(typinput,
+							dat,
+									ObjectIdGetDatum(InvalidOid),
+							Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
+						break;
+					default:
+						/* the others don't */
+						slot->tts_values[j] = OidFunctionCall1(typinput, dat);
 				}
-				PG_CATCH();
-				{
-					/* there was an error during conversion */
-					StringInfoData msg;
-					ErrorData *edata;
 
-					/* switch back to the saved memory context */
-					MemoryContextSwitchTo(savecontext);
-					edata = CopyErrorData();
-					FlushErrorState();
-
-					/* construct an error message that indicates where the problem happened */
-            		initStringInfo(&msg);
-					appendStringInfo(&msg, "Error converting column \"%s\" for foreign table scan of \"%s\", row %u",
-						fdw_state->oraTable->cols[index]->pgname,
-						fdw_state->oraTable->pgname,
-						fdw_state->rowcount);
-
-					/* the original error message will become a detail */
-					edata->detail = edata->message;
-					edata->message = msg.data;
-
-					/* rethrow the modified error */
-					ReThrowError(edata);
-				}
-				PG_END_TRY();
+				/* uninstall error context callback */
+				error_context_stack = errcontext.previous;
 			}
 
 			/* free the data buffer for LOBs */
@@ -2351,7 +2339,7 @@ List
 		/* don't serialize value */
 		result = lappend(result, serializeInt(param->isExtern));
 	}
-	/* don't serialize startup_cost and total_cost */
+	/* don't serialize startup_cost, total_cost, ignoreClauses, rowcount and columnindex */
 
 	return result;
 }
@@ -2417,7 +2405,9 @@ struct OracleFdwState
 	state->startup_cost = 0;
 	state->total_cost = 0;
 	state->ignoreClauses = NULL;
+	/* these are not serialized */
 	state->rowcount = 0;
+	state->columnindex = 0;
 
 	/* dbserver */
 	state->dbserver = deserializeString(lfirst(cell));
@@ -2667,6 +2657,22 @@ setParameters(struct paramDesc *paramList, EState *execstate)
 	}
 
 	return info.data;
+}
+
+/*
+ * errorContextCallback
+ * 		Provides the context for an error message during a type input conversion.
+ * 		The argument must be a pointer to a "struct OracleFdwState".
+ */
+void
+errorContextCallback(void *arg)
+{
+	struct OracleFdwState *fdw_state = (struct OracleFdwState *)arg;
+
+	errcontext("converting column \"%s\" for foreign table scan of \"%s\", row %u",
+		quote_identifier(fdw_state->oraTable->cols[fdw_state->columnindex]->pgname),
+		quote_identifier(fdw_state->oraTable->pgname),
+		fdw_state->rowcount);
 }
 
 /*
