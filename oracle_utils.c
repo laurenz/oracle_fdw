@@ -1046,7 +1046,7 @@ struct oraTable
 void
 oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, int block_size, double *startup_cost, double *total_cost, double *rows, int *width)
 {
-	double time;
+	double time, bytes;
 	dvoid *res[3];
 	sb4 res_size[3];
 	ub2 res_type[3], res_len[3];
@@ -1061,14 +1061,17 @@ oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, 
 	res_size[1] = sizeof(double);
 	res_type[1] = SQLT_BDOUBLE;
 
-	res[2] = (dvoid *)width;
-	res_size[2] = sizeof(int);
-	res_type[2] = SQLT_INT;
+	res[2] = (dvoid *)&bytes;
+	res_size[2] = sizeof(double);
+	res_type[2] = SQLT_BDOUBLE;
 
 	oracleQueryPlan(session, query, desc_query, 3, res, res_size, res_type, res_len, res_ind);
 
 	/* close the statement */
 	oracleCloseStatement(session);
+
+	/* width now contains the total bytes estimated - divide by number of rows */
+	*width = (int)(bytes / *rows);
 
 	/*
 	 * Guess startup_cost and total_cost from Oracle's "time".
