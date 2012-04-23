@@ -1,3 +1,12 @@
+Version 0.9.5 (beta)
+  Enhancements:
+  - Support ANALYZE on foreign tables (from PostgreSQL 9.2 on).
+
+  Bugfixes:
+  - Fix a bug that leads to warnings and sometimes bad results if system
+    columns of the foreign table are referenced.
+  - Fix wrong column width estimates of plan_costs=on.
+
 Version 0.9.4 (beta), released 2012-03-19
   Enhancements:
   - Support the new foreign data wrapper API introduced in 9.2.

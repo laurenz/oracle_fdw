@@ -94,9 +94,13 @@ Foreign table options
   that Oracle gives good estimates for the result size, but not for the cost
   of the execution (the only estimate you can get is "execution time" in second
   granularity).
-  Since these values are almost useless but expensive to collect, oracle_fdw
-  does by default does not bother to get them and estimates the costs to 10000
-  independent of the actual query.
+  Since this cost estimate is almost useless but expensive to collect,
+  oracle_fdw by default does not bother to get Oracle's cost estimates and
+  estimates the cost to 10000 regardless of the actual query.
+
+  From PostgreSQL 9.2 on, it is usually better to gather statistics on the
+  foreign table (see ANALYZE below) and keep this option disabled.
+
   Turn this on only if a) query execution is expensive and b) it has a positive
   influence on PostgreSQL query planning.
 
@@ -207,11 +211,23 @@ The expressions "now()", "transaction_timestamp()", "current_timestamp",
 The output of EXPLAIN will show the Oracle query used, so you can see which
 conditions were translated to Oracle and how.
 
-Explain
+EXPLAIN
 -------
 
 PostgreSQL's EXPLAIN will show the query that is actually issued to Oracle.
 EXPLAIN VERBOSE will show Oracle's execution plan.
+
+ANALYZE
+-------
+
+From PostgreSQL version 9.2 on, you can use ANALYZE to gather statistics
+on a foreign table.  This is supported by oracle_fdw.
+Statistics will be used for query planning, and for many queries will
+result in good (and much faster) row count estimates even if the table option
+"plan_costs" is turned off as long as the statistics are accurate.
+
+Keep in mind that analyzing an Oracle foreign table will result in a full
+sequential table scan.
 
 Installation Requirements
 =========================

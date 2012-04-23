@@ -22,6 +22,7 @@
 #include "catalog/pg_user_mapping.h"
 #include "catalog/pg_type.h"
 #include "commands/explain.h"
+#include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "libpq/md5.h"
@@ -91,6 +92,12 @@ static struct OracleFdwOption valid_options[] = {
 
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
 
+typedef enum {
+	FILTER_LOCALLY,
+	PUSHDOWN,
+	BOTH
+} handleClause;
+
 /*
  * FDW-specific information for RelOptInfo.fdw_private and ForeignScanState.fdw_state.
  */
@@ -105,8 +112,8 @@ struct OracleFdwState {
 	struct oraTable *oraTable;     /* description of the remote Oracle table */
 	Cost startup_cost;             /* cost estimate, only needed for planning */
 	Cost total_cost;               /* cost estimate, only needed for planning */
-	RestrictInfo **ignoreClauses;  /* WHERE conditions we push into Oracle, only needed for planning */
-	unsigned int rowcount;         /* rows already read from Oracle */
+	handleClause *handle_clauses;  /* how to handle WHERE conditions */
+	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
 };
 
@@ -135,6 +142,7 @@ static FdwPlan *oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, Rel
 static void oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
 static void oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
 static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses);
+static bool oracleAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockNumber *totalpages);
 #endif
 static void oracleExplainForeignScan(ForeignScanState *node, ExplainState *es);
 static void oracleBeginForeignScan(ForeignScanState *node, int eflags);
@@ -145,10 +153,13 @@ static void oracleEndForeignScan(ForeignScanState *node);
 /*
  * Helper functions
  */
-static struct OracleFdwState *getFdwState(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
+static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs);
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, RestrictInfo ***ignoreClauses);
+static char *createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, handleClause **handle_clauses);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
+#ifndef OLD_FDW_API
+static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
+#endif
 static bool getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataTypes(oracleSession *session, struct oraTable *oraTable);
@@ -162,6 +173,7 @@ static long deserializeLong(Const *constant);
 static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
 static void exitHook(int code, Datum arg);
 static char *setParameters(struct paramDesc *paramList, EState *execstate);
+static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls);
 static void errorContextCallback(void *arg);
 
 /*
@@ -179,6 +191,7 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 	fdwroutine->GetForeignRelSize = oracleGetForeignRelSize;
 	fdwroutine->GetForeignPaths = oracleGetForeignPaths;
 	fdwroutine->GetForeignPlan = oracleGetForeignPlan;
+	fdwroutine->AnalyzeForeignTable = oracleAnalyzeForeignTable;
 #endif
 	fdwroutine->ExplainForeignScan = oracleExplainForeignScan;
 	fdwroutine->BeginForeignScan = oracleBeginForeignScan;
@@ -315,12 +328,35 @@ oraclePlanForeignScan(Oid foreigntableid,
 	struct OracleFdwState *fdwState;
 	FdwPlan *fdwplan;
 	List *fdw_private;
+	bool plan_costs;
 
-	/*
-	 * Get everything we need for planning and executing the query.
-	 * This will also set baserel->width and baserel->rows if desired.
-	 */
-	fdwState = getFdwState(foreigntableid, root, baserel);
+	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
+
+	/* get connection options, connect and get the remote table description */
+	fdwState = getFdwState(foreigntableid, &plan_costs);
+
+	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
+	fdwState->query = createQuery(fdwState->session, baserel->reltargetlist, baserel->baserestrictinfo, fdwState->oraTable, &(fdwState->paramList), &(fdwState->handle_clauses));
+	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+
+	/* get PostgreSQL column data types, check that they match Oracle's */
+	checkDataTypes(fdwState->session, fdwState->oraTable);
+
+	/* get Oracle's (bad) estimate only if plan_costs is set */
+	if (plan_costs)
+	{
+		/* get Oracle's cost estimates for the query */
+		oracleEstimate(fdwState->session, fdwState->query, seq_page_cost, BLCKSZ, &(fdwState->startup_cost), &(fdwState->total_cost), &baserel->rows, &baserel->width);
+	}
+	else
+	{
+		/* otherwise, use a random "high" value */
+		fdwState->startup_cost = fdwState->total_cost = 10000.0;
+	}
+
+	/* release Oracle session (will be cached) */
+	oracleReleaseSession(fdwState->session, 0, 0);
+	fdwState->session = NULL;
 
 	/* "serialize" all necessary information in the private area */
 	fdw_private = serializePlanData(fdwState);
@@ -338,12 +374,58 @@ void
 oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 {
 	struct OracleFdwState *fdwState;
+	bool plan_costs;
+	List *local_conditions = NIL;
+	int i;
+	double ntuples;
 
-	/*
-	 * Get everything we need for planning and executing the query.
-	 * This will also set baserel->width and baserel->rows if desired.
-	 */
-	fdwState = getFdwState(foreigntableid, root, baserel);
+	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
+
+	/* get connection options, connect and get the remote table description */
+	fdwState = getFdwState(foreigntableid, &plan_costs);
+
+	/* construct Oracle query and get the list of parameters and antions for RestrictInfos */
+	fdwState->query = createQuery(fdwState->session, baserel->reltargetlist, baserel->baserestrictinfo, fdwState->oraTable, &(fdwState->paramList), &(fdwState->handle_clauses));
+	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+
+	/* get PostgreSQL column data types, check that they match Oracle's */
+	checkDataTypes(fdwState->session, fdwState->oraTable);
+
+	/* get Oracle's (bad) estimate only if plan_costs is set */
+	if (plan_costs)
+	{
+		/* get Oracle's cost estimates for the query */
+		oracleEstimate(fdwState->session, fdwState->query, seq_page_cost, BLCKSZ, &(fdwState->startup_cost), &(fdwState->total_cost), &ntuples, &baserel->width);
+
+		/* estimate selectivity only for conditions that are not pushed down */
+		for (i=list_length(baserel->baserestrictinfo)-1; i>=0; --i)
+			if (fdwState->handle_clauses[i] == FILTER_LOCALLY)
+				local_conditions = lcons(list_nth(baserel->baserestrictinfo, i), local_conditions);
+	}
+	else
+	{
+		/* otherwise, use a random "high" value for cost */
+		fdwState->startup_cost = fdwState->total_cost = 10000.0;
+
+		/* if baserel->pages > 0, there was an ANALYZE; use the row count estimate */
+		if (baserel->pages > 0)
+			ntuples = baserel->tuples;
+		else
+			ntuples = baserel->rows;  /* use silly default estimate of 1000 */
+
+		/* estimale selectivity locally for all conditions */
+		local_conditions = baserel->baserestrictinfo;
+	}
+
+	/* release Oracle session (will be cached) */
+	oracleReleaseSession(fdwState->session, 0, 0);
+	fdwState->session = NULL;
+
+	/* estimate how clauses that are not pushed down will influence row count */
+	ntuples = ntuples * clauselist_selectivity(root, local_conditions, 0, JOIN_INNER, NULL);
+	/* make sure that the estimate is not less that 1 */
+	ntuples = clamp_row_est(ntuples);
+	baserel->rows = ntuples;
 
 	/* store the state so that the other planning functions can use it */
 	baserel->fdw_private = (void *)fdwState;
@@ -358,29 +440,40 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 	add_path(baserel,
 		(Path *)create_foreignscan_path(root, baserel, baserel->rows,
 				fdwState->startup_cost, fdwState->total_cost,
-				NIL, NULL, NIL, NIL));
+				NIL, NULL, NIL));
 }
 
 ForeignScan
 *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses)
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
-	List *fdw_private;
+	List *fdw_private, *keep_clauses = NIL;
 	int i;
 
 	/* "serialize" all necessary information for the path private area */
 	fdw_private = serializePlanData(fdwState);
 
 	/* remove those clauses that are checked by Oracle */
-	if (fdwState->ignoreClauses != NULL)
-		for (i=0; fdwState->ignoreClauses[i]!=NULL; ++i)
-			scan_clauses = list_delete_ptr(scan_clauses, fdwState->ignoreClauses[i]);
+	if (fdwState->handle_clauses != NULL)
+		for (i=list_length(baserel->baserestrictinfo)-1; i>=0; --i)
+			if (fdwState->handle_clauses[i] != PUSHDOWN)
+				keep_clauses = lcons(list_nth(scan_clauses, i), keep_clauses);
 
 	/* remove the RestrictInfo node from all remaining clauses */
-	scan_clauses = extract_actual_clauses(scan_clauses, false);
+	keep_clauses = extract_actual_clauses(keep_clauses, false);
 
 	/* Create the ForeignScan node */
-	return make_foreignscan(tlist, scan_clauses, baserel->relid, NIL, fdw_private);
+	return make_foreignscan(tlist, keep_clauses, baserel->relid, NIL, fdw_private);
+}
+
+bool
+oracleAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockNumber *totalpages)
+{
+	*func = acquireSampleRowsFunc;
+	/* use positive page count as a sign that the table has been ANALYZEd */
+	*totalpages = 42;
+
+	return true;
 }
 #endif
 
@@ -462,14 +555,6 @@ oracleIterateForeignScan(ForeignScanState *node)
 	EState *execstate = node->ss.ps.state;
 	int have_result;
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
-	int j, index;
-	char *value = NULL;
-	long value_len = 0;
-	ErrorContextCallback errcontext;
-
-	/* initialize error context callback, install it only during conversions */
-	errcontext.callback = errorContextCallback;
-	errcontext.arg = (void *)fdw_state;
 
 	if (oracleIsStatementOpen(fdw_state->session))
 	{
@@ -488,136 +573,22 @@ oracleIterateForeignScan(ForeignScanState *node)
 		have_result = oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList);
 	}
 
-	/* we return a virtual tuple */
-	slot->tts_mintuple = NULL;
-	slot->tts_shouldFreeMin = false;
-	slot->tts_buffer = InvalidBuffer;
-	slot->tts_tuple = NULL;
-	slot->tts_shouldFree = false;
+	/* initialize virtual tuple */
+	ExecClearTuple(slot);
 
 	if (have_result)
 	{
-		slot->tts_isempty = false;
-		slot->tts_nvalid = fdw_state->oraTable->npgcols;
-		slot->tts_values = (Datum *)palloc(sizeof(Datum) * slot->tts_nvalid);
-		slot->tts_isnull = (bool *)palloc(sizeof(bool) * slot->tts_nvalid);
-
 		/* increase row count */
 		++fdw_state->rowcount;
 
-		/* assign result values */
-		index = -1;
-		for (j=0; j<fdw_state->oraTable->npgcols; ++j)
-		{
-			/* for dropped columns, insert a NULL */
-			if (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1)
-			{
-				slot->tts_isnull[j] = true;
-				slot->tts_values[j] = PointerGetDatum(NULL);
-				continue;
-			}
-			else
-				++index;
+		/* convert result to arrays of values and null indicators */
+		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull);
 
-			/*
-		 	* Columns exceeding the length of the Oracle table will be NULL,
-		 	* as well as columns that are not used in the query.
-		 	*/
-			if (index >= fdw_state->oraTable->ncols
-					|| fdw_state->oraTable->cols[index]->used == 0
-					|| fdw_state->oraTable->cols[index]->val_null == -1)
-			{
-				slot->tts_isnull[j] = true;
-				slot->tts_values[j] = PointerGetDatum(NULL);
-				continue;
-			}
-
-			slot->tts_isnull[j] = false;
-
-			/* get the data and its length */
-			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
-					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
-					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
-			{
-				/* get the actual LOB contents (palloc'ed) */
-				oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
-			}
-			else
-			{
-				/* for other data types, oraTable contains the results */
-				value = fdw_state->oraTable->cols[index]->val;
-				value_len = fdw_state->oraTable->cols[index]->val_len;
-			}
-
-			/* fill the TupleSlot with the data (after conversion if necessary) */
-			if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
-			{
-				/* binary columns are not converted */
-				bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
-				memcpy(VARDATA(result), value, value_len);
-				SET_VARSIZE(result, value_len + VARHDRSZ);
-
-				slot->tts_values[j] = PointerGetDatum(result);
-			}
-			else
-			{
-				regproc typinput;
-				HeapTuple tuple;
-				Datum dat;
-
-				/* find the appropriate conversion function */
-				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
-				if (!HeapTupleIsValid(tuple))
-				{
-					elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
-				}
-				typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
-				ReleaseSysCache(tuple);
-
-				/* and call it */
-				dat = CStringGetDatum(value);
-
-				/* install error context callback */
-				errcontext.previous = error_context_stack;
-				error_context_stack = &errcontext;
-				fdw_state->columnindex = index;
-
-				switch (fdw_state->oraTable->cols[index]->pgtype)
-				{
-					case BPCHAROID:
-					case VARCHAROID:
-					case TIMESTAMPOID:
-					case TIMESTAMPTZOID:
-					case INTERVALOID:
-					case NUMERICOID:
-						/* these functions require the type modifier */
-						slot->tts_values[j] = OidFunctionCall3(typinput,
-							dat,
-									ObjectIdGetDatum(InvalidOid),
-							Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
-						break;
-					default:
-						/* the others don't */
-						slot->tts_values[j] = OidFunctionCall1(typinput, dat);
-				}
-
-				/* uninstall error context callback */
-				error_context_stack = errcontext.previous;
-			}
-
-			/* free the data buffer for LOBs */
-			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
-					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
-					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
-				pfree(value);
-		}
+		/* store the virtual tuple */
+		ExecStoreVirtualTuple(slot);
 	}
 	else
 	{
-		/* if there are no more results, return an empty tuple */
-		slot->tts_isempty = true;
-		slot->tts_nvalid = 0;
-
 		/* close the statement */
 		oracleCloseStatement(fdw_state->session);
 	}
@@ -661,22 +632,18 @@ oracleReScanForeignScan(ForeignScanState *node)
 
 /*
  * getFdwState
- * 		Get all information necessary for planning and executing the foreign scan:
- * 		Establish an Oracle connection, get a description of the
- * 		remote table, construct the query to issue against Oracle
- * 		and a list of parameters for the query, verify that column
- * 		data types can be converted, get Oracle's cost estimates if
- * 		desired.
- * 		As a side effect, baserel->width and baserel->rows are set if desired.
+ * 		Construct an OracleFdwState from the options of the foreign table.
+ * 		Establish an Oracle connection and get a description of the
+ * 		remote table.
  */
 struct OracleFdwState
-*getFdwState(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel)
+*getFdwState(Oid foreigntableid, bool *plan_costs)
 {
 	struct OracleFdwState *fdwState = palloc(sizeof(struct OracleFdwState));
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *plan_costs = NULL, *qualtable;
+	char *schema = NULL, *table = NULL, *plancosts = NULL, *qualtable;
 	StringInfoData buf;
 
 	fdwState->nls_lang = NULL;
@@ -684,7 +651,7 @@ struct OracleFdwState
 	fdwState->user = NULL;
 	fdwState->password = NULL;
 	fdwState->paramList = NULL;
-	fdwState->ignoreClauses = NULL;
+	fdwState->handle_clauses = NULL;
 
 	/*
 	 * Get all relevant options from the foreign table, the user mapping,
@@ -707,7 +674,7 @@ struct OracleFdwState
 		if (strcmp(def->defname, OPT_TABLE) == 0)
 			table = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0)
-			plan_costs = ((Value *) (def->arg))->val.str;
+			plancosts = ((Value *) (def->arg))->val.str;
 	}
 
 	/* check if options are ok */
@@ -715,8 +682,6 @@ struct OracleFdwState
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_OPTION_NAME_NOT_FOUND),
 				errmsg("required option \"%s\" in foreign table \"%s\" missing", OPT_TABLE, pgtablename)));
-
-	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
 	/* guess a good NLS_LANG environment setting */
 	fdwState->nls_lang = guessNlsLang(fdwState->nls_lang);
@@ -742,34 +707,11 @@ struct OracleFdwState
 	/* add PostgreSQL data to table description */
 	getColumnData(foreigntableid, fdwState->oraTable);
 
-	/* construct Oracle query and get the list of parameters and ignorable RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel->reltargetlist, baserel->baserestrictinfo, fdwState->oraTable, &(fdwState->paramList), &(fdwState->ignoreClauses));
-	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
-
-	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(fdwState->session, fdwState->oraTable);
-
-	/* get Oracle's (bad) estimate only if plan_costs is set */
-	if (plan_costs != NULL
-			&& (strcmp(plan_costs, "on") == 0
-			|| strcmp(plan_costs, "ON") == 0
-			|| strcmp(plan_costs, "yes") == 0
-			|| strcmp(plan_costs, "YES") == 0
-			|| strcmp(plan_costs, "true") == 0
-			|| strcmp(plan_costs, "TRUE") == 0))
-	{
-		/* get Oracle's cost estimates for the query */
-		oracleEstimate(fdwState->session, fdwState->query, seq_page_cost, BLCKSZ, &(fdwState->startup_cost), &(fdwState->total_cost), &baserel->rows, &baserel->width);
-	}
-	else
-	{
-		/* otherwise, use a random "high" value */
-		fdwState->startup_cost = fdwState->total_cost = 10000.0;
-	}
-
-	/* release Oracle session (will be cached) */
-	oracleReleaseSession(fdwState->session, 0, 0);
-	fdwState->session = NULL;
+	/* test if we should invoke Oracle's optimizer for cost planning */
+	*plan_costs = plancosts != NULL
+			&& (strcmp(plancosts, "on") == 0 || strcmp(plancosts, "ON") == 0
+			|| strcmp(plancosts, "yes") == 0 || strcmp(plancosts, "YES") == 0
+			|| strcmp(plancosts, "true") == 0 || strcmp(plancosts, "TRUE") == 0);
 
 	return fdwState;
 }
@@ -862,17 +804,17 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		Construct a query string for Oracle that
  * 		a) contains only the necessary columns in the SELECT list
  * 		b) has all the WHERE clauses that can safely be translated to Oracle.
- * 		Untranslatable WHERE clauses are omitted since PostgreSQL will check
- * 		them anyway.
- * 		A NULL-terminated array of eliminated WHERE RestrictInfos is constructed.
+ * 		Untranslatable WHERE clauses are omitted and left for PostgreSQL to check.
+ * 		A NULL-terminated array of RestrictInfos is constructed which need not
+ * 		be re-evaluated at execution time.
  * 		As a side effect. we also mark the used columns in oraTable.
  */
 char
-*createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, RestrictInfo ***ignoreClauses)
+*createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, handleClause **handle_clauses)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
-	int i, clause_count = 0;
+	int i, clause_count = -1;
 	char *where, *wherecopy, *p, md5[33];
 	StringInfoData query, result;
 	struct paramDesc *param, *prev_param = NULL;
@@ -913,11 +855,10 @@ char
 		appendStringInfo(&query, "NULL");
 	appendStringInfo(&query, " FROM %s", oraTable->name);
 
-	/* allocate enough space for ignoreClauses */
+	/* allocate enough space for handle_clauses */
 	if (conditions != NIL)
 	{
-		*ignoreClauses = (RestrictInfo **)palloc(sizeof(RestrictInfo *) * (list_length(conditions) + 1));
-		(*ignoreClauses)[0] = NULL;
+		*handle_clauses = (handleClause *)palloc(sizeof(handleClause) * list_length(conditions));
 	}
 
 	/* append WHERE clauses */
@@ -939,13 +880,10 @@ char
 			}
 			pfree(where);
 
-			/* add the RestrictInfo to the list of ignorable ones */
-			if (can_ignore)
-			{
-				(*ignoreClauses)[clause_count] = (RestrictInfo *)lfirst(cell);
-				(*ignoreClauses)[++clause_count] = NULL;
-			}
+			(*handle_clauses)[++clause_count] = can_ignore ? PUSHDOWN : BOTH;
 		}
+		else
+			(*handle_clauses)[++clause_count] = FILTER_LOCALLY;
 	}
 
 	/* get a copy of the where clause without single quoted string literals */
@@ -1004,6 +942,118 @@ char
 
 	return result.data;
 }
+
+#ifndef OLD_FDW_API
+/*
+ * acquireSampleRowsFunc
+ * 		Perform a sequential scan on the Oracle table and return a sampe of rows.
+ */
+int
+acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows)
+{
+	int collected_rows = 0, i;
+	struct OracleFdwState *fdw_state;
+	bool plan_costs, first_column = true;;
+	StringInfoData query;
+	TupleDesc tupDesc = RelationGetDescr(relation);
+	Datum *values = (Datum *)palloc(tupDesc->natts * sizeof(Datum));
+	bool *nulls = (bool *)palloc(tupDesc->natts * sizeof(bool));
+	double rstate, rowstoskip = -1;
+
+	elog(DEBUG1, "oracle_fdw: analyze foreign table %d", RelationGetRelid(relation));
+
+	*totalrows = 0;
+
+	 /* Prepare for sampling rows */
+	rstate = anl_init_selection_state(targrows);
+
+	/* get connection options, connect and get the remote table description */
+	fdw_state = getFdwState(RelationGetRelid(relation), &plan_costs);
+	fdw_state ->paramList = NULL;
+	fdw_state->handle_clauses = NULL;
+	fdw_state->rowcount = 0;
+
+	/* construct query */
+	initStringInfo(&query);
+	appendStringInfo(&query, "SELECT ");
+
+	/* loop columns */
+	for (i=0; i<fdw_state->oraTable->ncols; ++i)
+	{
+		/* all columns are used */
+		fdw_state->oraTable->cols[i]->used = 1;
+
+		/* allocate memory for return value */
+		fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size);
+		fdw_state->oraTable->cols[i]->val_len = 0;
+		fdw_state->oraTable->cols[i]->val_null = 1;
+
+		if (first_column)
+			first_column = false;
+		else
+			appendStringInfo(&query, ", ");
+
+		/* append column name */
+		appendStringInfo(&query, "%s", fdw_state->oraTable->cols[i]->name);
+	}
+
+	/* if there are no columns, use NULL */
+	if (first_column)
+		appendStringInfo(&query, "NULL");
+
+	appendStringInfo(&query, " FROM %s", fdw_state->oraTable->name);
+	fdw_state->query = query.data;
+	elog(DEBUG1, "oracle_fdw: remote query is %s", fdw_state->query);
+
+	/* get PostgreSQL column data types, check that they match Oracle's */
+	checkDataTypes(fdw_state->session, fdw_state->oraTable);
+
+	/* loop through query results */
+	while(oracleIsStatementOpen(fdw_state->session)
+			? oracleFetchNext(fdw_state->session, fdw_state->oraTable)
+			: oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList))
+	{
+		/* allow user to interrupt ANALYZE */
+		vacuum_delay_point();
+
+		++fdw_state->rowcount;
+
+		if (collected_rows < targrows)
+		{
+			/* the first "targrows" rows are added as samples */
+			convertTuple(fdw_state, values, nulls);
+			rows[collected_rows++] = heap_form_tuple(tupDesc, values, nulls);
+		}
+		else
+		{
+			/*
+			 * Skip a number of rows before replacing a random sample row.
+			 * A more detailed description of the algorithm can be found in analyze.c
+			 */
+			if (rowstoskip < 0)
+				rowstoskip = anl_get_next_S(*totalrows, targrows, &rstate);
+
+			if (rowstoskip <= 0)
+			{
+				int k = (int)(targrows * anl_random_fract());
+
+				heap_freetuple(rows[k]);
+				convertTuple(fdw_state, values, nulls);
+				rows[k] = heap_form_tuple(tupDesc, values, nulls);
+			}
+		}
+	}
+
+	*totalrows = (double)fdw_state->rowcount;
+	*totaldeadrows = 0;
+
+	/* report report */
+	ereport(elevel, (errmsg("\"%s\": table contains %lu rows; %d rows in sample",
+			RelationGetRelationName(relation), fdw_state->rowcount, collected_rows)));
+
+	return collected_rows;
+}
+#endif
 
 /*
  * This macro is used by getOracleWhereClause to identify PostgreSQL
@@ -2347,7 +2397,7 @@ List
 		/* don't serialize value */
 		result = lappend(result, serializeInt(param->isExtern));
 	}
-	/* don't serialize startup_cost, total_cost, ignoreClauses, rowcount and columnindex */
+	/* don't serialize startup_cost, total_cost, handle_clauses, rowcount and columnindex */
 
 	return result;
 }
@@ -2412,7 +2462,7 @@ struct OracleFdwState
 	/* these fields are not needed during execution */
 	state->startup_cost = 0;
 	state->total_cost = 0;
-	state->ignoreClauses = NULL;
+	state->handle_clauses = NULL;
 	/* these are not serialized */
 	state->rowcount = 0;
 	state->columnindex = 0;
@@ -2668,6 +2718,130 @@ setParameters(struct paramDesc *paramList, EState *execstate)
 }
 
 /*
+ * convertTuple
+ * 		Convert a result row from Oracle stored in oraTable
+ * 		into arrays of values and null indicators.
+ */
+void
+convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls)
+{
+	char *value = NULL;
+	long value_len = 0;
+	int j, index = -1;
+	ErrorContextCallback errcontext;
+
+	/* initialize error context callback, install it only during conversions */
+	errcontext.callback = errorContextCallback;
+	errcontext.arg = (void *)fdw_state;
+
+	/* assign result values */
+	for (j=0; j<fdw_state->oraTable->npgcols; ++j)
+	{
+		/* for dropped columns, insert a NULL */
+		if (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1)
+		{
+			nulls[j] = true;
+			values[j] = PointerGetDatum(NULL);
+			continue;
+		}
+		else
+			++index;
+
+		/*
+	 	* Columns exceeding the length of the Oracle table will be NULL,
+	 	* as well as columns that are not used in the query.
+	 	*/
+		if (index >= fdw_state->oraTable->ncols
+				|| fdw_state->oraTable->cols[index]->used == 0
+				|| fdw_state->oraTable->cols[index]->val_null == -1)
+		{
+			nulls[j] = true;
+			values[j] = PointerGetDatum(NULL);
+			continue;
+		}
+
+		nulls[j] = false;
+
+		/* get the data and its length */
+		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
+				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+		{
+			/* get the actual LOB contents (palloc'ed) */
+			oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
+		}
+		else
+		{
+			/* for other data types, oraTable contains the results */
+			value = fdw_state->oraTable->cols[index]->val;
+			value_len = fdw_state->oraTable->cols[index]->val_len;
+		}
+
+		/* fill the TupleSlot with the data (after conversion if necessary) */
+		if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
+		{
+			/* binary columns are not converted */
+			bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
+			memcpy(VARDATA(result), value, value_len);
+			SET_VARSIZE(result, value_len + VARHDRSZ);
+
+			values[j] = PointerGetDatum(result);
+		}
+		else
+		{
+			regproc typinput;
+			HeapTuple tuple;
+			Datum dat;
+
+			/* find the appropriate conversion function */
+			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
+			if (!HeapTupleIsValid(tuple))
+			{
+				elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
+			}
+			typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
+			ReleaseSysCache(tuple);
+
+			/* and call it */
+			dat = CStringGetDatum(value);
+
+			/* install error context callback */
+			errcontext.previous = error_context_stack;
+			error_context_stack = &errcontext;
+			fdw_state->columnindex = index;
+
+			switch (fdw_state->oraTable->cols[index]->pgtype)
+			{
+				case BPCHAROID:
+				case VARCHAROID:
+				case TIMESTAMPOID:
+				case TIMESTAMPTZOID:
+				case INTERVALOID:
+				case NUMERICOID:
+					/* these functions require the type modifier */
+					values[j] = OidFunctionCall3(typinput,
+						dat,
+								ObjectIdGetDatum(InvalidOid),
+						Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
+					break;
+				default:
+					/* the others don't */
+					values[j] = OidFunctionCall1(typinput, dat);
+			}
+
+			/* uninstall error context callback */
+			error_context_stack = errcontext.previous;
+		}
+
+		/* free the data buffer for LOBs */
+		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
+				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
+				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+			pfree(value);
+	}
+}
+
+/*
  * errorContextCallback
  * 		Provides the context for an error message during a type input conversion.
  * 		The argument must be a pointer to a "struct OracleFdwState".
@@ -2677,7 +2851,7 @@ errorContextCallback(void *arg)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)arg;
 
-	errcontext("converting column \"%s\" for foreign table scan of \"%s\", row %u",
+	errcontext("converting column \"%s\" for foreign table scan of \"%s\", row %lu",
 		quote_identifier(fdw_state->oraTable->cols[fdw_state->columnindex]->pgname),
 		quote_identifier(fdw_state->oraTable->pgname),
 		fdw_state->rowcount);
