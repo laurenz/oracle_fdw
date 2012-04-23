@@ -1210,6 +1210,10 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 		case T_Var:
 			variable = (Var *)expr;
 
+			/* we cannot handle system columns */
+			if (variable->varattno < 1)
+				return false;
+
 			/*
 			 * Allow boolean columns here.
 			 * They will be rendered as ("COL" <> 0).
@@ -1886,6 +1890,10 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 			break;
 		case T_Var:
 			variable = (Var *)expr;
+
+			/* ignore system columns */
+			if (variable->varattno < 1)
+				break;
 
 			/* get oraTable column index corresponding to this column (-1 if none) */
 			index = oraTable->ncols - 1;
