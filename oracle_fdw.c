@@ -377,7 +377,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	bool plan_costs;
 	List *local_conditions = NIL;
 	int i;
-	double ntuples;
+	double ntuples = -1;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
@@ -410,8 +410,6 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 		/* if baserel->pages > 0, there was an ANALYZE; use the row count estimate */
 		if (baserel->pages > 0)
 			ntuples = baserel->tuples;
-		else
-			ntuples = baserel->rows;  /* use silly default estimate of 1000 */
 
 		/* estimale selectivity locally for all conditions */
 		local_conditions = baserel->baserestrictinfo;
@@ -421,11 +419,15 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	oracleReleaseSession(fdwState->session, 0, 0);
 	fdwState->session = NULL;
 
-	/* estimate how clauses that are not pushed down will influence row count */
-	ntuples = ntuples * clauselist_selectivity(root, local_conditions, 0, JOIN_INNER, NULL);
-	/* make sure that the estimate is not less that 1 */
-	ntuples = clamp_row_est(ntuples);
-	baserel->rows = ntuples;
+	/* apply statistics only if we have a reasonable row count estimate */
+	if (ntuples != -1)
+	{
+		/* estimate how clauses that are not pushed down will influence row count */
+		ntuples = ntuples * clauselist_selectivity(root, local_conditions, 0, JOIN_INNER, NULL);
+		/* make sure that the estimate is not less that 1 */
+		ntuples = clamp_row_est(ntuples);
+		baserel->rows = ntuples;
+	}
 
 	/* store the state so that the other planning functions can use it */
 	baserel->fdw_private = (void *)fdwState;
