@@ -51,6 +51,9 @@
 
 #include "oracle_fdw.h"
 
+/* binary LOBs are truncated to this length (if at all) */
+#define LOB_TRUNC_SIZE 1025
+
 #if PG_VERSION_NUM < 90200
 #define OLD_FDW_API
 #else
@@ -173,7 +176,7 @@ static long deserializeLong(Const *constant);
 static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
 static void exitHook(int code, Datum arg);
 static char *setParameters(struct paramDesc *paramList, EState *execstate);
-static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls);
+static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_long);
 static void errorContextCallback(void *arg);
 
 /*
@@ -584,7 +587,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 		++fdw_state->rowcount;
 
 		/* convert result to arrays of values and null indicators */
-		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull);
+		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
 
 		/* store the virtual tuple */
 		ExecStoreVirtualTuple(slot);
@@ -949,6 +952,8 @@ char
 /*
  * acquireSampleRowsFunc
  * 		Perform a sequential scan on the Oracle table and return a sampe of rows.
+ * 		Binary Oracle LOBs are truncated to LOB_TRUNC_SIZE because anything
+ * 		exceeding this is not used by compute_scalar_stats().
  */
 int
 acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows)
@@ -1023,7 +1028,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 		if (collected_rows < targrows)
 		{
 			/* the first "targrows" rows are added as samples */
-			convertTuple(fdw_state, values, nulls);
+			convertTuple(fdw_state, values, nulls, true);
 			rows[collected_rows++] = heap_form_tuple(tupDesc, values, nulls);
 		}
 		else
@@ -1040,7 +1045,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 				int k = (int)(targrows * anl_random_fract());
 
 				heap_freetuple(rows[k]);
-				convertTuple(fdw_state, values, nulls);
+				convertTuple(fdw_state, values, nulls, true);
 				rows[k] = heap_form_tuple(tupDesc, values, nulls);
 			}
 		}
@@ -2723,9 +2728,10 @@ setParameters(struct paramDesc *paramList, EState *execstate)
  * convertTuple
  * 		Convert a result row from Oracle stored in oraTable
  * 		into arrays of values and null indicators.
+ * 		If trunc_long it true, truncate binary LOBs to LOB_TRUNC_SIZE bytes.
  */
 void
-convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls)
+convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_long)
 {
 	char *value = NULL;
 	long value_len = 0;
@@ -2771,6 +2777,11 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls)
 		{
 			/* get the actual LOB contents (palloc'ed) */
 			oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
+
+			/* truncate binary LOBs if they exceed LOB_TRUNC_SIZE bytes */
+			if (trunc_long && value_len > LOB_TRUNC_SIZE
+					&& fdw_state->oraTable->cols[index]->oratype != ORA_TYPE_CLOB)
+				value_len = LOB_TRUNC_SIZE;
 		}
 		else
 		{
