@@ -952,7 +952,7 @@ char
 /*
  * acquireSampleRowsFunc
  * 		Perform a sequential scan on the Oracle table and return a sampe of rows.
- * 		Binary Oracle LOBs are truncated to LOB_TRUNC_SIZE because anything
+ * 		All values are truncated to LOB_TRUNC_SIZE because anything
  * 		exceeding this is not used by compute_scalar_stats().
  */
 int
@@ -2728,7 +2728,7 @@ setParameters(struct paramDesc *paramList, EState *execstate)
  * convertTuple
  * 		Convert a result row from Oracle stored in oraTable
  * 		into arrays of values and null indicators.
- * 		If trunc_long it true, truncate binary LOBs to LOB_TRUNC_SIZE bytes.
+ * 		If trunc_long it true, truncate values to LOB_TRUNC_SIZE bytes.
  */
 void
 convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_long)
@@ -2778,16 +2778,38 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			/* get the actual LOB contents (palloc'ed) */
 			oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
 
-			/* truncate binary LOBs if they exceed LOB_TRUNC_SIZE bytes */
-			if (trunc_long && value_len > LOB_TRUNC_SIZE
-					&& fdw_state->oraTable->cols[index]->oratype != ORA_TYPE_CLOB)
+			/* if desired, truncate LOBs if they exceed LOB_TRUNC_SIZE bytes */
+			if (trunc_long && value_len > LOB_TRUNC_SIZE)
+			{
 				value_len = LOB_TRUNC_SIZE;
+				/* fill CLOBs with blanks so that there is no character boundary problem */
+				if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+				{
+					memset(value, ' ', LOB_TRUNC_SIZE);
+					value[LOB_TRUNC_SIZE] = '\0';
+				}
+			}
 		}
 		else
 		{
 			/* for other data types, oraTable contains the results */
 			value = fdw_state->oraTable->cols[index]->val;
 			value_len = fdw_state->oraTable->cols[index]->val_len;
+
+			/*
+			 * If desired, truncate text, varchar and char columns exceeding LOB_TRUNC_SIZE bytes.
+			 * Don't truncate Oracle RAW, they can't be bigger than 2000 bytes anyway.
+			 */
+			if (trunc_long && value_len > LOB_TRUNC_SIZE
+					&& (fdw_state->oraTable->cols[index]->pgtype == TEXTOID
+						|| fdw_state->oraTable->cols[index]->pgtype == VARCHAROID
+						|| fdw_state->oraTable->cols[index]->pgtype == BPCHAROID))
+			{
+				value_len = LOB_TRUNC_SIZE;
+				/* fill with blanks so that there is no character boundary problem */
+				memset(value, ' ', LOB_TRUNC_SIZE);
+				value[LOB_TRUNC_SIZE] = '\0';
+			}
 		}
 
 		/* fill the TupleSlot with the data (after conversion if necessary) */
