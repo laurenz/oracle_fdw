@@ -1749,8 +1749,8 @@ void
 oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len, int trunc)
 {
 	OCILobLocator *locp = *(OCILobLocator **)locptr;
-	ub4 amount;
-	sword result;
+	oraub8 amount_byte, amount_char;
+	sword result = OCI_SUCCESS;
 
 	/* initialize result buffer length */
 	*value_len = 0;
@@ -1780,14 +1780,17 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 			*value = oracleRealloc(*value, *value_len + LOB_CHUNK_SIZE + 1);
 
 		/*
-		 * The first time round, "amount = 0" tells OCILobRead to read the whole LOB.
-		 * On subsequent reads, the parameter is ignored.
-		 * After the call, "amount" contains the number of bytes read.
+		 * The first time round, "amount_* = 0" tells OCILobRead to read the whole LOB.
+		 * On subsequent reads, the amount_* parameters are ignored.
+		 * After the call, "amount_byte" contains the number of bytes read.
 		 */
-		amount = trunc ? LOB_TRUNC_SIZE : 0;
+		amount_byte = trunc ? LOB_TRUNC_SIZE : 0;  /* ignored for CLOBs */
+		amount_char = amount_byte;  /* ignored for binary LOBs */
 		result = checkerr(
-			OCILobRead(session->connp->svchp, session->envp->errhp, locp, &amount, (ub4)1,
-				(dvoid *)(*value + *value_len), LOB_CHUNK_SIZE, NULL, NULL, (ub2)0, (ub1)0),
+			OCILobRead2(session->connp->svchp, session->envp->errhp, locp, &amount_byte, &amount_char,
+				(oraub8)1, (dvoid *)(*value + *value_len), (oraub8)LOB_CHUNK_SIZE,
+				(result == OCI_NEED_DATA) ? OCI_NEXT_PIECE : OCI_FIRST_PIECE,
+				NULL, NULL, (ub2)0, (ub1)0),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result == OCI_ERROR)
@@ -1798,7 +1801,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		}
 
 		/* update LOB length */
-		*value_len += amount;
+		*value_len += amount_byte;
 	}
 	while (result == OCI_NEED_DATA);
 
