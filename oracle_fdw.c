@@ -51,8 +51,16 @@
 
 #include "oracle_fdw.h"
 
-/* binary LOBs are truncated to this length (if at all) */
-#define LOB_TRUNC_SIZE 1025
+/* defined in backend/commands/analyze.c */
+#ifndef WIDTH_THRESHOLD
+#define WIDTH_THRESHOLD 1024
+#endif
+
+/*
+ * During ANALYZE, don't retrieve more than this many bytes of the LOB
+ * since they get discarded anyway and it wastes memory and network capacity.
+ */
+const int LOB_TRUNC_SIZE = WIDTH_THRESHOLD + 1;
 
 #if PG_VERSION_NUM < 90200
 #define OLD_FDW_API
@@ -176,7 +184,7 @@ static long deserializeLong(Const *constant);
 static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
 static void exitHook(int code, Datum arg);
 static char *setParameters(struct paramDesc *paramList, EState *execstate);
-static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_long);
+static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob);
 static void errorContextCallback(void *arg);
 
 /*
@@ -2728,10 +2736,10 @@ setParameters(struct paramDesc *paramList, EState *execstate)
  * convertTuple
  * 		Convert a result row from Oracle stored in oraTable
  * 		into arrays of values and null indicators.
- * 		If trunc_long it true, truncate values to LOB_TRUNC_SIZE bytes.
+ * 		If trunc_lob it true, truncate LOBs to LOB_TRUNC_SIZE bytes.
  */
 void
-convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_long)
+convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob)
 {
 	char *value = NULL;
 	long value_len = 0;
@@ -2775,19 +2783,15 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 		{
-			/* get the actual LOB contents (palloc'ed) */
-			oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len);
+			/* get the actual LOB contents (palloc'ed), truncated if desired */
+			oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len, trunc_lob);
 
-			/* if desired, truncate LOBs if they exceed LOB_TRUNC_SIZE bytes */
-			if (trunc_long && value_len > LOB_TRUNC_SIZE)
+			/* fill truncated CLOBs with blanks to avoid character boundary problem */
+			if (trunc_lob && value_len >= LOB_TRUNC_SIZE
+					&& fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 			{
-				value_len = LOB_TRUNC_SIZE;
-				/* fill CLOBs with blanks so that there is no character boundary problem */
-				if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
-				{
-					memset(value, ' ', LOB_TRUNC_SIZE);
-					value[LOB_TRUNC_SIZE] = '\0';
-				}
+				memset(value, ' ', value_len);
+				value[value_len] = '\0';
 			}
 		}
 		else
@@ -2795,21 +2799,6 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			/* for other data types, oraTable contains the results */
 			value = fdw_state->oraTable->cols[index]->val;
 			value_len = fdw_state->oraTable->cols[index]->val_len;
-
-			/*
-			 * If desired, truncate text, varchar and char columns exceeding LOB_TRUNC_SIZE bytes.
-			 * Don't truncate Oracle RAW, they can't be bigger than 2000 bytes anyway.
-			 */
-			if (trunc_long && value_len > LOB_TRUNC_SIZE
-					&& (fdw_state->oraTable->cols[index]->pgtype == TEXTOID
-						|| fdw_state->oraTable->cols[index]->pgtype == VARCHAROID
-						|| fdw_state->oraTable->cols[index]->pgtype == BPCHAROID))
-			{
-				value_len = LOB_TRUNC_SIZE;
-				/* fill with blanks so that there is no character boundary problem */
-				memset(value, ' ', LOB_TRUNC_SIZE);
-				value[LOB_TRUNC_SIZE] = '\0';
-			}
 		}
 
 		/* fill the TupleSlot with the data (after conversion if necessary) */
