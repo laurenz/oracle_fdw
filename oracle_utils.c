@@ -1743,10 +1743,10 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
  * oracleGetLob
  * 		Get the LOB contents and store them in *value and *value_len.
  * 		"oraTable" is passed so that all LOB locators can be freed in case of errors.
- * 		if "trunc" is true, get only the first LOB_TRUNC_SIZE bytes.
+ * 		If "trunc" is nonzero, it contains the number of bytes or characters to get.
  */
 void
-oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len, int trunc)
+oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc)
 {
 	OCILobLocator *locp = *(OCILobLocator **)locptr;
 	oraub8 amount_byte, amount_char;
@@ -1784,7 +1784,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		 * On subsequent reads, the amount_* parameters are ignored.
 		 * After the call, "amount_byte" contains the number of bytes read.
 		 */
-		amount_byte = trunc ? LOB_TRUNC_SIZE : 0;  /* ignored for CLOBs */
+		amount_byte = (oraub8)trunc;  /* ignored for CLOBs */
 		amount_char = amount_byte;  /* ignored for binary LOBs */
 		result = checkerr(
 			OCILobRead2(session->connp->svchp, session->envp->errhp, locp, &amount_byte, &amount_char,

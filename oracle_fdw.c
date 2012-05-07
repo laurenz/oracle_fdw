@@ -56,12 +56,6 @@
 #define WIDTH_THRESHOLD 1024
 #endif
 
-/*
- * During ANALYZE, don't retrieve more than this many bytes of the LOB
- * since they get discarded anyway and it wastes memory and network capacity.
- */
-const int LOB_TRUNC_SIZE = WIDTH_THRESHOLD + 1;
-
 #if PG_VERSION_NUM < 90200
 #define OLD_FDW_API
 #else
@@ -960,7 +954,7 @@ char
 /*
  * acquireSampleRowsFunc
  * 		Perform a sequential scan on the Oracle table and return a sampe of rows.
- * 		All values are truncated to LOB_TRUNC_SIZE because anything
+ * 		All LOB values are truncated to WIDTH_THRESHOLD+1 because anything
  * 		exceeding this is not used by compute_scalar_stats().
  */
 int
@@ -2736,7 +2730,7 @@ setParameters(struct paramDesc *paramList, EState *execstate)
  * convertTuple
  * 		Convert a result row from Oracle stored in oraTable
  * 		into arrays of values and null indicators.
- * 		If trunc_lob it true, truncate LOBs to LOB_TRUNC_SIZE bytes.
+ * 		If trunc_lob it true, truncate LOBs to WIDTH_THRESHOLD+1 bytes.
  */
 void
 convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob)
@@ -2784,15 +2778,9 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 		{
 			/* get the actual LOB contents (palloc'ed), truncated if desired */
-			oracleGetLob(fdw_state->session, fdw_state->oraTable, (void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype, &value, &value_len, trunc_lob);
-
-			/* fill truncated CLOBs with blanks to avoid character boundary problem */
-			if (trunc_lob && value_len >= LOB_TRUNC_SIZE
-					&& fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
-			{
-				memset(value, ' ', value_len);
-				value[value_len] = '\0';
-			}
+			oracleGetLob(fdw_state->session, fdw_state->oraTable,
+				(void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype,
+				&value, &value_len, trunc_lob ? (WIDTH_THRESHOLD+1) : 0);
 		}
 		else
 		{
