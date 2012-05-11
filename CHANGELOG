@@ -1,4 +1,4 @@
-Version 0.9.5 (beta)
+Version 0.9.5 (beta), released 2012-05-11
   Enhancements:
   - Support ANALYZE on foreign tables (from PostgreSQL 9.2 on).
 
