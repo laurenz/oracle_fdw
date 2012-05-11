@@ -7,8 +7,72 @@ conditions and required columns as well as comprehensive EXPLAIN support.
 
 oracle_fdw was written by Laurenz Albe <laurenz.albe@wien.gv.at>
 
-Objects created by the extension
-================================
+This README contains the following sections:
+
+1. Cookbook
+2. Objects created by the extension
+3. Options
+4. Usage
+5. Installation Requirements
+6. Installation
+7. Internals
+8. Problems
+
+1. Cookbook
+===========
+
+This is a simple example how to use oracle_fdw.
+More detailed information will be provided in the sections "Options" and
+"Usage" below.  You should also read the PostgreSQL documentation on
+foreign data and the commands used in the example.
+
+For the sake of this example, let's assume you can connect as operating system
+user "postgres" (or whoever starts the PostgreSQL server) with the following
+command:
+
+  sqlplus orauser/orapwd@//dbserver.mydomain.com/ORADB
+
+That means that the Oracle client and the environment is set up correctly.
+I also assume that oracle_fdw has been compiled and installed (see section
+"Installation" below).
+
+We want to access a table defined like this:
+
+SQL> DESCRIBE oratab
+ Name                            Null?    Type
+ ------------------------------- -------- ------------
+ ID                              NOT NULL NUMBER(5)
+ TEXT                                     VARCHAR2(30)
+ FLOATING                        NOT NULL NUMBER(7,2)
+
+Then configure oracle_fdw as PostgreSQL superuser like this:
+
+pgdb=# CREATE EXTENSION oracle_fdw;
+pgdb=# CREATE SERVER oradb FOREIGN DATA WRAPPER oracle_fdw
+          OPTIONS (dbserver '//dbserver.mydomain.com/ORADB');
+pgdb=# GRANT USAGE ON FOREIGN SERVER oradb TO pguser;
+
+(You can use other naming methods or local connections, see the description of
+option "dbserver" below.)
+
+Then you can connect to PostgreSQL as "pguser" and define:
+
+pgdb=> CREATE USER MAPPING FOR pguser SERVER oradb
+          OPTIONS (user 'orauser', password 'orapwd');
+
+(You can use external authentication to avoid storing Oracle passwords;
+see below.)
+
+pgdb=> CREATE FOREIGN TABLE oratab (
+          id        integer           NOT NULL,
+          text      character varying(30),
+          floating  double precision  NOT NULL
+       ) SERVER oradb OPTIONS (table 'ORATAB');
+
+Now you can use the table like a regular PostgreSQL table.
+
+2. Objects created by the extension
+===================================
 
 FUNCTION oracle_fdw_handler() RETURNS fdw_handler
   Oracle foreign data wrapper handler
@@ -31,8 +95,8 @@ FUNCTION oracle_close_connections() RETURNS void
 This function can be used to close all open Oracle connections in this session.
 See "Usage" below for when this might be useful.
 
-Options
-=======
+3. Options
+==========
 
 Foreign data wrapper options
 ----------------------------
@@ -104,8 +168,8 @@ Foreign table options
   Turn this on only if a) query execution is expensive and b) it has a positive
   influence on PostgreSQL query planning.
 
-Usage
-=====
+4. Usage
+========
 
 Oracle permissions
 ------------------
@@ -229,8 +293,8 @@ result in good (and much faster) row count estimates even if the table option
 Keep in mind that analyzing an Oracle foreign table will result in a full
 sequential table scan.
 
-Installation Requirements
-=========================
+5. Installation Requirements
+============================
 
 PostgreSQL 9.1 or better are required.
 Oracle client version 10 or better is required.
@@ -241,8 +305,8 @@ although I could only test it on Linux and Windows.
 It has been tested with Oracle 10.2 and 11.2.  It might work with other
 versions.  Both Instant Client and the regular client should work.
 
-Installation
-============
+6. Installation
+===============
 
 oracle_fdw has been written as a PostgreSQL extension and uses the Extension
 Building Infrastructure "PGXS".  It should be easy to install.
@@ -283,8 +347,8 @@ To install the extension in a database, connect as superuser and
 
 That will define the required functions and create a foreign data wrapper.
 
-Internals
-=========
+7. Internals
+============
 
 oracle_fdw sets the MODULE of the Oracle session to "postgres" and the
 ACTION to the backend process number.  This can help identifying the Oracle
@@ -304,8 +368,8 @@ Therefore, oracle_fdw adds a comment to the query that contains an MD5 hash
 of the query text.  This is used to search in V$SQL.
 The actual execution plan or cost information is retrieved from V$SQL_PLAN.
 
-Problems
-========
+8. Problems
+===========
 
 Encoding
 --------
