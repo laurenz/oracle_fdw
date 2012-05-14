@@ -962,7 +962,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 {
 	int collected_rows = 0, i;
 	struct OracleFdwState *fdw_state;
-	bool plan_costs, first_column = true;;
+	bool plan_costs, first_column = true;
 	StringInfoData query;
 	TupleDesc tupDesc = RelationGetDescr(relation);
 	Datum *values = (Datum *)palloc(tupDesc->natts * sizeof(Datum));
