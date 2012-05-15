@@ -371,7 +371,7 @@ oracleSession
 		}
 
 		/* set MODULE for the Oracle session */
-		snprintf(pid, 29, "%lu", (unsigned long)getpid());
+		sprintf(pid, "%lu", (unsigned long)getpid());
 		pid[29] = '\0';
 
 		if (checkerr(
