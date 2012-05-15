@@ -125,9 +125,9 @@ struct OracleFdwState {
 /*
  * SQL functions
  */
-extern Datum oracle_fdw_handler(PG_FUNCTION_ARGS);
-extern Datum oracle_fdw_validator(PG_FUNCTION_ARGS);
-extern Datum oracle_close_connections(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum oracle_fdw_handler(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum oracle_fdw_validator(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum oracle_close_connections(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(oracle_fdw_handler);
 PG_FUNCTION_INFO_V1(oracle_fdw_validator);
@@ -185,7 +185,7 @@ static void errorContextCallback(void *arg);
  * Foreign-data wrapper handler function: return a struct with pointers
  * to callback routines.
  */
-Datum
+PGDLLEXPORT Datum
 oracle_fdw_handler(PG_FUNCTION_ARGS)
 {
 	FdwRoutine *fdwroutine = makeNode(FdwRoutine);
@@ -215,7 +215,7 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
  * 		Raise an ERROR if the option or its value are considered invalid
  * 		or a required option is missing.
  */
-Datum
+PGDLLEXPORT Datum
 oracle_fdw_validator(PG_FUNCTION_ARGS)
 {
 	List *options_list = untransformRelOptions(PG_GETARG_DATUM(0));
@@ -298,7 +298,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
  * oracle_close_connections
  * 		Close all open Oracle connections.
  */
-Datum
+PGDLLEXPORT Datum
 oracle_close_connections(PG_FUNCTION_ARGS)
 {
 	elog(DEBUG1, "oracle_fdw: close all Oracle connections");
