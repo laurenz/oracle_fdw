@@ -32,6 +32,9 @@ static int silent = 0;
 static char oraMessage[ERRBUFSIZE];
 static sb4 errcode;
 
+/* set to "1" as soon as OCIEnvCreate is called */
+static int oci_initialized = 0;
+
 /*
  * Linked list for temporary Oracle handles and descriptors.
  * Stores statement and describe handles as well as timetamp and LOB descriptors.
@@ -175,6 +178,9 @@ oracleSession
 				"error connecting to Oracle: OCIEnvCreate failed to create environment handle",
 				oraMessage);
 		}
+
+		/* we can call OCITerminate now */
+		oci_initialized = 1;
 
 		/* allocate error handle */
 		if (checkerr(
@@ -587,7 +593,8 @@ oracleShutdown()
 	oracleCloseConnections();
 
 	/* done with Oracle */
-	(void)OCITerminate(OCI_DEFAULT);
+	if (oci_initialized)
+		(void)OCITerminate(OCI_DEFAULT);
 }
 
 /*

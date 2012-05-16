@@ -1,3 +1,10 @@
+Version 0.9.6 (beta)
+  Bugfixes:
+  - Fix a bug that causes a server crash when the PostgreSQL session is
+    terminated if the only statements involving oracle_fdw during that
+    session were CREATE statements.
+    Per report from Bry Lo.
+
 Version 0.9.5 (beta), released 2012-05-11
   Enhancements:
   - Support ANALYZE on foreign tables (from PostgreSQL 9.2 on).
