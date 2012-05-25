@@ -30,7 +30,7 @@ static int silent = 0;
 /* contains Oracle error messages, set by checkerr() */
 #define ERRBUFSIZE 1000
 static char oraMessage[ERRBUFSIZE];
-static sb4 errcode;
+static sb4 err_code;
 
 /* set to "1" as soon as OCIEnvCreate is called */
 static int oci_initialized = 0;
@@ -658,7 +658,7 @@ struct oraTable
 				(ub4)strlen(mytablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_UNK, dschp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			if (errcode == 4043)
+			if (err_code == 4043)
 				oracleError_sd(FDW_TABLE_NOT_FOUND,
 					"remote table for \"%s\" does not exist or does not allow read access", pgname,
 					oraMessage);
@@ -776,7 +776,7 @@ struct oraTable
 				(ub4)strlen(tablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_TABLE, dschp),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			if (errcode == 4043)
+			if (err_code == 4043)
 				oracleError_sd(FDW_TABLE_NOT_FOUND,
 					"remote table for \"%s\" does not exist or does not allow read access", pgname,
 					oraMessage);
@@ -1378,7 +1378,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	{
 
 		/* create a better message if we lack permissions on V$SQL */
-		if (errcode == 942)
+		if (err_code == 942)
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"no SELECT privilege on V$SQL in the remote database",
 				oraMessage);
@@ -1457,7 +1457,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	{
 
 		/* create a better message if we lack permissions on V$SQL_PLAN */
-		if (errcode == 942)
+		if (err_code == 942)
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"no SELECT privilege on V$SQL_PLAN in the remote database",
 				oraMessage);
@@ -1873,7 +1873,7 @@ checkerr(sword status, dvoid *handle, ub4 handleType)
 	oraMessage[0] = '\0';
 
 	if (status == OCI_SUCCESS_WITH_INFO || status == OCI_ERROR)
-		OCIErrorGet(handle, (ub4)1, NULL, &errcode,
+		OCIErrorGet(handle, (ub4)1, NULL, &err_code,
 			(text *)oraMessage, (ub4)ERRBUFSIZE, handleType);
 
 	if (status == OCI_SUCCESS_WITH_INFO)
@@ -1882,7 +1882,7 @@ checkerr(sword status, dvoid *handle, ub4 handleType)
 	if (status == OCI_NO_DATA)
 	{
 		strcpy(oraMessage, "ORA-00100: no data found");
-		errcode = (sb4)100;
+		err_code = (sb4)100;
 	}
 
 	return status;
