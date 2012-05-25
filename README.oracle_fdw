@@ -374,11 +374,16 @@ The actual execution plan or cost information is retrieved from V$SQL_PLAN.
 Encoding
 --------
 
+Characters stored in an Oracle database that cannot be converted to the
+PostgreSQL database encoding will silently be replaced by "replacement
+characters", typically a normal or inverted question mark, by Oracle.
+You will get no warning or error messages.
+
 If you use a PostgreSQL database encoding that Oracle does not know
 (currently, these are EUC_CN, EUC_KR, LATIN10, MULE_INTERNAL, WIN874
 and SQL_ASCII), non-ASCII characters cannot be translated correctly.
-You will get a warning and the characters will be replaced by "replacement
-characters", typically a question mark.
+You will get a warning in this case, and the characters will be replaced
+by replacement characters as described above.
 
 You can set the "nls_lang" option of the foreign data wrapper to force a
 certain Oracle encoding, but the resulting characters will most likely be
