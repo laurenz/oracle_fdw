@@ -115,8 +115,8 @@ extern struct oraTable *oracleDescribe(oracleSession *session, char *tablename, 
 extern void oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, int block_size, double *startup_cost, double *total_cost, double *rows, int *width);
 extern void oracleExplain(oracleSession *session, const char *query, int *nrows, char ***plan);
 extern int oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList);
-extern int oracleFetchNext(oracleSession *session, struct oraTable *oraTable);
-extern void oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
+extern int oracleFetchNext(oracleSession *session);
+extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
 extern void oracleCleanupTransaction(void *arg);
 
 /*

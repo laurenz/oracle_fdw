@@ -11,6 +11,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
+#if defined _WIN32 || defined _WIN64
+/* for getpid */
+#include <process.h>
+#endif
 
 /* Oracle header */
 #include <oci.h>
@@ -563,7 +567,7 @@ oracleCloseStatement(oracleSession *session)
  * 		Close everything in the cache.
  */
 void
-oracleCloseConnections()
+oracleCloseConnections(void)
 {
 	while (envlist != NULL)
 	{
@@ -585,7 +589,7 @@ oracleCloseConnections()
  * 		This will be called at the end of the PostgreSQL session.
  */
 void
-oracleShutdown()
+oracleShutdown(void)
 {
 	/* don't report error messages */
 	silent = 1;
@@ -1736,7 +1740,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
  * 		Fetch the next result row, return 1 if there is one, else 0.
  */
 int
-oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
+oracleFetchNext(oracleSession *session)
 {
 	sword result;
 
@@ -1764,11 +1768,10 @@ oracleFetchNext(oracleSession *session, struct oraTable *oraTable)
 /*
  * oracleGetLob
  * 		Get the LOB contents and store them in *value and *value_len.
- * 		"oraTable" is passed so that all LOB locators can be freed in case of errors.
  * 		If "trunc" is nonzero, it contains the number of bytes or characters to get.
  */
 void
-oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc)
+oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc)
 {
 	OCILobLocator *locp = *(OCILobLocator **)locptr;
 	oraub8 amount_byte, amount_char;
@@ -1823,7 +1826,7 @@ oracleGetLob(oracleSession *session, struct oraTable *oraTable, void *locptr, or
 		}
 
 		/* update LOB length */
-		*value_len += amount_byte;
+		*value_len += (long)amount_byte;
 	}
 	while (result == OCI_NEED_DATA);
 
@@ -1916,7 +1919,7 @@ char
 
 	if (quote)
 	{
-		for (i=0; i<size; ++i)
+		for (i=0; i<(int)size; ++i)
 		{
 			if (string[i] == '"')
 				++resultsize;
@@ -1926,7 +1929,7 @@ char
 	result = oracleAlloc(resultsize + 1);
 	if (quote)
 		result[++j] = '"';
-	for (i=0; i<size; ++i)
+	for (i=0; i<(int)size; ++i)
 	{
 		result[++j] = string[i];
 		if (quote && string[i] == '"')

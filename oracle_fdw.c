@@ -144,7 +144,7 @@ PG_FUNCTION_INFO_V1(oracle_close_connections);
 /*
  * on-load initializer
  */
-extern void _PG_init(void);
+extern PGDLLEXPORT void _PG_init(void);
 
 /*
  * FDW callback routines
@@ -175,7 +175,7 @@ static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows
 #endif
 static bool getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
-static void checkDataTypes(oracleSession *session, struct oraTable *oraTable);
+static void checkDataTypes(struct oraTable *oraTable);
 static char *guessNlsLang(char *nls_lang);
 static List *serializePlanData(struct OracleFdwState *fdwState);
 static Const *serializeString(const char *s);
@@ -334,7 +334,7 @@ oracle_close_connections(PG_FUNCTION_ARGS)
  * 		backend shutdown.
  */
 void
-_PG_init()
+_PG_init(void)
 {
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 }
@@ -366,7 +366,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(fdwState->session, fdwState->oraTable);
+	checkDataTypes(fdwState->oraTable);
 
 	/* get Oracle's (bad) estimate only if plan_costs is set */
 	if (plan_costs)
@@ -415,7 +415,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(fdwState->session, fdwState->oraTable);
+	checkDataTypes(fdwState->oraTable);
 
 	/* get Oracle's (bad) estimate only if plan_costs is set */
 	if (plan_costs)
@@ -589,7 +589,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 		elog(DEBUG3, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
 		/* fetch the next result row */
-		have_result = oracleFetchNext(fdw_state->session, fdw_state->oraTable);
+		have_result = oracleFetchNext(fdw_state->session);
 	}
 	else
 	{
@@ -1055,11 +1055,11 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	elog(DEBUG1, "oracle_fdw: remote query is %s", fdw_state->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
-	checkDataTypes(fdw_state->session, fdw_state->oraTable);
+	checkDataTypes(fdw_state->oraTable);
 
 	/* loop through query results */
 	while(oracleIsStatementOpen(fdw_state->session)
-			? oracleFetchNext(fdw_state->session, fdw_state->oraTable)
+			? oracleFetchNext(fdw_state->session)
 			: oracleExecuteQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->paramList))
 	{
 		/* allow user to interrupt ANALYZE */
@@ -2193,7 +2193,7 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
  * 		converted to the PostgreSQL data types, raise an error if not.
  */
 void
-checkDataTypes(oracleSession *session, struct oraTable *oraTable)
+checkDataTypes(struct oraTable *oraTable)
 {
 	int i;
 
@@ -2819,7 +2819,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 		{
 			/* for LOBs, get the actual LOB contents (palloc'ed), truncated if desired */
-			oracleGetLob(fdw_state->session, fdw_state->oraTable,
+			oracleGetLob(fdw_state->session,
 				(void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype,
 				&value, &value_len, trunc_lob ? (WIDTH_THRESHOLD+1) : 0);
 		}
