@@ -1,4 +1,9 @@
 Version 0.9.6 (beta)
+  Enhancements:
+  - Support Oracle types LONG and LONG RAW.
+    Introduce table option "max_long" (default 32767) to set the maximal
+    length of such columns.
+
   Bugfixes:
   - Fix a bug that causes a server crash when the PostgreSQL session is
     terminated if the only statements involving oracle_fdw during that

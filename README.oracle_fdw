@@ -152,7 +152,7 @@ Foreign table options
   The table's schema (or owner).  Useful to access tables that do not belong
   to the connecting Oracle user.
 
-- plan_costs (optional)
+- plan_costs (optional, defaults to "off")
 
   If set to yes/on/true, Oracle's cost estimates will be used.  The problem is
   that Oracle gives good estimates for the result size, but not for the cost
@@ -167,6 +167,16 @@ Foreign table options
 
   Turn this on only if a) query execution is expensive and b) it has a positive
   influence on PostgreSQL query planning.
+
+- max_long (optional, defaults to "32767")
+
+  The maximal length of any LONG or LONG RAW columns in the Oracle table.
+  Possible values are integers between 1 and 2147483642.  This amount of
+  memory will be allocated at least twice, so large values will consume a lot
+  of memory.
+  If "max_long" is less than the length of the longest value retrieved,
+  you will receive the error message "ORA-01406: fetched column value was
+  truncated".
 
 4. Usage
 ========
@@ -225,9 +235,11 @@ VARCHAR2                       | char, varchar, text
 NVARCHAR2                      | char, varchar, text
 CLOB                           | char, varchar, text
 CFILE                          | char, varchar, text
+LONG                           | char, varchar, text
 RAW                            | uuid, bytea
 BLOB                           | bytea
 BFILE                          | bytea
+LONG RAW                       | bytea
 NUMBER                         | numeric, float4, float8, char, varchar, text
 NUMBER(n,m) with m<=0          | numeric, float4, float8, int2, int4, int8,
                                |   boolean, char, varchar, text
@@ -247,7 +259,6 @@ INTERVAL DAY TO SECOND         | interval, char, varchar, text
 
 If a NUMBER is converted to a boolean, "0" means "false", everything else "true".
 
-The deprecated types LONG and LONG RAW are not supported at this time.
 NCLOB is currently not supported because Oracle cannot automatically convert
 it to the client encoding.
 

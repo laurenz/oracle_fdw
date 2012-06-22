@@ -613,7 +613,7 @@ oracleIsStatementOpen(oracleSession *session)
  * 		Returns a palloc'ed data structure with the results.
  */
 struct oraTable
-*oracleDescribe(oracleSession *session, char *tablename, char *pgname)
+*oracleDescribe(oracleSession *session, char *tablename, char *pgname, long max_long)
 {
 	struct oraTable *reply;
 	char *mytablename = tablename;
@@ -1022,7 +1022,16 @@ struct oraTable
 				reply->cols[i-1]->oratype = ORA_TYPE_INTERVALD2S;
 				reply->cols[i-1]->val_size = precision + scale + 12;
 				break;
-			case SQLT_LVB:
+			case SQLT_LBI:
+				/* LONG RAW */
+				reply->cols[i-1]->oratype = ORA_TYPE_LONGRAW;
+				reply->cols[i-1]->val_size = max_long + 5;
+				break;
+			case SQLT_LNG:
+				/* LONG */
+				reply->cols[i-1]->oratype = ORA_TYPE_LONG;
+				reply->cols[i-1]->val_size = max_long + 5;
+				break;
 			case SQLT_BIN:
 				/* RAW(n) */
 				reply->cols[i-1]->oratype = ORA_TYPE_RAW;
@@ -1651,6 +1660,12 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 						type = SQLT_STR;
 					else
 						type = SQLT_BIN;
+					break;
+				case ORA_TYPE_LONG:
+					type = SQLT_LVC;
+					break;
+				case ORA_TYPE_LONGRAW:
+					type = SQLT_LVB;
 					break;
 				default:
 					/* all other columns are converted to strings */

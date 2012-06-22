@@ -48,6 +48,7 @@
 #include "utils/timestamp.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "oracle_fdw.h"
 
@@ -81,6 +82,9 @@ struct OracleFdwOption
 #define OPT_SCHEMA "schema"
 #define OPT_TABLE "table"
 #define OPT_PLAN_COSTS "plan_costs"
+#define OPT_MAX_LONG "max_long"
+
+#define DEFAULT_MAX_LONG 32767
 
 /*
  * Valid options for oracle_fdw.
@@ -92,11 +96,15 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_PASSWORD, UserMappingRelationId, true},
 	{OPT_SCHEMA, ForeignTableRelationId, false},
 	{OPT_TABLE, ForeignTableRelationId, true},
-	{OPT_PLAN_COSTS, ForeignTableRelationId, false}
+	{OPT_PLAN_COSTS, ForeignTableRelationId, false},
+	{OPT_MAX_LONG, ForeignTableRelationId, false}
 };
 
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
 
+/*
+ * Ways to handle WHERE clauses.
+ */
 typedef enum {
 	FILTER_LOCALLY,
 	PUSHDOWN,
@@ -277,6 +285,19 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are: on/yes/true or off/no/false")));
+		}
+
+		/* check valid values for max_long */
+		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
+		{
+			char *val = ((Value *) (def->arg))->val.str;
+			char *endptr;
+			unsigned long max_long = strtoul(val, &endptr, 0);
+			if (val[0] == '\0' || *endptr != '\0' || max_long < 1 || max_long > 2147483642ul)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are integers between 1 and 2147483642")));
 		}
 	}
 
@@ -650,7 +671,8 @@ struct OracleFdwState
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *plancosts = NULL, *qualtable;
+	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL, *qualtable;
+	long max_long;
 	StringInfoData buf;
 
 	fdwState->nls_lang = NULL;
@@ -682,7 +704,15 @@ struct OracleFdwState
 			table = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0)
 			plancosts = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
+			maxlong = ((Value *) (def->arg))->val.str;
 	}
+
+	/* convert "max_long" option to number or use default */
+	if (maxlong == NULL)
+		max_long = DEFAULT_MAX_LONG;
+	else
+		max_long = strtol(maxlong, NULL, 0);
 
 	/* check if options are ok */
 	if (table == NULL)
@@ -709,7 +739,7 @@ struct OracleFdwState
 	}
 
 	/* get remote table description */
-	fdwState->oraTable = oracleDescribe(fdwState->session, qualtable, pgtablename);
+	fdwState->oraTable = oracleDescribe(fdwState->session, qualtable, pgtablename, max_long);
 
 	/* add PostgreSQL data to table description */
 	getColumnData(foreigntableid, fdwState->oraTable);
@@ -989,21 +1019,31 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	/* loop columns */
 	for (i=0; i<fdw_state->oraTable->ncols; ++i)
 	{
-		/* all columns are used */
-		fdw_state->oraTable->cols[i]->used = 1;
-
-		/* allocate memory for return value */
-		fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size);
-		fdw_state->oraTable->cols[i]->val_len = 0;
-		fdw_state->oraTable->cols[i]->val_null = 1;
-
-		if (first_column)
-			first_column = false;
+		/* don't get LONG, LONG RAW and untranslatable values */
+		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_OTHER)
+		{
+			fdw_state->oraTable->cols[i]->used = 0;
+		}
 		else
-			appendStringInfo(&query, ", ");
-
-		/* append column name */
-		appendStringInfo(&query, "%s", fdw_state->oraTable->cols[i]->name);
+		{
+			/* all columns are used */
+			fdw_state->oraTable->cols[i]->used = 1;
+	
+			/* allocate memory for return value */
+			fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size);
+			fdw_state->oraTable->cols[i]->val_len = 0;
+			fdw_state->oraTable->cols[i]->val_null = 1;
+	
+			if (first_column)
+				first_column = false;
+			else
+				appendStringInfo(&query, ", ");
+	
+			/* append column name */
+			appendStringInfo(&query, "%s", fdw_state->oraTable->cols[i]->name);
+		}
 	}
 
 	/* if there are no columns, use NULL */
@@ -2169,7 +2209,8 @@ checkDataTypes(oracleSession *session, struct oraTable *oraTable)
 		/* the binary Oracle types can be converted to bytea */
 		if ((oratype == ORA_TYPE_RAW
 				|| oratype == ORA_TYPE_BLOB
-				|| oratype == ORA_TYPE_BFILE)
+				|| oratype == ORA_TYPE_BFILE
+				|| oratype == ORA_TYPE_LONGRAW)
 				&& pgtype == BYTEAOID)
 			continue;
 
@@ -2777,10 +2818,20 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 		{
-			/* get the actual LOB contents (palloc'ed), truncated if desired */
+			/* for LOBs, get the actual LOB contents (palloc'ed), truncated if desired */
 			oracleGetLob(fdw_state->session, fdw_state->oraTable,
 				(void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype,
 				&value, &value_len, trunc_lob ? (WIDTH_THRESHOLD+1) : 0);
+		}
+		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONG
+				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONGRAW)
+		{
+			/* for LONG and LONG RAW, the first 4 bytes contain the length */
+			value_len = *((long *)fdw_state->oraTable->cols[index]->val);
+			/* the rest is the actual data */
+			value = fdw_state->oraTable->cols[index]->val + 4;
+			/* terminating zero byte (needed for LONGs) */
+			value[value_len] = '\0';
 		}
 		else
 		{
