@@ -1,4 +1,4 @@
-Version 0.9.6 (beta)
+Version 0.9.6 (beta), released 2012-06-25
   Enhancements:
   - Support Oracle types LONG and LONG RAW.
     Introduce table option "max_long" (default 32767) to set the maximal

@@ -104,7 +104,7 @@ struct oracleSession
 static void setOracleEnvironment(char *nls_lang);
 static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
 static sword checkerr(sword status, dvoid *handle, ub4 handleType);
-static char *copyOraText(const OraText *string, ub4 size, int quote);
+static char *copyOraText(const OraText *string, int size, int quote);
 static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect);
 static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
@@ -708,7 +708,7 @@ struct oraTable
 					oraMessage);
 			}
 
-			name = copyOraText(ident, ident_size, 1);
+			name = copyOraText(ident, (int)ident_size, 1);
 
 			/* referenced table schema */
 			if (checkerr(
@@ -721,7 +721,7 @@ struct oraTable
 					oraMessage);
 			}
 
-			schema = copyOraText(ident, ident_size, 1);
+			schema = copyOraText(ident, (int)ident_size, 1);
 
 			/* referenced table database link */
 			if (checkerr(
@@ -734,7 +734,7 @@ struct oraTable
 					oraMessage);
 			}
 
-			link = copyOraText(ident, ident_size, 0);
+			link = copyOraText(ident, (int)ident_size, 0);
 
 			/* construct a table name for the next lookup */
 			synonym_len = strlen(name);
@@ -861,7 +861,7 @@ struct oraTable
 				oraMessage);
 		}
 
-		reply->cols[i-1]->name = copyOraText(ident, ident_size, 1);
+		reply->cols[i-1]->name = copyOraText(ident, (int)ident_size, 1);
 
 		/* get the data type */
 		if (checkerr(
@@ -1029,12 +1029,12 @@ struct oraTable
 			case SQLT_LBI:
 				/* LONG RAW */
 				reply->cols[i-1]->oratype = ORA_TYPE_LONGRAW;
-				reply->cols[i-1]->val_size = max_long + 5;
+				reply->cols[i-1]->val_size = max_long + 4;
 				break;
 			case SQLT_LNG:
 				/* LONG */
 				reply->cols[i-1]->oratype = ORA_TYPE_LONG;
-				reply->cols[i-1]->val_size = max_long + 5;
+				reply->cols[i-1]->val_size = max_long + 4;
 				break;
 			case SQLT_BIN:
 				/* RAW(n) */
@@ -1911,7 +1911,7 @@ checkerr(sword status, dvoid *handle, ub4 handleType)
  * 		Returns a palloc'ed string containing a (possibly quoted) copy of "string".
  */
 char
-*copyOraText(const OraText *string, ub4 size, int quote)
+*copyOraText(const OraText *string, int size, int quote)
 {
 	int resultsize = (quote ? size + 2 : size);
 	register int i, j=-1;
@@ -1919,7 +1919,7 @@ char
 
 	if (quote)
 	{
-		for (i=0; i<(int)size; ++i)
+		for (i=0; i<size; ++i)
 		{
 			if (string[i] == '"')
 				++resultsize;
@@ -1929,7 +1929,7 @@ char
 	result = oracleAlloc(resultsize + 1);
 	if (quote)
 		result[++j] = '"';
-	for (i=0; i<(int)size; ++i)
+	for (i=0; i<size; ++i)
 	{
 		result[++j] = string[i];
 		if (quote && string[i] == '"')

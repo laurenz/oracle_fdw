@@ -293,11 +293,11 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 			char *val = ((Value *) (def->arg))->val.str;
 			char *endptr;
 			unsigned long max_long = strtoul(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || max_long < 1 || max_long > 2147483642ul)
+			if (val[0] == '\0' || *endptr != '\0' || max_long < 1 || max_long > 1073741823ul)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 1 and 2147483642")));
+						errhint("Valid values in this context are integers between 1 and 1073741823")));
 		}
 	}
 
@@ -2572,7 +2572,7 @@ struct OracleFdwState
 		state->oraTable->cols[i]->val_size = deserializeLong(lfirst(cell));
 		cell = lnext(cell);
 		/* allocate memory for the result value */
-		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size);
+		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size + 1);
 		state->oraTable->cols[i]->val_len = 0;
 		state->oraTable->cols[i]->val_null = 1;
 	}
