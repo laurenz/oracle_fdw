@@ -1,3 +1,11 @@
+Version 0.9.7 (beta)
+  Bugfixes:
+  - Avoid failure to describe synonyms under certain conditions.
+    This constitutes a compatibility break: table and schema names now
+    have to be exactly as they are in Oracle's catalogs, i.e. without
+    double quotes and normally in uppercase.
+    Per report from Bry Lo.
+
 Version 0.9.6 (beta), released 2012-06-25
   Enhancements:
   - Support Oracle types LONG and LONG RAW.

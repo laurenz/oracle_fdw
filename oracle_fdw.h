@@ -111,7 +111,7 @@ extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
 extern int oracleIsStatementOpen(oracleSession *session);
-extern struct oraTable *oracleDescribe(oracleSession *session, char *tablename, char *pgname, long max_long);
+extern struct oraTable *oracleDescribe(oracleSession *session, char *schema, char *table, char *pgname, long max_long);
 extern void oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, int block_size, double *startup_cost, double *total_cost, double *rows, int *width);
 extern void oracleExplain(oracleSession *session, const char *query, int *nrows, char ***plan);
 extern int oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList);

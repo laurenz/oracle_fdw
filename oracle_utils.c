@@ -617,181 +617,74 @@ oracleIsStatementOpen(oracleSession *session)
  * 		Returns a palloc'ed data structure with the results.
  */
 struct oraTable
-*oracleDescribe(oracleSession *session, char *tablename, char *pgname, long max_long)
+*oracleDescribe(oracleSession *session, char *schema, char *table, char *pgname, long max_long)
 {
 	struct oraTable *reply;
-	char *mytablename = tablename;
-	OCIDescribe *dschp;
-	OCIParam *parmp, *colp;
+	OCIStmt *stmthp;
+	OCIParam *colp;
 	ub2 oraType, charsize, ncols, bin_size;
-	ub2 on = 1;
-	ub1 objtyp, precision, csfrm;
+	ub1 precision, csfrm;
 	sb1 scale;
-	dvoid *collist;
-	char *name, *schema, *link;
+	char *qtable, *qschema = NULL, *tablename, *query;
 	OraText *ident;
 	ub4 ident_size;
-	int i, synonym_len;
-	int synonym_redirections = 10;	/* avoid endless loop in synonym lookup */
+	int i, length;
 
-	/* create and remember describe handle */
-	allocHandle((void **)&dschp, OCI_HTYPE_DESCRIBE, 0, session->envp->envhp, session->connp,
+	/* get a complete quoted table name */
+	qtable = copyOraText(table, strlen(table), 1);
+	length = strlen(qtable);
+	if (schema != NULL)
+	{
+		qschema = copyOraText(schema, strlen(schema), 1);
+		length += strlen(qschema) + 1;
+	}
+	tablename = oracleAlloc(length + 1);
+	tablename[0] = '\0';  /* empty */
+	if (schema != NULL)
+	{
+		strcat(tablename, qschema);
+		strcat(tablename, ".");
+	}
+	strcat(tablename, qtable);
+	oracleFree(qtable);
+	if (schema != NULL)
+		oracleFree(qschema);
+	
+	/* construct a "SELECT * FROM ..." query to describe columns */
+	length += 14;
+	query = oracleAlloc(length + 1);
+	strcpy(query, "SELECT * FROM ");
+	strcat(query, tablename);
+	
+	/* create statement handle */
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
 		FDW_UNABLE_TO_CREATE_REPLY,
-		"error describing remote table: OCIHandleAlloc failed to allocate describe handle");
+		"error describing remote table: OCIHandleAlloc failed to allocate statement handle");
 
-	/* set attribute so that global synonyms are searched too */
+	/* prepare the query */
 	if (checkerr(
-		OCIAttrSet(dschp, OCI_HTYPE_DESCRIBE, (dvoid *)&on, 0,
-			OCI_ATTR_DESC_PUBLIC, session->envp->errhp),
+		OCIStmtPrepare(stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-			"error describing remote table: OCIAttrSet failed to set public attribute in describe handle",
+			"error describing remote table: OCIStmtPrepare failed to prepare query",
 			oraMessage);
 	}
 
-	/*
-	 * Follow the chain of synonyms if there is one.
-	 * This will follow a synonym chain at most "synonym_redirections"
-	 * times to avoid an endless loop (yes, that's possible in Oracle)
-	 */
-	do {
-		/* describe table */
-		if (checkerr(
-			OCIDescribeAny(session->connp->svchp, session->envp->errhp, (dvoid *)mytablename,
-				(ub4)strlen(mytablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_UNK, dschp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			if (err_code == 4043)
-				oracleError_sd(FDW_TABLE_NOT_FOUND,
-					"remote table for \"%s\" does not exist or does not allow read access", pgname,
-					oraMessage);
-			else
-				oracleError_d(FDW_TABLE_NOT_FOUND,
-					"error describing remote table: OCIDescribeAny failed",
-					oraMessage);
-		}
-
-		/* get parameter descriptor */
-		if (checkerr(
-			OCIAttrGet((dvoid *)dschp, (ub4) OCI_HTYPE_DESCRIBE,
-				(dvoid *)&parmp, (ub4 *)0, (ub4)OCI_ATTR_PARAM, session->envp->errhp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-				"error describing remote table: OCIAttrGet failed to get parameter descriptor",
-				oraMessage);
-		}
-
-		/* get type of described object */
-		if (checkerr(
-			OCIAttrGet((dvoid *)parmp, (ub4) OCI_DTYPE_PARAM,
-				(dvoid *)&objtyp, (ub4 *)0, (ub4)OCI_ATTR_PTYPE, session->envp->errhp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-				"error describing remote table: OCIAttrGet failed to get object type",
-				oraMessage);
-		}
-
-		/* for synonyms, get the object that it points to */
-		if (objtyp == OCI_PTYPE_SYN)
-		{
-			/* referenced table name */
-			if (checkerr(
-				OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_NAME, session->envp->errhp),
-				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-			{
-				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-					"error describing remote table: OCIAttrGet failed to get synonym name",
-					oraMessage);
-			}
-
-			name = copyOraText(ident, (int)ident_size, 1);
-
-			/* referenced table schema */
-			if (checkerr(
-				OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_SCHEMA_NAME, session->envp->errhp),
-				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-			{
-				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-					"error describing remote table: OCIAttrGet failed to get synonym schema",
-					oraMessage);
-			}
-
-			schema = copyOraText(ident, (int)ident_size, 1);
-
-			/* referenced table database link */
-			if (checkerr(
-				OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-					(dvoid *)&ident, &ident_size, (ub4)OCI_ATTR_LINK, session->envp->errhp),
-				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-			{
-				oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-					"error describing remote table: OCIAttrGet failed to get synonym dblink",
-					oraMessage);
-			}
-
-			link = copyOraText(ident, (int)ident_size, 0);
-
-			/* construct a table name for the next lookup */
-			synonym_len = strlen(name);
-			if (schema[0] != '\0')
-				synonym_len += strlen(schema) + 1;
-			if (link[0] != '\0')
-				synonym_len += strlen(link) + 1;
-			mytablename = oracleAlloc(synonym_len + 1);
-
-			mytablename[0] = '\0';
-			if (schema[0] != '\0')
-			{
-				strcat(mytablename, schema);
-				strcat(mytablename, ".");
-			}
-			strcpy(mytablename, name);
-			if (link[0] != '\0')
-			{
-				strcat(mytablename, "@");
-				strcat(mytablename, link);
-			}
-		}
-	} while (objtyp == OCI_PTYPE_SYN && --synonym_redirections > 0);
-
-	/* force an Oracle error if the found obkect is neither table nor view */
-	if (objtyp != OCI_PTYPE_TABLE && objtyp != OCI_PTYPE_VIEW)
+	if (checkerr(
+		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)0, (ub4)0,
+			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DESCRIBE_ONLY),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
-		on = 0;
-		/* reset the attribute to search global synonyms */
-		if (checkerr(
-			OCIAttrSet(dschp, OCI_HTYPE_DESCRIBE, (dvoid *)&on, 0,
-				OCI_ATTR_DESC_PUBLIC, session->envp->errhp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-				"error describing remote table: OCIAttrSet failed to reset public attribute in describe handle",
+		if (err_code == 942)
+			oracleError_sd(FDW_TABLE_NOT_FOUND,
+				"remote table for \"%s\" does not exist or does not allow read access", pgname,
 				oraMessage);
-		}
-
-		/* this attempt to describe the table will produce a meaningful error */
-		if (checkerr(
-			OCIDescribeAny(session->connp->svchp, session->envp->errhp, (dvoid *)tablename,
-				(ub4)strlen(tablename), OCI_OTYPE_NAME, OCI_DEFAULT, OCI_PTYPE_TABLE, dschp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			if (err_code == 4043)
-				oracleError_sd(FDW_TABLE_NOT_FOUND,
-					"remote table for \"%s\" does not exist or does not allow read access", pgname,
-					oraMessage);
-			else
-				oracleError_d(FDW_TABLE_NOT_FOUND,
-					"error describing remote table: OCIDescribeAny failed",
-					oraMessage);
-		}
-
-		/* we must not reach this */
-		oracleError(FDW_ERROR, "internal error describing remote table: unexpectedly found table");
+		else
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
+				"error describing remote table: OCIStmtExecute failed to describe table",
+				oraMessage);
 	}
 
 	/* allocate an oraTable struct for the results */
@@ -803,8 +696,8 @@ struct oraTable
 
 	/* get the number of columns */
 	if (checkerr(
-		OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-			(dvoid *)&ncols, (ub4 *)0, (ub4)OCI_ATTR_NUM_COLS, session->envp->errhp),
+		OCIAttrGet((dvoid *)stmthp, (ub4)OCI_HTYPE_STMT,
+			(dvoid *)&ncols, (ub4 *)0, (ub4)OCI_ATTR_PARAM_COUNT, session->envp->errhp),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -814,17 +707,6 @@ struct oraTable
 
 	reply->ncols = ncols;
 	reply->cols = (struct oraColumn **)oracleAlloc(sizeof(struct oraColumn *) * reply->ncols);
-
-	/* get the parameter descriptor for the list of columns */
-	if (checkerr(
-		OCIAttrGet((dvoid *) parmp, (ub4) OCI_DTYPE_PARAM,
-			&collist, (ub4 *)0, (ub4)OCI_ATTR_LIST_COLUMNS, session->envp->errhp),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-			"error describing remote table: OCIAttrGet failed to get column list",
-			oraMessage);
-	}
 
 	/* loop through the column list */
 	for (i=1; i<=reply->ncols; ++i)
@@ -842,7 +724,7 @@ struct oraTable
 
 		/* get the parameter descriptor for the column */
 		if (checkerr(
-			OCIParamGet(collist, OCI_DTYPE_PARAM, session->envp->errhp, (dvoid *)&colp, i),
+			OCIParamGet((void *)stmthp, OCI_HTYPE_STMT, session->envp->errhp, (dvoid *)&colp, i),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
@@ -1052,7 +934,7 @@ struct oraTable
 	}
 
 	/* free describe handle, this takes care of the parameter handles */
-	freeHandle(dschp, session->connp);
+	freeHandle(stmthp, session->connp);
 
 	return reply;
 }

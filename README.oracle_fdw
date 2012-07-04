@@ -143,14 +143,15 @@ Foreign table options
 
 - table (required)
 
-  The Oracle table name.  If unquoted, Oracle will translate it to upper case.
-  For lower case, mixed case and special characters, you must specify this
-  option enclosed in double quotes.
+  The Oracle table name.  This name must be written exactly as it occurs in
+  Oracle's system catalog, so normally consist of uppercase letters only.
 
 - schema (optional)
 
   The table's schema (or owner).  Useful to access tables that do not belong
-  to the connecting Oracle user.
+  to the connecting Oracle user.  This name must be written exactly as it
+  occurs in Oracle's system catalog, so normally consist of uppercase letters
+  only.
 
 - plan_costs (optional, defaults to "off")
 

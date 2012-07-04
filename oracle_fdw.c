@@ -274,7 +274,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		/* check valid values for plan_costs */
 		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0)
 		{
-			char *val = ((Value *) (def->arg))->val.str;
+			char *val = ((Value *)(def->arg))->val.str;
 			if (pg_strcasecmp(val, "on") != 0
 					&& pg_strcasecmp(val, "off") != 0
 					&& pg_strcasecmp(val, "yes") != 0
@@ -287,6 +287,18 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						errhint("Valid values in this context are: on/yes/true or off/no/false")));
 		}
 
+		/* check valid values for "table" and "schema" */
+		if (strcmp(def->defname, OPT_TABLE) == 0
+				|| strcmp(def->defname, OPT_SCHEMA) == 0)
+		{
+			char *val = ((Value *)(def->arg))->val.str;
+			if (strchr(val, '"') != NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Double quotes are not allowed in names.")));
+		}
+
 		/* check valid values for max_long */
 		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
 		{
@@ -297,7 +309,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 1 and 1073741823")));
+						errhint("Valid values in this context are integers between 1 and 1073741823.")));
 		}
 	}
 
@@ -671,9 +683,8 @@ struct OracleFdwState
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL, *qualtable;
+	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL;
 	long max_long;
-	StringInfoData buf;
 
 	fdwState->nls_lang = NULL;
 	fdwState->dbserver = NULL;
@@ -726,20 +737,8 @@ struct OracleFdwState
 	/* connect to Oracle database */
 	fdwState->session = oracleGetSession(fdwState->dbserver, fdwState->user, fdwState->password, fdwState->nls_lang, pgtablename, 0);
 
-	/* (optionally) qualified table name for Oracle */
-	if (schema == NULL)
-	{
-		qualtable = table;
-	}
-	else
-	{
-		initStringInfo(&buf);
-		appendStringInfo(&buf, "%s.%s", schema, table);
-		qualtable = buf.data;
-	}
-
 	/* get remote table description */
-	fdwState->oraTable = oracleDescribe(fdwState->session, qualtable, pgtablename, max_long);
+	fdwState->oraTable = oracleDescribe(fdwState->session, schema, table, pgtablename, max_long);
 
 	/* add PostgreSQL data to table description */
 	getColumnData(foreigntableid, fdwState->oraTable);
@@ -806,7 +805,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 	 */
 	att_rel = heap_open(AttributeRelationId, AccessShareLock);
 	ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(foreigntableid));
-	ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTGreaterStrategyNumber, F_INT2GT, Int16GetDatum((int2)0));
+	ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTGreaterStrategyNumber, F_INT2GT, Int16GetDatum((int16)0));
 	scan = systable_beginscan(att_rel, AttributeRelidNumIndexId, true, SnapshotNow, 2, key);
 
 	/* loop through columns */
