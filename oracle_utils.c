@@ -689,8 +689,7 @@ struct oraTable
 
 	/* allocate an oraTable struct for the results */
 	reply = oracleAlloc(sizeof(struct oraTable));
-	reply->name = oracleAlloc(strlen(tablename) + 1);
-	strcpy(reply->name, tablename);
+	reply->name = tablename;
 	reply->pgname = pgname;
 	reply->npgcols = 0;
 

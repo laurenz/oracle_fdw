@@ -2826,7 +2826,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONGRAW)
 		{
 			/* for LONG and LONG RAW, the first 4 bytes contain the length */
-			value_len = *((long *)fdw_state->oraTable->cols[index]->val);
+			value_len = *((int32 *)fdw_state->oraTable->cols[index]->val);
 			/* the rest is the actual data */
 			value = fdw_state->oraTable->cols[index]->val + 4;
 			/* terminating zero byte (needed for LONGs) */
