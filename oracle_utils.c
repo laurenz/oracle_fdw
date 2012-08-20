@@ -932,7 +932,7 @@ struct oraTable
 		reply->cols[i-1]->val_null = 1;
 	}
 
-	/* free describe handle, this takes care of the parameter handles */
+	/* free statement handle, this takes care of the parameter handles */
 	freeHandle(stmthp, session->connp);
 
 	return reply;
