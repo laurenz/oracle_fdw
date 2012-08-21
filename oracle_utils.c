@@ -104,7 +104,7 @@ struct oracleSession
 static void setOracleEnvironment(char *nls_lang);
 static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
 static sword checkerr(sword status, dvoid *handle, ub4 handleType);
-static char *copyOraText(const OraText *string, int size, int quote);
+static char *copyOraText(const char *string, int size, int quote);
 static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect);
 static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
@@ -742,7 +742,7 @@ struct oraTable
 				oraMessage);
 		}
 
-		reply->cols[i-1]->name = copyOraText(ident, (int)ident_size, 1);
+		reply->cols[i-1]->name = copyOraText((char *)ident, (int)ident_size, 1);
 
 		/* get the data type */
 		if (checkerr(
@@ -1792,7 +1792,7 @@ checkerr(sword status, dvoid *handle, ub4 handleType)
  * 		Returns a palloc'ed string containing a (possibly quoted) copy of "string".
  */
 char
-*copyOraText(const OraText *string, int size, int quote)
+*copyOraText(const char *string, int size, int quote)
 {
 	int resultsize = (quote ? size + 2 : size);
 	register int i, j=-1;
