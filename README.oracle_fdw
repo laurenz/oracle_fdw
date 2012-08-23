@@ -103,7 +103,8 @@ Foreign data wrapper options
 
 (Caution: If you modify the default foreign data wrapper "oracle_fdw",
 any changes will be lost upon dump/restore.  Create a new foreign data wrapper
-if you want the options to be persistent.)
+if you want the options to be persistent.  The SQL script shipped with the
+software contains a CREATE FOREIGN DATA WRAPPER statement you can use.)
 
 - nls_lang (optional)
 
