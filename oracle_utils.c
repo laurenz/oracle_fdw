@@ -622,12 +622,12 @@ struct oraTable
 	struct oraTable *reply;
 	OCIStmt *stmthp;
 	OCIParam *colp;
-	ub2 oraType, charsize, ncols, bin_size;
+	ub2 oraType, charsize, bin_size;
 	ub1 precision, csfrm;
 	sb1 scale;
 	char *qtable, *qschema = NULL, *tablename, *query;
 	OraText *ident;
-	ub4 ident_size;
+	ub4 ncols, ident_size;
 	int i, length;
 
 	/* get a complete quoted table name */
@@ -1136,13 +1136,14 @@ setOracleEnvironment(char *nls_lang)
 void
 oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind)
 {
-	int prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY, child_nr, i;
+	int child_nr, i;
 	const char * const sql_id_query = "SELECT sql_id, child_number FROM (SELECT sql_id, child_number FROM v$sql WHERE sql_text LIKE :sql ORDER BY last_active_time DESC) WHERE rownum=1";
 	char sql_id[20], query_head[50], *p;
 	OCIDefine *defnhp;
 	OCIBind *bndhp;
 	sb2 ind1, ind2, ind3;
 	ub2 len1, len2;
+	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
 
 	/* make sure there is no statement handle stored in session */
 	if (session->stmthp != NULL)
@@ -1370,7 +1371,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 int
 oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList)
 {
-	int prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY, i, col_pos;
+	int i, col_pos;
 	sb2 indicator;
 	struct paramDesc *param;
 	OCIBind *bndhp;
@@ -1380,6 +1381,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	static char dummy[4];
 	static sb4 dummy_size = 4;
 	static sb2 dummy_null;
+	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
 
 	/* make sure there is no statement handle stored in "session" */
 	if (session->stmthp != NULL)
