@@ -5,6 +5,8 @@ Version 0.9.7 (beta)
     have to be exactly as they are in Oracle's catalogs, i.e. without
     double quotes and normally in uppercase.
     Per report from Bry Lo.
+  - Add paths to Makefile so that we can build with Instant Client RPMs.
+    Noticed by Andrew Theaker.
 
 Version 0.9.6 (beta), released 2012-06-25
   Enhancements:
