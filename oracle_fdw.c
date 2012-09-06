@@ -888,7 +888,7 @@ char
 	}
 	/* dummy column if there is no result column we need from Oracle */
 	if (first_col)
-		appendStringInfo(&query, "NULL");
+		appendStringInfo(&query, "'1'");
 	appendStringInfo(&query, " FROM %s", oraTable->name);
 
 	/* allocate enough space for handle_clauses */

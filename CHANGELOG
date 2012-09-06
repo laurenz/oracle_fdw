@@ -9,6 +9,9 @@ Version 0.9.7 (beta)
     Noticed by Andrew Theaker.
   - Fix a memory corruption bug that can lead to crashes, errors and
     wrong results.
+  - Improve bad performance of "SELECT count(*)" on foreign tables.
+    This is a simple workaround for the (not yet confirmed)
+    Oracle bug 14562530.
 
 Version 0.9.6 (beta), released 2012-06-25
   Enhancements:
