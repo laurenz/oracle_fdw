@@ -7,6 +7,8 @@ Version 0.9.7 (beta)
     Per report from Bry Lo.
   - Add paths to Makefile so that we can build with Instant Client RPMs.
     Noticed by Andrew Theaker.
+  - Fix a memory corruption bug that can lead to crashes, errors and
+    wrong results.
 
 Version 0.9.6 (beta), released 2012-06-25
   Enhancements:

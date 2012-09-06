@@ -623,7 +623,8 @@ struct oraTable
 	OCIStmt *stmthp;
 	OCIParam *colp;
 	ub2 oraType, charsize, bin_size;
-	ub1 precision, csfrm;
+	ub1 csfrm;
+	sb2 precision;
 	sb1 scale;
 	char *qtable, *qschema = NULL, *tablename, *query;
 	OraText *ident;
@@ -723,7 +724,7 @@ struct oraTable
 
 		/* get the parameter descriptor for the column */
 		if (checkerr(
-			OCIParamGet((void *)stmthp, OCI_HTYPE_STMT, session->envp->errhp, (dvoid *)&colp, i),
+			OCIParamGet((void *)stmthp, OCI_HTYPE_STMT, session->envp->errhp, (dvoid **)&colp, i),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
