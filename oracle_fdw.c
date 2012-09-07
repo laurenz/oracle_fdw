@@ -8,6 +8,11 @@
 #include "postgres.h"
 
 #include "fmgr.h"
+#if PG_VERSION_NUM < 90300
+#include "access/htup.h"
+#else
+#include "access/htup_details.h"
+#endif
 #include "access/reloptions.h"
 #include "access/xact.h"
 #include "catalog/indexing.h"
