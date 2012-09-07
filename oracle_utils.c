@@ -1588,7 +1588,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 	if (col_pos == 0)
 	{
 		/*
-		 * No columns selected (i.e., SELECT NULL FROM).
+		 * No columns selected (i.e., SELECT '1' FROM).
 		 * Define dummy result columnn.
 		 */
 		if (checkerr(
