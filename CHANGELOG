@@ -1,8 +1,8 @@
-Version 0.9.7 (beta)
+Version 0.9.7 (beta), released 2012-09-07
   Bugfixes:
   - Avoid failure to describe synonyms under certain conditions.
-    This constitutes a compatibility break: table and schema names now
-    have to be exactly as they are in Oracle's catalogs, i.e. without
+    ATTENTION: This constitutes a compatibility break: table and schema names
+    now have to be exactly as they are in Oracle's catalogs, i.e. without
     double quotes and normally in uppercase.
     Per report from Bry Lo.
   - Add paths to Makefile so that we can build with Instant Client RPMs.
