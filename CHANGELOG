@@ -1,3 +1,8 @@
+Version 0.9.8 (beta)
+  Bugfixes:
+  - Add check to make sure that character string data are properly encoded.
+    This is necessary because Oracle does not check this properly.
+    Per report from David E. Wheeler.
 Version 0.9.7 (beta), released 2012-09-07
   Bugfixes:
   - Avoid failure to describe synonyms under certain conditions.

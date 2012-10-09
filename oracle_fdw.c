@@ -31,6 +31,7 @@
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "libpq/md5.h"
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
@@ -2784,6 +2785,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 	long value_len = 0;
 	int j, index = -1;
 	ErrorContextCallback errcontext;
+	Oid pgtype;
 
 	/* initialize error context callback, install it only during conversions */
 	errcontext.callback = errorContextCallback;
@@ -2816,6 +2818,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		}
 
 		nulls[j] = false;
+		pgtype = fdw_state->oraTable->cols[index]->pgtype;
 
 		/* get the data and its length */
 		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
@@ -2845,7 +2848,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		}
 
 		/* fill the TupleSlot with the data (after conversion if necessary) */
-		if (fdw_state->oraTable->cols[index]->pgtype == BYTEAOID)
+		if (pgtype == BYTEAOID)
 		{
 			/* binary columns are not converted */
 			bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
@@ -2861,10 +2864,10 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			Datum dat;
 
 			/* find the appropriate conversion function */
-			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[index]->pgtype));
+			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pgtype));
 			if (!HeapTupleIsValid(tuple))
 			{
-				elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[index]->pgtype);
+				elog(ERROR, "cache lookup failed for type %u", pgtype);
 			}
 			typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
 			ReleaseSysCache(tuple);
@@ -2877,7 +2880,12 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			error_context_stack = &errcontext;
 			fdw_state->columnindex = index;
 
-			switch (fdw_state->oraTable->cols[index]->pgtype)
+			/* for string types, check that the data are in the database encoding */
+			if (pgtype == BPCHAROID || pgtype == VARCHAROID || pgtype == TEXTOID)
+				(void)pg_verify_mbstr(GetDatabaseEncoding(), value, value_len, false);
+
+			/* call the type input function */
+			switch (pgtype)
 			{
 				case BPCHAROID:
 				case VARCHAROID:
