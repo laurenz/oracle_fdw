@@ -129,6 +129,7 @@ extern void *oracleRealloc(void *p, size_t size);
 extern void oracleFree(void *p);
 extern void oracleError_d(oraError sqlstate, const char *message, const char *detail);
 extern void oracleError_sd(oraError sqlstate, const char *message, const char *arg, const char *detail);
+extern void oracleError_ssdh(oraError sqlstate, const char *message, const char *arg1, const char* arg2, const char *detail, const char *hint);
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
 extern void oracleDebug2(const char *message);

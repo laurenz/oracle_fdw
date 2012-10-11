@@ -3017,6 +3017,20 @@ oracleError_sd(oraError sqlstate, const char *message, const char *arg, const ch
 }
 
 /*
+ * oracleError_ssdh
+ * 		Report a PostgreSQL error with two string arguments, a detail message and a hint.
+ */
+void
+oracleError_ssdh(oraError sqlstate, const char *message, const char *arg1, const char* arg2, const char *detail, const char *hint)
+{
+	ereport(ERROR,
+			(errcode(to_sqlstate(sqlstate)),
+			errmsg(message, arg1, arg2),
+			errdetail("%s", detail),
+			errhint("%s", hint)));
+}
+
+/*
  * oracleError_i
  * 		Report a PostgreSQL error with integer argument.
  */

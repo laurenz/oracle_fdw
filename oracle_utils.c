@@ -679,9 +679,9 @@ struct oraTable
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		if (err_code == 942)
-			oracleError_sd(FDW_TABLE_NOT_FOUND,
-				"remote table for \"%s\" does not exist or does not allow read access", pgname,
-				oraMessage);
+			oracleError_ssdh(FDW_TABLE_NOT_FOUND,
+				"Oracle table %s for foreign table \"%s\" does not exist or does not allow read access", tablename, pgname,
+				oraMessage, "Oracle table names are case sensitive (normally all uppercase).");
 		else
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIStmtExecute failed to describe table",
@@ -1772,11 +1772,17 @@ oracleCleanupTransaction(void *arg)
 sword
 checkerr(sword status, dvoid *handle, ub4 handleType)
 {
+	int length;
 	oraMessage[0] = '\0';
 
 	if (status == OCI_SUCCESS_WITH_INFO || status == OCI_ERROR)
+	{
 		OCIErrorGet(handle, (ub4)1, NULL, &err_code,
 			(text *)oraMessage, (ub4)ERRBUFSIZE, handleType);
+		length = strlen(oraMessage);
+		if (length > 0 && oraMessage[length-1] == '\n')
+			oraMessage[length-1] = '\0';
+	}
 
 	if (status == OCI_SUCCESS_WITH_INFO)
 		status = OCI_SUCCESS;
