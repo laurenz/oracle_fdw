@@ -67,7 +67,10 @@ pgdb=> CREATE FOREIGN TABLE oratab (
           id        integer           NOT NULL,
           text      character varying(30),
           floating  double precision  NOT NULL
-       ) SERVER oradb OPTIONS (table 'ORATAB');
+       ) SERVER oradb OPTIONS (schema 'ORAUSER', table 'ORATAB');
+
+(Remember that table and schema name -- the latter is optional -- must
+normally be in uppercase.)
 
 Now you can use the table like a regular PostgreSQL table.
 
