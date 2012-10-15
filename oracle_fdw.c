@@ -42,6 +42,7 @@
 #include "port.h"
 #include "storage/ipc.h"
 #include "storage/lock.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
@@ -180,6 +181,7 @@ static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 #endif
 static bool getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
+static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataTypes(struct oraTable *oraTable);
 static char *guessNlsLang(char *nls_lang);
@@ -1133,6 +1135,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 	char *opername, *left, *right, *arg, oprkind;
 	Const *constant;
 	OpExpr *oper;
+	ScalarArrayOpExpr *arrayoper;
 	CaseExpr *caseexpr;
 	BoolExpr *boolexpr;
 	CoalesceExpr *coalesceexpr;
@@ -1147,7 +1150,9 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 	StringInfoData result;
 	Oid leftargtype, rightargtype, schema;
 	oraType oratype;
-	bool first_arg, can_ignore = true;
+	ArrayIterator iterator;
+	Datum datum;
+	bool first_arg, can_ignore = true, isNull;
 	int index;
 
 	/* default is: cannot convert WHERE clause */
@@ -1162,110 +1167,25 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			constant = (Const *)expr;
 			if (constant->constisnull)
 			{
-				initStringInfo(&result);
-				appendStringInfo(&result, "NULL");
+				/* only translate NULLs of a type Oracle can handle */
+				if (canHandleType(constant->consttype))
+				{
+					initStringInfo(&result);
+					appendStringInfo(&result, "NULL");
+				}
+				else
+					return false;
 			}
 			else
 			{
-				Datum dat = constant->constvalue;
-				char *str, *p;
-				struct pg_tm tm;
-				fsec_t fsec;
-
-				/* get the type's output function */
-				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(constant->consttype));
-				if (!HeapTupleIsValid(tuple))
+				/* get a string representation of the value */
+				char *c = datumToString(constant->constvalue, constant->consttype);
+				if (c == NULL)
+					return false;
+				else
 				{
-					elog(ERROR, "cache lookup failed for type %u", constant->consttype);
-				}
-				typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
-				ReleaseSysCache(tuple);
-
-				/* render the constant in Oracle SQL */
-				switch (constant->consttype) {
-					case TEXTOID:
-					case CHAROID:
-					case BPCHAROID:
-					case VARCHAROID:
-					case NAMEOID:
-						str = DatumGetCString(OidFunctionCall1(typoutput, dat));
-
-						/*
-						 * Don't try to convert empty strings to Oracle.
-						 * Oracle treats empty strings as NULL.
-						 */
-						if (str[0] == '\0')
-							return false;
-
-						/* quote string */
-						initStringInfo(&result);
-						appendStringInfo(&result, "'");
-						for (p=str; *p; ++p)
-						{
-							if (*p == '\'')
-								appendStringInfo(&result, "'");
-							appendStringInfo(&result, "%c", *p);
-						}
-						appendStringInfo(&result, "'");
-						break;
-					case INT8OID:
-					case INT2OID:
-					case INT4OID:
-					case OIDOID:
-					case FLOAT4OID:
-					case FLOAT8OID:
-					case NUMERICOID:
-						str = DatumGetCString(OidFunctionCall1(typoutput, dat));
-						initStringInfo(&result);
-						appendStringInfo(&result, "%s", str);
-						break;
-					case DATEOID:
-						str = DatumGetCString(OidFunctionCall1(typoutput, dat));
-						initStringInfo(&result);
-						appendStringInfo(&result, "TO_TIMESTAMP('%s', 'YYYY-MM-DD')", str);
-						break;
-					case TIMESTAMPOID:
-						str = DatumGetCString(OidFunctionCall1(typoutput, dat));
-						initStringInfo(&result);
-						appendStringInfo(&result, "TO_TIMESTAMP('%s', 'YYYY-MM-DD HH24:MI:SS.FF')", str);
-						break;
-					case TIMESTAMPTZOID:
-						str = DatumGetCString(OidFunctionCall1(typoutput, dat));
-						initStringInfo(&result);
-						appendStringInfo(&result, "TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FFTZH:TZM')", str);
-						break;
-					case INTERVALOID:
-						if (interval2tm(*DatumGetIntervalP(dat), &tm, &fsec) != 0)
-						{
-							elog(ERROR, "could not convert interval to tm");
-						}
-
-						/* only translate intervals that can be translated to INTERVAL DAY TO SECOND */
-						if (tm.tm_year != 0 || tm.tm_mon != 0)
-							return false;
-
-						/* Oracle intervals have only one sign */
-						if (tm.tm_mday < 0 || tm.tm_hour < 0 || tm.tm_min < 0 || tm.tm_sec < 0 || fsec < 0)
-						{
-							str = "-";
-							/* all signs must match */
-							if (tm.tm_mday > 0 || tm.tm_hour > 0 || tm.tm_min > 0 || tm.tm_sec > 0 || fsec > 0)
-								return false;
-							tm.tm_mday = -tm.tm_mday;
-							tm.tm_hour = -tm.tm_hour;
-							tm.tm_min = -tm.tm_min;
-							tm.tm_sec = -tm.tm_sec;
-							fsec = -fsec;
-						}
-						else
-							str = "";
-
-						initStringInfo(&result);
-						appendStringInfo(&result, "INTERVAL '%s%d %d:%d:%d.%d' DAY(9) TO SECOND(9)", str, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
-
-						break;
-					default:
-						return false;
+					initStringInfo(&result);
+					appendStringInfo(&result, "%s", c);
 				}
 			}
 			break;
@@ -1513,6 +1433,81 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 			pfree(opername);
 			break;
+		case T_ScalarArrayOpExpr:
+			arrayoper = (ScalarArrayOpExpr *)expr;
+
+			/* get operator name, left argument type and schema */
+			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(arrayoper->opno));
+			if (! HeapTupleIsValid(tuple))
+			{
+				elog(ERROR, "cache lookup failed for operator %u", arrayoper->opno);
+			}
+			opername = pstrdup(((Form_pg_operator)GETSTRUCT(tuple))->oprname.data);
+			leftargtype = ((Form_pg_operator)GETSTRUCT(tuple))->oprleft;
+			schema = ((Form_pg_operator)GETSTRUCT(tuple))->oprnamespace;
+			ReleaseSysCache(tuple);
+
+			/* get the type's output function */
+			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(leftargtype));
+			if (!HeapTupleIsValid(tuple))
+			{
+				elog(ERROR, "cache lookup failed for type %u", leftargtype);
+			}
+			typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
+			ReleaseSysCache(tuple);
+
+			/* ignore operators in other than the pg_catalog schema */
+			if (schema != PG_CATALOG_NAMESPACE)
+				return false;
+
+			/* don't try to push down anything but IN and NOT IN expressions */
+			if ((strcmp(opername, "=") != 0 || ! arrayoper->useOr)
+					&& (strcmp(opername, "<>") != 0 || arrayoper->useOr))
+				return false;
+
+			if (! canHandleType(leftargtype))
+				return false;
+
+			can_ignore = can_ignore && getOracleWhereClause(session, &left, linitial(arrayoper->args), oraTable, paramList);
+			if (left == NULL)
+				return false;
+
+			/* begin to compose result */
+			initStringInfo(&result);
+			appendStringInfo(&result, "(%s %s (", left, arrayoper->useOr ? "IN" : "NOT IN");
+
+			/* the second and last argument must be a Const of ArrayType */
+			constant = (Const *)llast(arrayoper->args);
+
+			/* loop through the array elements */
+			iterator = array_create_iterator(DatumGetArrayTypeP(constant->constvalue), 0);
+			first_arg = true;
+			while (array_iterate(iterator, &datum, &isNull))
+			{
+				char *c;
+
+				if (isNull)
+					c = "NULL";
+				else
+				{
+					c = datumToString(datum, leftargtype);
+					if (c == NULL)
+					{
+						array_free_iterator(iterator);
+						return false;
+					}
+				}
+
+				/* append the srgument */
+				appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", c);
+				first_arg = false;
+			}
+			array_free_iterator(iterator);
+
+			/* two parentheses close the expression */
+			appendStringInfo(&result, "))");
+
+			break;
 		case T_DistinctExpr:
 			/* get argument type */
 			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(((DistinctExpr *)expr)->opno));
@@ -1583,7 +1578,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 					boolexpr->boolop == NOT_EXPR ? "NOT " : "",
 					arg);
 
-			for_each_cell(cell, lnext(boolexpr->args->head))
+			for_each_cell(cell, lnext(list_head(boolexpr->args)))
 			{
 				can_ignore = can_ignore && getOracleWhereClause(session, &arg, (Expr *)lfirst(cell), oraTable, paramList);
 				if (arg == NULL)
@@ -1962,6 +1957,120 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 	*where = result.data;
 	return can_ignore;
+}
+
+/*
+ * datumToString
+ * 		Convert a Datum to a string by calling the type output function.
+ * 		Returns the result or NULL if it cannot be converted to Oracle SQL.
+ */
+static char
+*datumToString(Datum datum, Oid type)
+{
+	StringInfoData result;
+	regproc typoutput;
+	HeapTuple tuple;
+	char *str, *p;
+	struct pg_tm tm;
+	fsec_t fsec;
+
+	/* get the type's output function */
+	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type));
+	if (!HeapTupleIsValid(tuple))
+	{
+		elog(ERROR, "cache lookup failed for type %u", type);
+	}
+	typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
+	ReleaseSysCache(tuple);
+
+	/* render the constant in Oracle SQL */
+	switch (type) {
+		case TEXTOID:
+		case CHAROID:
+		case BPCHAROID:
+		case VARCHAROID:
+		case NAMEOID:
+			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+
+			/*
+			 * Don't try to convert empty strings to Oracle.
+			 * Oracle treats empty strings as NULL.
+			 */
+			if (str[0] == '\0')
+				return NULL;
+
+			/* quote string */
+			initStringInfo(&result);
+			appendStringInfo(&result, "'");
+			for (p=str; *p; ++p)
+			{
+				if (*p == '\'')
+					appendStringInfo(&result, "'");
+				appendStringInfo(&result, "%c", *p);
+			}
+			appendStringInfo(&result, "'");
+			break;
+		case INT8OID:
+		case INT2OID:
+		case INT4OID:
+		case OIDOID:
+		case FLOAT4OID:
+		case FLOAT8OID:
+		case NUMERICOID:
+			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			initStringInfo(&result);
+			appendStringInfo(&result, "%s", str);
+			break;
+		case DATEOID:
+			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			initStringInfo(&result);
+			appendStringInfo(&result, "TO_TIMESTAMP('%s', 'YYYY-MM-DD')", str);
+			break;
+		case TIMESTAMPOID:
+			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			initStringInfo(&result);
+			appendStringInfo(&result, "TO_TIMESTAMP('%s', 'YYYY-MM-DD HH24:MI:SS.FF')", str);
+			break;
+		case TIMESTAMPTZOID:
+			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			initStringInfo(&result);
+			appendStringInfo(&result, "TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FFTZH:TZM')", str);
+			break;
+		case INTERVALOID:
+			if (interval2tm(*DatumGetIntervalP(datum), &tm, &fsec) != 0)
+			{
+				elog(ERROR, "could not convert interval to tm");
+			}
+
+			/* only translate intervals that can be translated to INTERVAL DAY TO SECOND */
+			if (tm.tm_year != 0 || tm.tm_mon != 0)
+				return NULL;
+
+			/* Oracle intervals have only one sign */
+			if (tm.tm_mday < 0 || tm.tm_hour < 0 || tm.tm_min < 0 || tm.tm_sec < 0 || fsec < 0)
+			{
+				str = "-";
+				/* all signs must match */
+				if (tm.tm_mday > 0 || tm.tm_hour > 0 || tm.tm_min > 0 || tm.tm_sec > 0 || fsec > 0)
+					return false;
+				tm.tm_mday = -tm.tm_mday;
+				tm.tm_hour = -tm.tm_hour;
+				tm.tm_min = -tm.tm_min;
+				tm.tm_sec = -tm.tm_sec;
+				fsec = -fsec;
+			}
+			else
+				str = "";
+
+			initStringInfo(&result);
+			appendStringInfo(&result, "INTERVAL '%s%d %d:%d:%d.%d' DAY(9) TO SECOND(9)", str, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
+
+			break;
+		default:
+			return NULL;
+	}
+
+	return result.data;
 }
 
 /*

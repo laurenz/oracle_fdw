@@ -1,4 +1,7 @@
 Version 0.9.8 (beta)
+  Enhancements:
+  - Add support for pushdown of IN and NOT IN clauses in WHERE conditions.
+
   Bugfixes:
   - Add check to make sure that character string data are properly encoded.
     This is necessary because Oracle does not check this properly.
