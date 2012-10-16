@@ -1,11 +1,13 @@
-Version 0.9.8 (beta)
+Version 0.9.8 (beta), released 2012-10-16
   Enhancements:
   - Add support for pushdown of IN and NOT IN clauses in WHERE conditions.
+    As suggested by Wang Dong.
 
   Bugfixes:
   - Add check to make sure that character string data are properly encoded.
     This is necessary because Oracle does not check this properly.
     Per report from David E. Wheeler.
+
 Version 0.9.7 (beta), released 2012-09-07
   Bugfixes:
   - Avoid failure to describe synonyms under certain conditions.
