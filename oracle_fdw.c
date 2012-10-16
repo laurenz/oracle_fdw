@@ -1504,6 +1504,10 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			}
 			array_free_iterator(iterator);
 
+			/* don't allow empty arrays */
+			if (first_arg)
+				return false;
+
 			/* two parentheses close the expression */
 			appendStringInfo(&result, "))");
 
