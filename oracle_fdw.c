@@ -2897,12 +2897,12 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 	char *value = NULL;
 	long value_len = 0;
 	int j, index = -1;
-	ErrorContextCallback errcontext;
+	ErrorContextCallback errcb;
 	Oid pgtype;
 
 	/* initialize error context callback, install it only during conversions */
-	errcontext.callback = errorContextCallback;
-	errcontext.arg = (void *)fdw_state;
+	errcb.callback = errorContextCallback;
+	errcb.arg = (void *)fdw_state;
 
 	/* assign result values */
 	for (j=0; j<fdw_state->oraTable->npgcols; ++j)
@@ -2989,8 +2989,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			dat = CStringGetDatum(value);
 
 			/* install error context callback */
-			errcontext.previous = error_context_stack;
-			error_context_stack = &errcontext;
+			errcb.previous = error_context_stack;
+			error_context_stack = &errcb;
 			fdw_state->columnindex = index;
 
 			/* for string types, check that the data are in the database encoding */
@@ -3018,7 +3018,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			}
 
 			/* uninstall error context callback */
-			error_context_stack = errcontext.previous;
+			error_context_stack = errcb.previous;
 		}
 
 		/* free the data buffer for LOBs */
