@@ -1,3 +1,9 @@
+Version 0.9.9 (beta)
+  Bugfixes:
+  - Fix error "ORA-01406: fetched column value was truncated"
+    caused by timestamps with precision greater than 6.
+    Per report from David E. Wheeler.
+
 Version 0.9.8 (beta), released 2012-10-16
   Enhancements:
   - Add support for pushdown of IN and NOT IN clauses in WHERE conditions.

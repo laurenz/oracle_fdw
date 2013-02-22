@@ -890,13 +890,13 @@ struct oraTable
 			case SQLT_TIMESTAMP:
 				/* TIMESTAMP */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMP;
-				reply->cols[i-1]->val_size = 27;
+				reply->cols[i-1]->val_size = 30;
 				break;
 			case SQLT_TIMESTAMP_TZ:
 			case SQLT_TIMESTAMP_LTZ:
 				/* TIMESTAMP WITH TIMEZONE and TIMESTAMP WITH LOCAL TIMEZONE */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMPTZ;
-				reply->cols[i-1]->val_size = 33;
+				reply->cols[i-1]->val_size = 36;
 				break;
 			case SQLT_INTERVAL_YM:
 				/* INTERVAL YEAR TO MONTH */
