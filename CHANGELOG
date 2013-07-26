@@ -3,6 +3,8 @@ Version 0.9.9 (beta)
   - Fix error "ORA-01406: fetched column value was truncated"
     caused by timestamps with precision greater than 6.
     Per report from David E. Wheeler.
+  - Fix crash with IN lists that do not entirely consist of constants.
+    Per report from Wang Dong.
 
 Version 0.9.8 (beta), released 2012-10-16
   Enhancements:

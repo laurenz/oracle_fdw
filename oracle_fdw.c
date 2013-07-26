@@ -1472,11 +1472,15 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			if (left == NULL)
 				return false;
 
+			/* only push down IN expressions with constant second (=last) argument */
+			if (((Expr *)llast(arrayoper->args))->type != T_Const)
+				return false;
+
 			/* begin to compose result */
 			initStringInfo(&result);
 			appendStringInfo(&result, "(%s %s (", left, arrayoper->useOr ? "IN" : "NOT IN");
 
-			/* the second and last argument must be a Const of ArrayType */
+			/* the second (=last) argument must be a Const of ArrayType */
 			constant = (Const *)llast(arrayoper->args);
 
 			/* loop through the array elements */
