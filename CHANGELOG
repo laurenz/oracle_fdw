@@ -1,10 +1,19 @@
 Version 0.9.9 (beta)
+  Enhancements:
+  - Enable build with PostgreSQL 9.3.
+
   Bugfixes:
   - Fix error "ORA-01406: fetched column value was truncated"
     caused by timestamps with precision greater than 6.
     Per report from David E. Wheeler.
   - Fix crash with IN lists that do not entirely consist of constants.
     Per report from Wang Dong.
+  - Fix handling of parameters during pushdown of WHERE conditions.
+    The previous implementation returned incorrect results for certain
+    queries like SELECT ... WHERE colname = (SELECT ...)
+    ATTENTION: Since correct handling of parameters is not possible before
+    PostgreSQL 9.2, query parameters will not be pushed down in PostgreSQL 9.1.
+    This is a regression for cases where this happened to work.
 
 Version 0.9.8 (beta), released 2012-10-16
   Enhancements:

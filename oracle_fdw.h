@@ -83,11 +83,10 @@ typedef enum {
 struct paramDesc
 {
 	char *name;            /* name we give the parameter */
-	int number;            /* index in the array of parameters */
 	Oid type;              /* PostgreSQL data type */
 	oraBindType bindType;  /* which type to use for binding to Oracle statement */
 	char *value;           /* value rendered as string */
-	int isExtern;          /* false for internal parameters */
+	void *node;            /* the executable expression */
 	struct paramDesc *next;
 };
 

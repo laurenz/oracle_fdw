@@ -34,6 +34,7 @@
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
+#include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
@@ -128,6 +129,7 @@ struct OracleFdwState {
 	char *nls_lang;                /* Oracle locale information */
 	oracleSession *session;        /* encapsulates the active Oracle session */
 	char *query;                   /* query we issue against Oracle */
+	List *params;                  /* list of parameters needed for the query */
 	struct paramDesc *paramList;   /* description of parameters needed for the query */
 	struct oraTable *oraTable;     /* description of the remote Oracle table */
 	Cost startup_cost;             /* cost estimate, only needed for planning */
@@ -175,12 +177,12 @@ static void oracleEndForeignScan(ForeignScanState *node);
  */
 static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs);
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, handleClause **handle_clauses);
+static char *createQuery(oracleSession *session, RelOptInfo *foreignrel, struct oraTable *oraTable, List **params, handleClause **handle_clauses);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 #endif
-static bool getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList);
+static bool getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **where, Expr *expr, const struct oraTable *oraTable, List **params);
 static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataTypes(struct oraTable *oraTable);
@@ -193,7 +195,7 @@ static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
 static void cleanupTransaction(ResourceReleasePhase phase, bool isCommit, bool isTopLevel, void *arg);
 static void exitHook(int code, Datum arg);
-static char *setParameters(struct paramDesc *paramList, EState *execstate);
+static char *setParameters(struct paramDesc *paramList, EState *execstate, ExprContext *econtext);
 static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob);
 static void errorContextCallback(void *arg);
 
@@ -382,7 +384,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	fdwState = getFdwState(foreigntableid, &plan_costs);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel->reltargetlist, baserel->baserestrictinfo, fdwState->oraTable, &(fdwState->paramList), &(fdwState->handle_clauses));
+	fdwState->query = createQuery(fdwState->session, baserel, fdwState->oraTable, &(fdwState->params), &(fdwState->handle_clauses));
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -431,7 +433,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	fdwState = getFdwState(foreigntableid, &plan_costs);
 
 	/* construct Oracle query and get the list of parameters and antions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel->reltargetlist, baserel->baserestrictinfo, fdwState->oraTable, &(fdwState->paramList), &(fdwState->handle_clauses));
+	fdwState->query = createQuery(fdwState->session, baserel, fdwState->oraTable, &(fdwState->params), &(fdwState->handle_clauses));
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -511,7 +513,7 @@ ForeignScan
 	keep_clauses = extract_actual_clauses(keep_clauses, false);
 
 	/* Create the ForeignScan node */
-	return make_foreignscan(tlist, keep_clauses, baserel->relid, NIL, fdw_private);
+	return make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private);
 }
 
 bool
@@ -565,16 +567,72 @@ oracleExplainForeignScan(ForeignScanState *node, ExplainState *es)
 void
 oracleBeginForeignScan(ForeignScanState *node, int eflags)
 {
+	ForeignScan *fsplan = (ForeignScan *)node->ss.ps.plan;
 #ifdef OLD_FDW_API
-	List *fdw_private = ((FdwPlan *)((ForeignScan *)node->ss.ps.plan)->fdwplan)->fdw_private;
+	List *fdw_private = ((FdwPlan *)fsplan->fdwplan)->fdw_private;
 #else
-	List *fdw_private = ((ForeignScan *)node->ss.ps.plan)->fdw_private;
+	List *fdw_private = fsplan->fdw_private;
+	List *exec_exprs;
+	ListCell *cell;
+	int index;
 #endif
+	struct paramDesc *paramDesc;
 	struct OracleFdwState *fdw_state;
 
 	/* deserialize private plan data */
 	fdw_state = deserializePlanData(fdw_private);
 	node->fdw_state = (void *)fdw_state;
+
+#ifndef OLD_FDW_API
+	/* create an ExprState tree for the parameter expressions */
+	exec_exprs = (List *)ExecInitExpr((Expr *)fsplan->fdw_exprs, (PlanState *)node);
+
+	/* create the list of parameters */
+	index = 0;
+	foreach(cell, exec_exprs)
+	{
+		ExprState *expr = (ExprState *)lfirst(cell);
+		char parname[10];
+
+		/* count, but skip deleted entries */
+		++index;
+		if (expr == NULL)
+			continue;
+
+		/* create a new entry in the parameter list */
+		paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
+		snprintf(parname, 10, ":p%d", index);
+		paramDesc->name = pstrdup(parname);
+		paramDesc->type = exprType((Node *)(expr->expr));
+
+		if (paramDesc->type == TEXTOID || paramDesc->type == VARCHAROID
+				|| paramDesc->type == BPCHAROID || paramDesc->type == CHAROID)
+			paramDesc->type = BIND_STRING;
+		else if (paramDesc->type == DATEOID || paramDesc->type == TIMESTAMPOID
+				|| paramDesc->type == TIMESTAMPTZOID)
+			paramDesc->bindType = BIND_TIMESTAMP;
+		else
+			paramDesc->bindType = BIND_NUMBER;
+
+		paramDesc->value = NULL;
+		paramDesc->node = expr;
+		paramDesc->next = fdw_state->paramList;
+		fdw_state->paramList = paramDesc;
+	}
+#endif
+
+	/* add a fake parameter ":now" if that string appears in the query */
+	if (strstr(fdw_state->query, ":now") != NULL)
+	{
+		paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
+		paramDesc->name = pstrdup(":now");
+		paramDesc->type = TIMESTAMPTZOID;
+		paramDesc->bindType = BIND_TIMESTAMP;
+		paramDesc->value = NULL;
+		paramDesc->node = NULL;
+		paramDesc->next = fdw_state->paramList;
+		fdw_state->paramList = paramDesc;
+	}
 
 	elog(DEBUG1, "oracle_fdw: begin foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
 
@@ -600,6 +658,7 @@ TupleTableSlot *
 oracleIterateForeignScan(ForeignScanState *node)
 {
 	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
+	ExprContext *econtext = node->ss.ps.ps_ExprContext;
 	EState *execstate = node->ss.ps.state;
 	int have_result;
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
@@ -614,7 +673,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 	else
 	{
 		/* fill the parameter list with the actual values in execstate */
-		char *paramInfo = setParameters(fdw_state->paramList, execstate);
+		char *paramInfo = setParameters(fdw_state->paramList, execstate, econtext);
 
 		/* execute the Oracle statement and fetch the first row */
 		elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
@@ -698,6 +757,7 @@ struct OracleFdwState
 	fdwState->dbserver = NULL;
 	fdwState->user = NULL;
 	fdwState->password = NULL;
+	fdwState->params = NIL;
 	fdwState->paramList = NULL;
 	fdwState->handle_clauses = NULL;
 
@@ -854,14 +914,15 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		As a side effect. we also mark the used columns in oraTable.
  */
 char
-*createQuery(oracleSession *session, List *columnlist, List *conditions, struct oraTable *oraTable, struct paramDesc **paramList, handleClause **handle_clauses)
+*createQuery(oracleSession *session, RelOptInfo *foreignrel, struct oraTable *oraTable, List **params, handleClause **handle_clauses)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
-	int i, clause_count = -1;
-	char *where, *wherecopy, *p, md5[33];
+	int i, clause_count = -1, index;
+	char *where, *wherecopy, *p, md5[33], parname[10];
 	StringInfoData query, result;
-	struct paramDesc *param, *prev_param = NULL;
+	List *columnlist = foreignrel->reltargetlist,
+		*conditions = foreignrel->baserestrictinfo;
 
 	/* first, find all the columns to include in the select list */
 
@@ -910,7 +971,7 @@ char
 	foreach(cell, conditions)
 	{
 		/* try to convert each condition to Oracle SQL */
-		bool can_ignore = getOracleWhereClause(session, &where, ((RestrictInfo *)lfirst(cell))->clause, oraTable, paramList);
+		bool can_ignore = getOracleWhereClause(session, foreignrel, &where, ((RestrictInfo *)lfirst(cell))->clause, oraTable, params);
 		if (where != NULL) {
 			/* append new WHERE clause to query string */
 			if (first_col)
@@ -941,31 +1002,18 @@ char
 	}
 
 	/* remove all parameters that do not actually occur in the query */
-	param = *paramList;
-	while (param != NULL)
+	index = 0;
+	foreach(cell, *params)
 	{
-		if (strstr(wherecopy, param->name) == NULL)
+		++index;
+		snprintf(parname, 10, ":p%d", index);
+		if (strstr(wherecopy, parname) == NULL)
 		{
-			/* remove parameter from linked list */
-			if (prev_param == NULL)
-				*paramList = param->next;
-			else
-				prev_param->next = param->next;
-
-			/* free memory */
-			pfree(param->name);
-			pfree(param);
+			/* set the element to NULL to indicate it's gone */
+			lfirst(cell) = NULL;
 		}
-		else
-		{
-			prev_param = param;
-		}
-
-		if (prev_param == NULL)
-			param = *paramList;
-		else
-			param = prev_param->next;
 	}
+
 	pfree(wherecopy);
 
 	/*
@@ -1130,7 +1178,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
  * 		will be stored in paramList.
  */
 bool
-getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const struct oraTable *oraTable, struct paramDesc **paramList)
+getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **where, Expr *expr, const struct oraTable *oraTable, List **params)
 {
 	char *opername, *left, *right, *arg, oprkind;
 	Const *constant;
@@ -1141,7 +1189,6 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 	CoalesceExpr *coalesceexpr;
 	CoerceViaIO *coerce;
 	Param *param;
-	struct paramDesc *paramDesc;
 	Var *variable;
 	FuncExpr *func;
 	regproc typoutput;
@@ -1190,41 +1237,34 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			}
 			break;
 		case T_Param:
+#ifdef OLD_FDW_API
+			/* don't try to push down parameters with 9.1 */
+			return false;
+#endif
 			param = (Param *)expr;
 
 			/* don't try to handle interval parameters */
 			if (! canHandleType(param->paramtype) || param->paramtype == INTERVALOID)
 				return false;
 
-			/*
-			 * external parameters will be called :e1, :e2, etc.
-			 * internal parameters will be called :i0, :i1, etc.
-			 */
+			/* find the index in the parameter list */
+			index = 0;
+			foreach(cell, *params)
+			{
+				++index;
+				if (equal(param, (Node *)lfirst(cell)))
+					break;
+			}
+			if (cell == NULL)
+			{
+				/* add the parameter to the list */
+				++index;
+				*params = lappend(*params, param);
+			}
+
+			/* parameters will be called :p1, :p2 etc. */
 			initStringInfo(&result);
-			appendStringInfo(&result,
-					":%c%d",
-					(param->paramkind == PARAM_EXTERN ? 'e' : 'i'),
-					param->paramid);
-
-			/* create a new entry in the parameter list */
-			paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
-			paramDesc->name = pstrdup(result.data);
-			paramDesc->number = param->paramid;
-			paramDesc->type = param->paramtype;
-
-			if (param->paramtype == TEXTOID || param->paramtype == VARCHAROID
-					|| param->paramtype == BPCHAROID || param->paramtype == CHAROID)
-				paramDesc->bindType = BIND_STRING;
-			else if (param->paramtype == DATEOID || param->paramtype == TIMESTAMPOID
-					|| param->paramtype == TIMESTAMPTZOID)
-				paramDesc->bindType = BIND_TIMESTAMP;
-			else
-				paramDesc->bindType = BIND_NUMBER;
-
-			paramDesc->value = NULL;
-			paramDesc->isExtern = (param->paramkind == PARAM_EXTERN);
-			paramDesc->next = *paramList;
-			*paramList = paramDesc;
+			appendStringInfo(&result, ":p%d", index);
 
 			/* we have to reevaluate conditions with internal parameters */
 			if (param->paramkind != PARAM_EXTERN)
@@ -1234,60 +1274,95 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 		case T_Var:
 			variable = (Var *)expr;
 
-			/* we cannot handle system columns */
-			if (variable->varattno < 1)
-				return false;
-
-			/*
-			 * Allow boolean columns here.
-			 * They will be rendered as ("COL" <> 0).
-			 */
-			if (! (canHandleType(variable->vartype) || variable->vartype == BOOLOID))
-				return false;
-
-			/* get oraTable column index corresponding to this column (-1 if none) */
-			index = oraTable->ncols - 1;
-			while (index >= 0 && oraTable->cols[index]->pgattnum != variable->varattno)
-				--index;
-
-			/* if no Oracle column corresponds, translate as NULL */
-			if (index == -1)
+			if (variable->varno == foreignrel->relid && variable->varlevelsup == 0)
 			{
+				/* the variable belongs to the foreign table, replace it with the name */
+
+				/* we cannot handle system columns */
+				if (variable->varattno < 1)
+					return false;
+	
+				/*
+				 * Allow boolean columns here.
+				 * They will be rendered as ("COL" <> 0).
+				 */
+				if (! (canHandleType(variable->vartype) || variable->vartype == BOOLOID))
+					return false;
+	
+				/* get oraTable column index corresponding to this column (-1 if none) */
+				index = oraTable->ncols - 1;
+				while (index >= 0 && oraTable->cols[index]->pgattnum != variable->varattno)
+					--index;
+	
+				/* if no Oracle column corresponds, translate as NULL */
+				if (index == -1)
+				{
+					initStringInfo(&result);
+					appendStringInfo(&result, "NULL");
+					break;
+				}
+	
+				/*
+				 * Don't try to convert a column reference if the type is
+				 * converted from a non-string type in Oracle to a string type
+				 * in PostgreSQL because functions and operators won't work the same.
+				 */
+				oratype = oraTable->cols[index]->oratype;
+				if ((variable->vartype == TEXTOID
+						|| variable->vartype == BPCHAROID
+						|| variable->vartype == VARCHAROID)
+						&& oratype != ORA_TYPE_VARCHAR2
+						&& oratype != ORA_TYPE_CHAR
+						&& oratype != ORA_TYPE_NVARCHAR2
+						&& oratype != ORA_TYPE_NCHAR
+						&& oratype != ORA_TYPE_CLOB)
+					return false;
+	
 				initStringInfo(&result);
-				appendStringInfo(&result, "NULL");
-				break;
+	
+				/* work around the lack of booleans in Oracle */
+				if (variable->vartype == BOOLOID)
+				{
+					appendStringInfo(&result, "(");
+				}
+	
+				appendStringInfo(&result, "%s", oraTable->cols[index]->name);
+	
+				/* work around the lack of booleans in Oracle */
+				if (variable->vartype == BOOLOID)
+				{
+					appendStringInfo(&result, " <> 0)");
+				}
 			}
-
-			/*
-			 * Don't try to convert a column reference if the type is
-			 * converted from a non-string type in Oracle to a string type
-			 * in PostgreSQL because functions and operators won't work the same.
-			 */
-			oratype = oraTable->cols[index]->oratype;
-			if ((variable->vartype == TEXTOID
-					|| variable->vartype == BPCHAROID
-					|| variable->vartype == VARCHAROID)
-					&& oratype != ORA_TYPE_VARCHAR2
-					&& oratype != ORA_TYPE_CHAR
-					&& oratype != ORA_TYPE_NVARCHAR2
-					&& oratype != ORA_TYPE_NCHAR
-					&& oratype != ORA_TYPE_CLOB)
+			else
+			{
+				/* treat it like a parameter */
+#ifdef OLD_FDW_API
+				/* don't try to push down parameters with 9.1 */
 				return false;
-
-			initStringInfo(&result);
-
-			/* work around the lack of booleans in Oracle */
-			if (variable->vartype == BOOLOID)
-			{
-				appendStringInfo(&result, "(");
-			}
-
-			appendStringInfo(&result, "%s", oraTable->cols[index]->name);
-
-			/* work around the lack of booleans in Oracle */
-			if (variable->vartype == BOOLOID)
-			{
-				appendStringInfo(&result, " <> 0)");
+#endif
+				/* don't try to handle type interval */
+				if (! canHandleType(variable->vartype) || variable->vartype == INTERVALOID)
+					return false;
+	
+				/* find the index in the parameter list */
+				index = 0;
+				foreach(cell, *params)
+				{
+					++index;
+					if (equal(variable, (Node *)lfirst(cell)))
+						break;
+				}
+				if (cell == NULL)
+				{
+					/* add the parameter to the list */
+					++index;
+					*params = lappend(*params, variable);
+				}
+	
+				/* parameters will be called :p1, :p2 etc. */
+				initStringInfo(&result);
+				appendStringInfo(&result, ":p%d", index);
 			}
 
 			break;
@@ -1349,7 +1424,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, &left, linitial(oper->args), oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(oper->args), oraTable, params);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -1359,7 +1434,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					can_ignore = can_ignore && getOracleWhereClause(session, &right, lsecond(oper->args), oraTable, paramList);
+					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(oper->args), oraTable, params);
 					if (right == NULL)
 					{
 						pfree(left);
@@ -1468,7 +1543,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			if (! canHandleType(leftargtype))
 				return false;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, &left, linitial(arrayoper->args), oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(arrayoper->args), oraTable, params);
 			if (left == NULL)
 				return false;
 
@@ -1529,12 +1604,12 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			if (! canHandleType(rightargtype))
 				return false;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, &left, linitial(((DistinctExpr *)expr)->args), oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(((DistinctExpr *)expr)->args), oraTable, params);
 			if (left == NULL)
 			{
 				return false;
 			}
-			can_ignore = can_ignore && getOracleWhereClause(session, &right, lsecond(((DistinctExpr *)expr)->args), oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -1558,12 +1633,12 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			if (! canHandleType(rightargtype))
 				return false;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, &left, linitial(((NullIfExpr *)expr)->args), oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(((NullIfExpr *)expr)->args), oraTable, params);
 			if (left == NULL)
 			{
 				return false;
 			}
-			can_ignore = can_ignore && getOracleWhereClause(session, &right, lsecond(((NullIfExpr *)expr)->args), oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -1577,7 +1652,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, &arg, linitial(boolexpr->args), oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, linitial(boolexpr->args), oraTable, params);
 			if (arg == NULL)
 				return false;
 
@@ -1588,7 +1663,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 			for_each_cell(cell, lnext(list_head(boolexpr->args)))
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, &arg, (Expr *)lfirst(cell), oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, (Expr *)lfirst(cell), oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1603,10 +1678,10 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 			break;
 		case T_RelabelType:
-			return getOracleWhereClause(session, where, ((RelabelType *)expr)->arg, oraTable, paramList);
+			return getOracleWhereClause(session, foreignrel, where, ((RelabelType *)expr)->arg, oraTable, params);
 			break;
 		case T_CoerceToDomain:
-			return getOracleWhereClause(session, where, ((CoerceToDomain *)expr)->arg, oraTable, paramList);
+			return getOracleWhereClause(session, foreignrel, where, ((CoerceToDomain *)expr)->arg, oraTable, params);
 			break;
 		case T_CaseExpr:
 			caseexpr = (CaseExpr *)expr;
@@ -1620,7 +1695,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			/* for the form "CASE arg WHEN ...", add first expression */
 			if (caseexpr->arg != NULL)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, &arg, caseexpr->arg, oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, caseexpr->arg, oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1641,12 +1716,12 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 				if (caseexpr->arg == NULL)
 				{
 					/* for CASE WHEN ..., use the whole expression */
-					can_ignore = can_ignore && getOracleWhereClause(session, &arg, whenclause->expr, oraTable, paramList);
+					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, whenclause->expr, oraTable, params);
 				}
 				else
 				{
 					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					can_ignore = can_ignore && getOracleWhereClause(session, &arg, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, paramList);
+					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
 				}
 
 				if (arg == NULL)
@@ -1661,7 +1736,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 				}
 
 				/* THEN */
-				can_ignore = can_ignore && getOracleWhereClause(session, &arg, whenclause->result, oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, whenclause->result, oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1677,7 +1752,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, &arg, caseexpr->defresult, oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, caseexpr->defresult, oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1705,7 +1780,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			first_arg = true;
 			foreach(cell, coalesceexpr->args)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, &arg, (Expr *)lfirst(cell), oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, (Expr *)lfirst(cell), oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1728,7 +1803,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 			break;
 		case T_NullTest:
-			can_ignore = can_ignore && getOracleWhereClause(session, &arg, ((NullTest *)expr)->arg, oraTable, paramList);
+			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, ((NullTest *)expr)->arg, oraTable, params);
 			if (arg == NULL)
 				return false;
 
@@ -1745,7 +1820,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
-				return getOracleWhereClause(session, where, linitial(func->args), oraTable, paramList);
+				return getOracleWhereClause(session, foreignrel, where, linitial(func->args), oraTable, params);
 
 			/* get function name and schema */
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->funcid));
@@ -1825,7 +1900,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 				first_arg = true;
 				foreach(cell, func->args)
 				{
-					can_ignore = can_ignore && getOracleWhereClause(session, &arg, lfirst(cell), oraTable, paramList);
+					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, lfirst(cell), oraTable, params);
 					if (arg == NULL)
 					{
 						pfree(result.data);
@@ -1850,7 +1925,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				can_ignore = can_ignore && getOracleWhereClause(session, &left, linitial(func->args), oraTable, paramList);
+				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(func->args), oraTable, params);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -1870,7 +1945,7 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					can_ignore = can_ignore && getOracleWhereClause(session, &right, lsecond(func->args), oraTable, paramList);
+					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(func->args), oraTable, params);
 					if (right == NULL)
 					{
 						pfree(opername);
@@ -1896,17 +1971,6 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 				/* special case: current timestamp */
 				initStringInfo(&result);
 				appendStringInfo(&result, ":now");
-
-				/* create a new entry in the parameter list */
-				paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
-				paramDesc->name = pstrdup(":now");
-				paramDesc->number = 0;
-				paramDesc->type = TIMESTAMPTZOID;
-				paramDesc->bindType = BIND_TIMESTAMP;
-				paramDesc->value = NULL;
-				paramDesc->isExtern = 1;
-				paramDesc->next = *paramList;
-				*paramList = paramDesc;
 			}
 			else
 			{
@@ -1935,27 +1999,34 @@ getOracleWhereClause(oracleSession *session, char **where, Expr *expr, const str
 
 			/* the argument must be a not-NULL text constant */
 			constant = (Const *)coerce->arg;
-			if (constant->constisnull || constant->consttype != TEXTOID)
+			if (constant->constisnull || (constant->consttype != CSTRINGOID && constant->consttype != TEXTOID))
 				return false;
 
+			/* get the type's output function */
+			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(constant->consttype));
+			if (!HeapTupleIsValid(tuple))
+			{
+				elog(ERROR, "cache lookup failed for type %u", constant->consttype);
+			}
+			typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
+			ReleaseSysCache(tuple);
+
 			/* the value must be "now" */
-			if (VARSIZE(constant->constvalue) - VARHDRSZ != 3
-					|| strncmp(VARDATA(constant->constvalue), "now", 3) != 0)
+			if (strcmp(DatumGetCString(OidFunctionCall1(typoutput, constant->constvalue)), "now") != 0)
 				return false;
 
 			initStringInfo(&result);
-			appendStringInfo(&result, ":now");
-
-			/* create a new entry in the parameter list */
-			paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
-			paramDesc->name = pstrdup(":now");
-			paramDesc->number = 0;
-			paramDesc->type = coerce->resulttype;
-			paramDesc->bindType = BIND_TIMESTAMP;
-			paramDesc->value = NULL;
-			paramDesc->isExtern = 1;
-			paramDesc->next = *paramList;
-			*paramList = paramDesc;
+			switch (coerce->resulttype)
+			{
+				case DATEOID:
+					appendStringInfo(&result, "(CAST (:now AS DATE))");
+					break;
+				case TIMESTAMPOID:
+					appendStringInfo(&result, "(CAST (:now AS TIMESTAMP))");
+					break;
+				case TIMESTAMPTZOID:
+					appendStringInfo(&result, ":now");
+			}
 
 			break;
 		default:
@@ -2519,8 +2590,7 @@ List
 *serializePlanData(struct OracleFdwState *fdwState)
 {
 	List *result = NIL;
-	int i, len = 0;
-	const struct paramDesc *param;
+	int i;
 
 	/* dbserver */
 	result = lappend(result, serializeString(fdwState->dbserver));
@@ -2554,22 +2624,7 @@ List
 		result = lappend(result, serializeLong(fdwState->oraTable->cols[i]->val_size));
 		/* don't serialize val, val_len and val_null */
 	}
-	/* find length of parameter list */
-	for (param=fdwState->paramList; param; param=param->next)
-		++len;
-	/* serialize length */
-	result = lappend(result, serializeInt(len));
-	/* parameter list entries */
-	for (param=fdwState->paramList; param; param=param->next)
-	{
-		result = lappend(result, serializeString(param->name));
-		result = lappend(result, serializeInt(param->number));
-		result = lappend(result, serializeOid(param->type));
-		result = lappend(result, serializeInt((int)param->bindType));
-		/* don't serialize value */
-		result = lappend(result, serializeInt(param->isExtern));
-	}
-	/* don't serialize startup_cost, total_cost, handle_clauses, rowcount and columnindex */
+	/* don't serialize params, paramList, startup_cost, total_cost, handle_clauses, rowcount and columnindex */
 
 	return result;
 }
@@ -2626,8 +2681,7 @@ struct OracleFdwState
 {
 	struct OracleFdwState *state = palloc(sizeof(struct OracleFdwState));
 	ListCell *cell = list_head(list);
-	int i, len;
-	struct paramDesc *param;
+	int i;
 
 	/* session will be set upon connect */
 	state->session = NULL;
@@ -2638,6 +2692,8 @@ struct OracleFdwState
 	/* these are not serialized */
 	state->rowcount = 0;
 	state->columnindex = 0;
+	state->params = NULL;
+	state->paramList = NULL;
 
 	/* dbserver */
 	state->dbserver = deserializeString(lfirst(cell));
@@ -2697,30 +2753,6 @@ struct OracleFdwState
 		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size + 1);
 		state->oraTable->cols[i]->val_len = 0;
 		state->oraTable->cols[i]->val_null = 1;
-	}
-
-	/* length of parameter list */
-	len = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
-	cell = lnext(cell);
-
-	/* parameter table entries */
-	state->paramList = NULL;
-	for (i=0; i<len; ++i)
-	{
-		param = (struct paramDesc *)palloc(sizeof(struct paramDesc));
-		param->name = deserializeString(lfirst(cell));
-		cell = lnext(cell);
-		param->number = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
-		cell = lnext(cell);
-		param->type = DatumGetObjectId(((Const *)lfirst(cell))->constvalue);
-		cell = lnext(cell);
-		param->bindType = (oraBindType)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
-		cell = lnext(cell);
-		param->value = NULL;
-		param->isExtern = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
-		cell = lnext(cell);
-		param->next = state->paramList;
-		state->paramList = param;
 	}
 
 	return state;
@@ -2790,67 +2822,43 @@ exitHook(int code, Datum arg)
  * 		Return a string containing the parameters set for a DEBUG message.
  */
 char *
-setParameters(struct paramDesc *paramList, EState *execstate)
+setParameters(struct paramDesc *paramList, EState *execstate, ExprContext *econtext)
 {
 	struct paramDesc *param;
 	Datum datum;
 	HeapTuple tuple;
 	TimestampTz tstamp;
-	int is_null;
+	bool is_null;
 	bool first_param = true;
+#ifndef OLD_FDW_API
+	MemoryContext oldcontext;
+#endif
 	StringInfoData info;  /* list of parameters for DEBUG message */
 	initStringInfo(&info);
 
-	/*
- 	* There is no open statement yet.
- 	* Run the query and get the first result row.
- 	*/
+#ifndef OLD_FDW_API
+	/* switch to short lived memory context */
+	oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
+#endif
 
 	/* iterate parameter list and fill values */
 	for (param=paramList; param; param=param->next)
 	{
 		if (strcmp(param->name, ":now") == 0)
 		{
-			/*
-		 	* This parameter will be set to the transaction start timestamp.
-		 	*/
-			regproc castfunc;
-
 			/* get transaction start timestamp */
 			tstamp = GetCurrentTransactionStartTimestamp();
 
-			if (param->type == TIMESTAMPTZOID)
-			{
-				/* no need to cast */
-				datum = TimestampGetDatum(tstamp);
-			}
-			else
-			{
-				/* find the cast function to the desired target type */
-				tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(TIMESTAMPTZOID), ObjectIdGetDatum(param->type));
-				if (!HeapTupleIsValid(tuple))
-				{
-					elog(ERROR, "cache lookup failed for cast from %u to %u", TIMESTAMPTZOID, param->type);
-				}
-				castfunc = ((Form_pg_cast)GETSTRUCT(tuple))->castfunc;
-				ReleaseSysCache(tuple);
-
-				/* cast */
-				datum = OidFunctionCall1(castfunc, TimestampGetDatum(tstamp));
-			}
-			is_null = 0;
-		}
-		else if (param->isExtern)
-		{
-			/* external parameters are numbered from 1 on */
-			datum = execstate->es_param_list_info->params[param->number-1].value;
-			is_null = execstate->es_param_list_info->params[param->number-1].isnull;
+			datum = TimestampGetDatum(tstamp);
+			is_null = false;
 		}
 		else
 		{
-			/* internal parameters are numbered from 0 on */
-			datum = execstate->es_param_exec_vals[param->number].value;
-			is_null = execstate->es_param_exec_vals[param->number].isnull;
+			/*
+			 * Evaluate the expression.
+			 * This code path cannot be reached in 9.1
+			 */
+			datum = ExecEvalExpr((ExprState *)(param->node), econtext, &is_null, NULL);
 		}
 
 		if (is_null)
@@ -2885,6 +2893,11 @@ setParameters(struct paramDesc *paramList, EState *execstate)
 			appendStringInfo(&info, ", %s=\"%s\"", param->name, param->value);
 		}
 	}
+
+#ifndef OLD_FDW_API
+	/* reset memory context */
+	MemoryContextSwitchTo(oldcontext);
+#endif
 
 	return info.data;
 }
