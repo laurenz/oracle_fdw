@@ -498,16 +498,26 @@ ForeignScan
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 	List *fdw_private, *keep_clauses = NIL;
+	ListCell *cell1, *cell2;
 	int i;
 
 	/* "serialize" all necessary information for the path private area */
 	fdw_private = serializePlanData(fdwState);
 
-	/* remove those clauses that are checked by Oracle */
-	if (fdwState->handle_clauses != NULL)
-		for (i=list_length(baserel->baserestrictinfo)-1; i>=0; --i)
-			if (fdwState->handle_clauses[i] != PUSHDOWN)
-				keep_clauses = lcons(list_nth(scan_clauses, i), keep_clauses);
+	/* keep only those clauses that are not handled by Oracle */
+	foreach(cell1, scan_clauses)
+	{
+		i = 0;
+		foreach(cell2, baserel->baserestrictinfo)
+		{
+			if (equal(lfirst(cell1), lfirst(cell2)) && fdwState->handle_clauses[i] != PUSHDOWN)
+			{
+				keep_clauses = lcons(lfirst(cell1), keep_clauses);
+				break;
+			}
+			++i;
+		}
+	}
 
 	/* remove the RestrictInfo node from all remaining clauses */
 	keep_clauses = extract_actual_clauses(keep_clauses, false);
@@ -1237,12 +1247,11 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			}
 			break;
 		case T_Param:
+			param = (Param *)expr;
 #ifdef OLD_FDW_API
 			/* don't try to push down parameters with 9.1 */
 			return false;
-#endif
-			param = (Param *)expr;
-
+#else
 			/* don't try to handle interval parameters */
 			if (! canHandleType(param->paramtype) || param->paramtype == INTERVALOID)
 				return false;
@@ -1271,6 +1280,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				can_ignore = false;
 
 			break;
+#endif
 		case T_Var:
 			variable = (Var *)expr;
 
@@ -1340,7 +1350,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 #ifdef OLD_FDW_API
 				/* don't try to push down parameters with 9.1 */
 				return false;
-#endif
+#else
 				/* don't try to handle type interval */
 				if (! canHandleType(variable->vartype) || variable->vartype == INTERVALOID)
 					return false;
@@ -1363,6 +1373,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				/* parameters will be called :p1, :p2 etc. */
 				initStringInfo(&result);
 				appendStringInfo(&result, ":p%d", index);
+#endif
 			}
 
 			break;
@@ -1424,7 +1435,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(oper->args), oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &left, linitial(oper->args), oraTable, params) && can_ignore;
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -1434,7 +1445,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(oper->args), oraTable, params);
+					can_ignore = getOracleWhereClause(session, foreignrel, &right, lsecond(oper->args), oraTable, params) && can_ignore;
 					if (right == NULL)
 					{
 						pfree(left);
@@ -1543,7 +1554,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			if (! canHandleType(leftargtype))
 				return false;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(arrayoper->args), oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &left, linitial(arrayoper->args), oraTable, params) && can_ignore;
 			if (left == NULL)
 				return false;
 
@@ -1604,12 +1615,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			if (! canHandleType(rightargtype))
 				return false;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(((DistinctExpr *)expr)->args), oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &left, linitial(((DistinctExpr *)expr)->args), oraTable, params) && can_ignore;
 			if (left == NULL)
 			{
 				return false;
 			}
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &right, lsecond(((DistinctExpr *)expr)->args), oraTable, params) && can_ignore;
 			if (right == NULL)
 			{
 				pfree(left);
@@ -1633,12 +1644,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			if (! canHandleType(rightargtype))
 				return false;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(((NullIfExpr *)expr)->args), oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &left, linitial(((NullIfExpr *)expr)->args), oraTable, params) && can_ignore;
 			if (left == NULL)
 			{
 				return false;
 			}
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &right, lsecond(((NullIfExpr *)expr)->args), oraTable, params) && can_ignore;
 			if (right == NULL)
 			{
 				pfree(left);
@@ -1652,7 +1663,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, linitial(boolexpr->args), oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &arg, linitial(boolexpr->args), oraTable, params) && can_ignore;
 			if (arg == NULL)
 				return false;
 
@@ -1663,7 +1674,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 
 			for_each_cell(cell, lnext(list_head(boolexpr->args)))
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, (Expr *)lfirst(cell), oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &arg, (Expr *)lfirst(cell), oraTable, params) && can_ignore;
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1695,7 +1706,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			/* for the form "CASE arg WHEN ...", add first expression */
 			if (caseexpr->arg != NULL)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, caseexpr->arg, oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &arg, caseexpr->arg, oraTable, params) && can_ignore;
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1716,12 +1727,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				if (caseexpr->arg == NULL)
 				{
 					/* for CASE WHEN ..., use the whole expression */
-					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, whenclause->expr, oraTable, params);
+					can_ignore = getOracleWhereClause(session, foreignrel, &arg, whenclause->expr, oraTable, params) && can_ignore;
 				}
 				else
 				{
 					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
+					can_ignore = getOracleWhereClause(session, foreignrel, &arg, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params) && can_ignore;
 				}
 
 				if (arg == NULL)
@@ -1736,7 +1747,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				}
 
 				/* THEN */
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, whenclause->result, oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &arg, whenclause->result, oraTable, params) && can_ignore;
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1752,7 +1763,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, caseexpr->defresult, oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &arg, caseexpr->defresult, oraTable, params) && can_ignore;
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1780,7 +1791,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			first_arg = true;
 			foreach(cell, coalesceexpr->args)
 			{
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, (Expr *)lfirst(cell), oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &arg, (Expr *)lfirst(cell), oraTable, params) && can_ignore;
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -1803,7 +1814,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 
 			break;
 		case T_NullTest:
-			can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, ((NullTest *)expr)->arg, oraTable, params);
+			can_ignore = getOracleWhereClause(session, foreignrel, &arg, ((NullTest *)expr)->arg, oraTable, params) && can_ignore;
 			if (arg == NULL)
 				return false;
 
@@ -1900,7 +1911,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				first_arg = true;
 				foreach(cell, func->args)
 				{
-					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &arg, lfirst(cell), oraTable, params);
+					can_ignore = getOracleWhereClause(session, foreignrel, &arg, lfirst(cell), oraTable, params) && can_ignore;
 					if (arg == NULL)
 					{
 						pfree(result.data);
@@ -1925,7 +1936,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &left, linitial(func->args), oraTable, params);
+				can_ignore = getOracleWhereClause(session, foreignrel, &left, linitial(func->args), oraTable, params) && can_ignore;
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -1945,7 +1956,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					can_ignore = can_ignore && getOracleWhereClause(session, foreignrel, &right, lsecond(func->args), oraTable, params);
+					can_ignore = getOracleWhereClause(session, foreignrel, &right, lsecond(func->args), oraTable, params) && can_ignore;
 					if (right == NULL)
 					{
 						pfree(opername);

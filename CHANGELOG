@@ -1,4 +1,4 @@
-Version 0.9.9 (beta)
+Version 0.9.9 (beta), released 2013-08-07
   Enhancements:
   - Enable build with PostgreSQL 9.3.
 
@@ -14,6 +14,9 @@ Version 0.9.9 (beta)
     ATTENTION: Since correct handling of parameters is not possible before
     PostgreSQL 9.2, query parameters will not be pushed down in PostgreSQL 9.1.
     This is a regression for cases where this happened to work.
+  - Fix a logical error that can lead to incorrect Oracle WHERE clauses.
+  - Fix a bug that can lead to the incorrect omission of a scan clause,
+    leading to wrong results.
 
 Version 0.9.8 (beta), released 2012-10-16
   Enhancements:
