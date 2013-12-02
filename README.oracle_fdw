@@ -2,7 +2,7 @@ Foreign Data Wrapper for Oracle
 ===============================
 
 oracle_fdw is a PostgreSQL extension that provides a Foreign Data Wrapper for
-easy and efficient read access to Oracle databases, including pushdown of WHERE
+easy and efficient access to Oracle databases, including pushdown of WHERE
 conditions and required columns as well as comprehensive EXPLAIN support.
 
 oracle_fdw was written by Laurenz Albe <laurenz.albe@wien.gv.at>
@@ -183,6 +183,25 @@ Foreign table options
   you will receive the error message "ORA-01406: fetched column value was
   truncated".
 
+- readonly (optional, defaults to "false")
+
+  INSERT, UPDATE and DELETE is only allowed on tables where this option is
+  not set to yes/on/true.  Since these statements can only be executed from
+  PostgreSQL 9.3 on, setting this option has no effect on earlier versions.
+  It might still be a good idea to set it in PostgreSQL 9.2 and earlier
+  on tables that you do not wish to be changed, to be prepared for an upgrade
+  to PostgreSQL 9.3 or later.
+
+Column options (from PostgreSQL 9.2 on)
+---------------------------------------
+
+- key (optional, defaults to "false")
+
+  If set to yes/on/true, the corresponding column on the foreign Oracle table
+  is considered a primary key column.
+  For UPDATE and DELETE to work, you must set this option on all columns
+  that belong to the table's primary key.
+
 4. Usage
 ========
 
@@ -219,6 +238,10 @@ The PostgreSQL table can have more or less columns than the Oracle table.
 If it has more columns, and these columns are used, you will receive a warning
 and NULL values will be returned.
 
+If you want to UPDATE or DELETE, make sure that the "key" option is set on all
+columns that belong to the table's primary key.  Failure to do so will result
+in errors.
+
 Data types
 ----------
 
@@ -239,11 +262,10 @@ VARCHAR                        | char, varchar, text
 VARCHAR2                       | char, varchar, text
 NVARCHAR2                      | char, varchar, text
 CLOB                           | char, varchar, text
-CFILE                          | char, varchar, text
 LONG                           | char, varchar, text
 RAW                            | uuid, bytea
 BLOB                           | bytea
-BFILE                          | bytea
+BFILE                          | bytea (read-only)
 LONG RAW                       | bytea
 NUMBER                         | numeric, float4, float8, char, varchar, text
 NUMBER(n,m) with m<=0          | numeric, float4, float8, int2, int4, int8,
@@ -290,6 +312,21 @@ The expressions "now()", "transaction_timestamp()", "current_timestamp",
 
 The output of EXPLAIN will show the Oracle query used, so you can see which
 conditions were translated to Oracle and how.
+
+Modifying foreign data
+----------------------
+
+From PostgreSQL 9.3 on, oracle_fdw supports INSERT, UPDATE and DELETE on
+foreign tables.  This is allowed by default (also in databases upgraded
+from an earlier PostgreSQL release) and can be disabled by setting the
+"readonly" table option.
+
+For UPDATE and DELETE to work, the columns corresponding to the primary
+key columns of the Oracle table must have the "key" column option set.
+These columns are used to identify a foreign table row, so make sure that
+the option is set on *all* columns that belong to the primary key.
+
+The RETURNING clause on INSERT, UPDATE and DELETE is supported.
 
 EXPLAIN
 -------

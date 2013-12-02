@@ -64,7 +64,7 @@ struct connEntry
 	OCISvcCtx *svchp;
 	OCISession *userhp;
 	struct handleEntry *handlelist;
-	int usecount;
+	int xact_level;  /* 0 = none, 1 = main, else subtransaction */
 	struct connEntry *next;
 };
 
@@ -101,6 +101,7 @@ struct oracleSession
 /*
  * Helper functions
  */
+static void oracleSetSavepoint(oracleSession *session, int nest_level);
 static void setOracleEnvironment(char *nls_lang);
 static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
 static sword checkerr(sword status, dvoid *handle, ub4 handleType);
@@ -110,15 +111,20 @@ static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
 static void allocHandle(dvoid **handlep, ub4 type, int isDescriptor, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
 static void freeHandle(dvoid *handlep, struct connEntry *connp);
+static ub2 getOraType(oraType arg);
+static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
+static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
+static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value);
 
 /*
  * oracleGetSession
  * 		Look up an Oracle connection in the cache, create a new one if there is none.
  * 		The result is a palloc'ed data structure containing the connection.
- * 		If "transaction" is true, start a "repeadable read" remote transaction.
+ * 		"curlevel" is the current PostgreSQL transaction level.
+ * 		If "readonly" is true, start a read-only transaction.
  */
 oracleSession
-*oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int transaction)
+*oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel, int readonly)
 {
 	OCIEnv *envhp = NULL;
 	OCIError *errhp = NULL;
@@ -465,27 +471,30 @@ oracleSession
 		connp->svchp = svchp;
 		connp->userhp = userhp;
 		connp->handlelist = NULL;
-		connp->usecount = 0;
+		connp->xact_level = 0;
 		connp->next = srvp->connlist;
 		srvp->connlist = connp;
 
-		/* register callback for rolled back PostgreSQL transactions */
+		/* register callback for PostgreSQL transaction events */
 		oracleRegisterCallback(connp);
 	}
 
-	if (transaction && connp->usecount == 0)
+	if (connp->xact_level <= 0)
 	{
 		oracleDebug2("oracle_fdw: begin serializable remote transaction");
 
-		/* start a "serializable" (= repeatable read) transaction */
+		/* start a read-only or "serializable" (= repeatable read) transaction */
 		if (checkerr(
-			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
+			OCITransStart(svchp, errhp, (uword)0,
+			readonly ? OCI_TRANS_READONLY : OCI_TRANS_SERIALIZABLE),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 				"error connecting to Oracle: OCITransStart failed to start a transaction",
 				oraMessage);
 		}
+
+		connp->xact_level = 1;
 	}
 
 	/* palloc a data structure pointing to the cached entries */
@@ -495,55 +504,10 @@ oracleSession
 	session->connp = connp;
 	session->stmthp = NULL;
 
-	/* increase session use count after anything that could cause an error */
-	++connp->usecount;
+	/* set savepoints up to the current level */
+	oracleSetSavepoint(session, curlevel);
 
 	return session;
-}
-
-/*
- * oracleReleaseSession
- * 		Release the statement handle.
- * 		If "close" is true, close the session and remove the cache entry.
- * 		If "error" is true, end transaction and set session use count to zero.
- * 		If the use count becomes zero, commit and free all handles and descriptors.
- */
-void
-oracleReleaseSession(oracleSession *session, int close, int error)
-{
-	/* close the statement, if any */
-	oracleCloseStatement(session);
-
-	/* if this is the end, reduce usecount to zero to force commit */
-	if (error || close)
-		session->connp->usecount = 0;
-	else
-		--session->connp->usecount;
-
-	/* commit the current transaction */
-	if (session->connp->usecount == 0)
-	{
-		/* free handles */
-		while (session->connp->handlelist != NULL)
-			freeHandle(session->connp->handlelist->handlep, session->connp);
-
-		oracleDebug2("oracle_fdw: commit remote transaction");
-
-		if (checkerr(
-			OCITransCommit(session->connp->svchp, session->envp->errhp, OCI_DEFAULT),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error committing transaction: OCITransCommit failed",
-				oraMessage);
-		}
-	}
-
-	/* close the session if requested */
-	if (close)
-		closeSession(session->envp->envhp, session->srvp->srvhp, session->connp->userhp, 1);
-
-	oracleFree(session);
 }
 
 /*
@@ -599,6 +563,183 @@ oracleShutdown(void)
 	/* done with Oracle */
 	if (oci_initialized)
 		(void)OCITerminate(OCI_DEFAULT);
+}
+
+/*
+ * oracleEndTransaction
+ * 		Commit or rollback the transaction.
+ * 		The first argument must be a connEntry.
+ * 		If "noerror" is true, don't throw errors.
+ */
+void oracleEndTransaction(void *arg, int is_commit, int noerror)
+{
+	struct connEntry *connp = NULL;
+	struct srvEntry *srvp = NULL;
+	struct envEntry *envp = NULL;
+	int found = 0;
+
+	/* do nothing if there is no transaction */
+	if (((struct connEntry *)arg)->xact_level == 0)
+		return;
+
+	/* find the cached handles for the argument */
+	envp = envlist;
+	while (envp)
+	{
+		srvp = envp->srvlist;
+		while (srvp)
+		{
+			connp = srvp->connlist;
+			while (connp)
+			{
+				if (connp == (struct connEntry *)arg)
+				{
+					found = 1;
+					break;
+				}
+				connp = connp->next;
+			}
+			if (found)
+				break;
+			srvp = srvp->next;
+		}
+		if (found)
+			break;
+		envp = envp->next;
+	}
+
+	if (! found)
+		oracleError(FDW_ERROR, "oracleEndTransaction internal error: handle not found in cache");
+
+	/* free handles */
+	while (connp->handlelist != NULL)
+		freeHandle(connp->handlelist->handlep, connp);
+
+	/* commit or rollback */
+	if (is_commit)
+	{
+		oracleDebug2("oracle_fdw: commit remote transaction");
+
+		if (checkerr(
+			OCITransCommit(connp->svchp, envp->errhp, OCI_DEFAULT),
+			(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS && !noerror)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error committing transaction: OCITransCommit failed",
+				oraMessage);
+		}
+	}
+	else
+	{
+		oracleDebug2("oracle_fdw: roll back remote transaction");
+
+		if (checkerr(
+			OCITransRollback(connp->svchp, envp->errhp, OCI_DEFAULT),
+			(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS && !noerror)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error rolling back transaction: OCITransRollback failed",
+				oraMessage);
+		}
+	}
+
+	connp->xact_level = 0;
+}
+
+/*
+ * oracleEndSubtransaction
+ * 		Commit or rollback all subtransaction up to savepoint "nest_nevel".
+ * 		The first argument must be a connEntry.
+ * 		If "is_commit" is not true, rollback.
+ */
+void
+oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
+{
+	char query[50], message[60];
+	struct connEntry *connp = NULL;
+	struct srvEntry *srvp = NULL;
+	struct envEntry *envp = NULL;
+	OCIStmt *stmthp = NULL;
+	int found = 0;
+
+	/* do nothing if the transaction level is lower than nest_level */
+	if (((struct connEntry *)arg)->xact_level < nest_level)
+		return;
+
+	((struct connEntry *)arg)->xact_level = nest_level - 1;
+
+	if (is_commit)
+	{
+		/**
+		 * There is nothing to do as savepoints don't get released in Oracle:
+		 * Setting the same savepoint again just overwrites the previous one.
+		 */
+		return;
+	}
+
+	/* find the cached handles for the argument */
+	envp = envlist;
+	while (envp)
+	{
+		srvp = envp->srvlist;
+		while (srvp)
+		{
+			connp = srvp->connlist;
+			while (connp)
+			{
+				if (connp == (struct connEntry *)arg)
+				{
+					found = 1;
+					break;
+				}
+				connp = connp->next;
+			}
+			if (found)
+				break;
+			srvp = srvp->next;
+		}
+		if (found)
+			break;
+		envp = envp->next;
+	}
+
+	if (! found)
+		oracleError(FDW_ERROR, "oracleRollbackSavepoint internal error: handle not found in cache");
+
+	snprintf(message, 59, "oracle_fdw: rollback to savepoint s%d", nest_level);
+	oracleDebug2(message);
+
+	snprintf(query, 49, "ROLLBACK TO SAVEPOINT s%d", nest_level);
+
+	/* create statement handle */
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, envp->envhp, connp,
+		FDW_OUT_OF_MEMORY,
+		"error rolling back to savepoint: OCIHandleAlloc failed to allocate statement handle");
+
+	/* prepare the query */
+	if (checkerr(
+		OCIStmtPrepare(stmthp, envp->errhp, (text *)query, (ub4) strlen(query),
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error rolling back to savepoint: OCIStmtPrepare failed to prepare rollback statement",
+			oraMessage);
+	}
+
+	/* rollback to savepoint */
+	if (checkerr(
+		OCIStmtExecute(connp->svchp, stmthp, envp->errhp, (ub4)1, (ub4)0,
+			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
+		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error rolling back to savepoint: OCIStmtExecute failed to set savepoint",
+			oraMessage);
+	}
+
+	/* free statement handle */
+	freeHandle(stmthp, connp);
 }
 
 /*
@@ -718,6 +859,7 @@ struct oraTable
 		reply->cols[i-1]->pgtype = 0;
 		reply->cols[i-1]->pgtypmod = 0;
 		reply->cols[i-1]->used = 0;
+		reply->cols[i-1]->pkey = 0;
 		reply->cols[i-1]->val = NULL;
 		reply->cols[i-1]->val_len = 0;
 		reply->cols[i-1]->val_null = 1;
@@ -928,9 +1070,6 @@ struct oraTable
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
 				reply->cols[i-1]->val_size = 0;
 		}
-
-		reply->cols[i-1]->val = NULL;
-		reply->cols[i-1]->val_null = 1;
 	}
 
 	/* free statement handle, this takes care of the parameter handles */
@@ -1041,6 +1180,57 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 
 	/* close the statement */
 	oracleCloseStatement(session);
+}
+
+/*
+ * oracleSetSavepoint
+ * 		Set savepoints up to level "nest_level".
+ */
+void
+oracleSetSavepoint(oracleSession *session, int nest_level)
+{
+	while (session->connp->xact_level < nest_level)
+	{
+		char query[40], message[50];
+
+		snprintf(message, 49, "oracle_fdw: set savepoint s%d", session->connp->xact_level + 1);
+		oracleDebug2(message);
+
+		snprintf(query, 39, "SAVEPOINT s%d", session->connp->xact_level + 1);
+
+		/* create statement handle */
+		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+			FDW_OUT_OF_MEMORY,
+			"error setting savepoint: OCIHandleAlloc failed to allocate statement handle");
+
+		/* prepare the query */
+		if (checkerr(
+			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
+				(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error setting savepoint: OCIStmtPrepare failed to prepare savepoint statement",
+				oraMessage);
+		}
+
+		/* set savepoint */
+		if (checkerr(
+			OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+				(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error setting savepoint: OCIStmtExecute failed to set savepoint",
+				oraMessage);
+		}
+
+		/* free statement handle */
+		freeHandle(session->stmthp, session->connp);
+		session->stmthp = NULL;
+
+		++session->connp->xact_level;
+	}
 }
 
 /*
@@ -1199,6 +1389,9 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 			oraMessage);
 	}
 
+	freeHandle(session->stmthp, session->connp);
+	session->stmthp = NULL;
+
 	/*
 	 * Get the SQL_ID and CHILD_NUMBER from V$SQL.
 	 */
@@ -1211,6 +1404,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	strncpy(query_head, query, p-query);
 	query_head[p-query] = '%';
 	query_head[p-query+1] = '\0';
+
+	/* create statement handle */
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION,
+		"error describing query: OCIHandleAlloc failed to allocate statement handle");
 
 	/* prepare */
 	if (checkerr(
@@ -1239,8 +1437,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* define result values */
-	defnhp = NULL;
 	sql_id[19] = '\0';
+	defnhp = NULL;
 	if (checkerr(
 		OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
 			(dvoid *)sql_id, (sb4)19,
@@ -1284,9 +1482,17 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 				oraMessage);
 	}
 
+	freeHandle(session->stmthp, session->connp);
+	session->stmthp = NULL;
+
 	/*
 	 * Run the final desc_query.
 	 */
+
+	/* create statement handle */
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION,
+		"error describing query: OCIHandleAlloc failed to allocate statement handle");
 
 	/* prepare */
 	if (checkerr(
@@ -1365,35 +1571,118 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 }
 
 /*
- * oracleExecuteQuery
- * 		Execute a query with parameters and fetches the first result row.
- * 		Returns 1 if there is a result, else 0.
+ * oraclePrepareQuery
+ * 		Prepares an SQL statement for execution.
  */
-int
-oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList)
+void
+oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable)
 {
-	int i, col_pos;
-	sb2 indicator;
-	struct paramDesc *param;
-	OCIBind *bndhp;
-	OCIDefine *defnhp;
+	int i, col_pos, is_select;
 	ub2 type;
-	sword result;
+	OCIDefine *defnhp;
 	static char dummy[4];
 	static sb4 dummy_size = 4;
 	static sb2 dummy_null;
 	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
 
+	/* figure out if the query is FOR UPDATE */
+	is_select = (strncmp(query, "SELECT", 6) == 0);
+
 	/* make sure there is no statement handle stored in "session" */
 	if (session->stmthp != NULL)
 	{
-		oracleError(FDW_ERROR, "oracleExecuteQuery internal error: statement handle is not NULL");
+		oracleError(FDW_ERROR, "oraclePrepareQuery internal error: statement handle is not NULL");
 	}
 
 	/* create statement handle */
 	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
 		FDW_UNABLE_TO_CREATE_EXECUTION,
 		"error executing query: OCIHandleAlloc failed to allocate statement handle");
+
+	/* prepare the statement */
+	if (checkerr(
+		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error executing query: OCIStmtPrepare failed to prepare remote query",
+			oraMessage);
+	}
+
+	col_pos = 0;
+	for (i=0; i<oraTable->ncols; ++i)
+	{
+		if (oraTable->cols[i]->used)
+		{
+			if (is_select)
+			{
+				/*
+				 * For SELECT statements, define the result columns of the query.
+				 */
+
+				/* figure out in which format we want the results */
+				type = getOraType(oraTable->cols[i]->oratype);
+				if (oraTable->cols[i]->pgtype == UUIDOID)
+					type = SQLT_STR;
+
+				/* check if it is a LOB column */
+				if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
+				{
+					/* allocate a LOB locator, store a pointer to it in "val" */
+					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
+						FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+				}
+
+				/* define result value */
+				defnhp = NULL;
+				if (checkerr(
+					OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)++col_pos,
+						(dvoid *)oraTable->cols[i]->val, (sb4)oraTable->cols[i]->val_size,
+						type, (dvoid *)&oraTable->cols[i]->val_null,
+						(ub2 *)&oraTable->cols[i]->val_len, NULL, OCI_DEFAULT),
+					(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				{
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIDefineByPos failed to define result value",
+						oraMessage);
+				}
+			}
+			else
+			{
+				/*
+				 * For other statements, allocate LOB locators for RETURNING parameters.
+				 */
+				if (oraTable->cols[i]->oratype == ORA_TYPE_BLOB || oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
+				{
+					/* allocate a LOB locator, store a pointer to it in "val" */
+					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
+						FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+				}
+			}
+		}
+	}
+
+	if (is_select && col_pos == 0)
+	{
+		/*
+		 * No columns selected (i.e., SELECT '1' FROM).
+		 * Define dummy result columnn.
+		 */
+		defnhp = NULL;
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
+				(dvoid *)dummy, dummy_size, SQLT_STR, (dvoid *)&dummy_null,
+				NULL, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error executing query: OCIDefineByPos failed to define result value",
+				oraMessage);
+		}
+	}
 
 	/* set prefetch options */
 	if (checkerr(
@@ -1414,33 +1703,69 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			"error executing query: OCIAttrSet failed to set prefetch memory in statement handle",
 			oraMessage);
 	}
+}
 
-	/* prepare the statement */
-	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
-			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error executing query: OCIStmtPrepare failed to prepare remote query",
-			oraMessage);
-	}
+/*
+ * oracleExecuteQuery
+ * 		Execute a prepared query with parameters and fetches the first result row.
+ * 		Returns the count of processed rows.
+ */
+int
+oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, struct paramDesc *paramList)
+{
+	sb2 *indicators;
+	struct paramDesc *param;
+	sword result;
+	ub4 rowcount, lob_empty = 0;
+	OCILobLocator **lob_locators;
+	int i, param_count = 0;
+
+	for (param=paramList; param; param=param->next)
+		++param_count;
+
+	/* allocate a temporary array to hold the LOB locators */
+	lob_locators = oracleAlloc(param_count * sizeof(OCILobLocator *));
+	memset(lob_locators, 0, param_count * sizeof(OCILobLocator *));
+
+	/* allocate a temporary array of indicators */
+	indicators = oracleAlloc(param_count * sizeof(sb2 *));
 
 	/* bind the parameters */
+	param_count = -1;
 	for (param=paramList; param; param=param->next)
 	{
 		dvoid *value = NULL;
 		sb4 value_len = 0;
-		ub2 value_type = SQLT_STR;
+		ub2 value_type = SQLT_STR;  /* works for NULLs of all types */
+		ub4 oci_mode = OCI_DEFAULT;
 		OCIDateTime **timest;
 		OCINumber *number;
 		char *num_format, *pos;
 
-		bndhp = NULL;
-		indicator = (sb2)(param->value == NULL ? -1 : 0);
+		++param_count;
+		indicators[param_count] = (sb2)((param->value == NULL) ? -1 : 0);
 
 		if (param->value != NULL)
 		{
+			if (param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
+			{
+				/* allocate LOB locator for LOB columns */
+				allocHandle((void **)&lob_locators[param_count], OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
+					FDW_UNABLE_TO_CREATE_EXECUTION,
+					"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+
+				/* empty the LOB */
+				if (checkerr(
+					OCIAttrSet(lob_locators[param_count], OCI_DTYPE_LOB, &lob_empty, 0,
+						OCI_ATTR_LOBEMPTY, session->envp->errhp),
+					(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				{
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIAttrSet failed to set LOB empty",
+						oraMessage);
+				}
+			}
+
 			switch (param->bindType) {
 				case BIND_NUMBER:
 					/* allocate a new NUMBER */
@@ -1472,6 +1797,7 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 							"error executing query: OCINumberFromText failed to convert parameter",
 							oraMessage);
 					}
+					oracleFree(num_format);
 
 					value = (dvoid *)number;
 					value_len = sizeof(OCINumber);
@@ -1508,98 +1834,63 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 				case BIND_STRING:
 					value = param->value;
 					value_len = strlen(param->value)+1;
+					value_type = SQLT_STR;
+					break;
+				case BIND_LONGRAW:
+					value = param->value;
+					value_len = *((sb4 *)param->value) + 4;
+					value_type = SQLT_LVB;
+					break;
+				case BIND_LONG:
+					value = param->value;
+					value_len = *((sb4 *)param->value) + 4;
+					value_type = SQLT_LVC;
+					break;
+ 				case BIND_BLOB:
+					value = &lob_locators[param_count];
+					value_len = sizeof(OCILobLocator *);
+					value_type = SQLT_BLOB;
+					break;
+ 				case BIND_CLOB:
+					value = &lob_locators[param_count];
+					value_len = sizeof(OCILobLocator *);
+					value_type = SQLT_CLOB;
+					break;
+				case BIND_OUTPUT:
+					value = NULL;
+					value_len = oraTable->cols[param->colnum]->val_size;
+					value_type = getOraType(oraTable->cols[param->colnum]->oratype);
+					if (oraTable->cols[param->colnum]->pgtype == UUIDOID)
+						value_type = SQLT_STR;
+					oci_mode = OCI_DATA_AT_EXEC;
 					break;
 			}
 		}
 
 		if (checkerr(
-			OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)param->name,
+			OCIBindByName(session->stmthp, (OCIBind **)&param->bindh, session->envp->errhp, (text *)param->name,
 				(sb4)strlen(param->name), value, value_len, value_type,
-				(dvoid *)&indicator, NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
+				(dvoid *)&indicators[param_count], NULL, NULL, (ub4)0, NULL, oci_mode),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIBindByName failed to bind parameter",
 				oraMessage);
 		}
-	}
 
-	/* define buffers for the results */
-	col_pos = 0;
-	for (i=0; i<oraTable->ncols; ++i)
-	{
-		if (oraTable->cols[i]->used)
+		if (param->bindType == BIND_OUTPUT)
 		{
-			/* figure out in which format we want the results */
-			switch (oraTable->cols[i]->oratype)
-			{
-				case ORA_TYPE_BLOB:
-					type = SQLT_BLOB;
-					break;
-				case ORA_TYPE_BFILE:
-					type = SQLT_BFILE;
-					break;
-				case ORA_TYPE_CLOB:
-					type = SQLT_CLOB;
-					break;
-				case ORA_TYPE_RAW:
-					/* RAW is retrieved as binary for bytea and as string for uuid */
-					if (oraTable->cols[i]->pgtype == UUIDOID)
-						type = SQLT_STR;
-					else
-						type = SQLT_BIN;
-					break;
-				case ORA_TYPE_LONG:
-					type = SQLT_LVC;
-					break;
-				case ORA_TYPE_LONGRAW:
-					type = SQLT_LVB;
-					break;
-				default:
-					/* all other columns are converted to strings */
-					type = SQLT_STR;
-			}
-
-			/* check if it is a LOB column */
-			if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
-			{
-				/* allocate a LOB locator, store a pointer to it in "val" */
-				allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
-					FDW_UNABLE_TO_CREATE_EXECUTION,
-					"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
-			}
-
-			/* define result value */
-			defnhp = NULL;
+			/* define callback */
 			if (checkerr(
-				OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)++col_pos,
-					(dvoid *)oraTable->cols[i]->val, (sb4)oraTable->cols[i]->val_size,
-					type, (dvoid *)&oraTable->cols[i]->val_null,
-					(ub2 *)&oraTable->cols[i]->val_len, NULL, OCI_DEFAULT),
+				OCIBindDynamic((OCIBind *)param->bindh, session->envp->errhp,
+					oraTable->cols[param->colnum], &bind_in_callback,
+					oraTable->cols[param->colnum], &bind_out_callback),
 				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 			{
 				oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-					"error executing query: OCIDefineByPos failed to define result value",
+					"error executing query: OCIBindDynamic failed to bind callback for parameter",
 					oraMessage);
 			}
-		}
-	}
-
-	if (col_pos == 0)
-	{
-		/*
-		 * No columns selected (i.e., SELECT '1' FROM).
-		 * Define dummy result columnn.
-		 */
-		if (checkerr(
-			OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
-				(dvoid *)dummy, dummy_size, SQLT_STR, (dvoid *)&dummy_null,
-				NULL, NULL, OCI_DEFAULT),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error executing query: OCIDefineByPos failed to define result value",
-				oraMessage);
 		}
 	}
 
@@ -1616,7 +1907,44 @@ oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTa
 			oraMessage);
 	}
 
-	return (result == OCI_SUCCESS);
+	/* free all LOB locators */
+	for (i=0; i<=param_count; ++i)
+		if (lob_locators[i] != NULL)
+			freeHandle((dvoid *)lob_locators[i], session->connp);
+	oracleFree(lob_locators);
+
+	/* free indicators */
+	oracleFree(indicators);
+
+	if (result == OCI_NO_DATA)
+		return 0;
+
+	/* get the number of processed rows */
+	if (checkerr(
+		OCIAttrGet((dvoid *)session->stmthp, (ub4)OCI_HTYPE_STMT,
+			(dvoid *)&rowcount, (ub4 *)0, (ub4)OCI_ATTR_ROW_COUNT, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error executing query: OCIAttrGet failed to get number of affected rows",
+			oraMessage);
+	}
+
+	/* set the length for all output parameters */
+	for (param=paramList; param; param=param->next)
+		if (param->bindType == BIND_OUTPUT)
+			oraTable->cols[param->colnum]->val_len = (unsigned short)oraTable->cols[param->colnum]->val_len4;
+
+	if (rowcount > 0)
+	{
+		/* write LOB data for DML queries to the LOB locators */
+		for (param=paramList; param; param=param->next)
+			if ((param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
+					&& oraTable->cols[param->colnum]->val_null != -1)
+				oracleWriteLob(session, *((OCILobLocator **)oraTable->cols[param->colnum]->val), param->value);
+	}
+
+	return rowcount;
 }
 
 /*
@@ -1664,17 +1992,28 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 	/* initialize result buffer length */
 	*value_len = 0;
 
-	/* open the LOB if it is a BFILE */
+	/* open the LOB */
 	if (type == ORA_TYPE_BFILE)
 	{
-		result = checkerr(
+		/* function to open BFILES - required */
+		if (checkerr(
 			OCILobFileOpen(session->connp->svchp, session->envp->errhp, locp, OCI_FILE_READONLY),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
-
-		if (result == OCI_ERROR)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error fetching result: OCILobFileOpen failed to open BFILE",
+				oraMessage);
+		}
+	}
+	else
+	{
+		/* function to open internal LOBs - for better performance */
+		if (checkerr(
+			OCILobOpen(session->connp->svchp, session->envp->errhp, locp, OCI_FILE_READONLY),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error fetching result: OCILobOpen failed to open LOB",
 				oraMessage);
 		}
 	}
@@ -1717,52 +2056,29 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 	/* string end for CLOBs */
 	(*value)[*value_len] = '\0';
 
-	/* close the LOB if it is a BFILE */
+	/* close the LOB */
 	if (type == ORA_TYPE_BFILE)
 	{
-		result = checkerr(
+		if (checkerr(
 			OCILobFileClose(session->connp->svchp, session->envp->errhp, locp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
-
-		if (result == OCI_ERROR)
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error fetching result: OCILobFileClose failed to close BFILE",
 				oraMessage);
 		}
 	}
-}
-
-/*
- * oracleCleanupTransaction
- * 		Try to find the session in the cache, return 1 if found, 0 if not.
- * 		If the session is found, issue a rollback and set usecount to zero.
- * 		Allocated Oracle handles are freed.
- */
-void
-oracleCleanupTransaction(void *arg)
-{
-	struct envEntry *envp;
-	struct srvEntry *srvp;
-	struct connEntry *connp = NULL;
-
-	/* search session handle in cache */
-	for (envp = envlist; envp != NULL; envp = envp->next)
-		for (srvp = envp->srvlist; srvp != NULL; srvp = srvp->next)
-			for (connp = srvp->connlist; connp != NULL; connp = connp->next)
-				if (connp == arg && connp->usecount > 0)
-				{
-					connp->usecount = 0;
-
-					oracleDebug2("oracle_fdw: rollback remote transaction");
-
-					/* rollback and ignore errors */
-					OCITransRollback(connp->svchp, envp->errhp, OCI_DEFAULT);
-
-					/* free handles */
-					while (connp->handlelist != NULL)
-						freeHandle(connp->handlelist->handlep, connp);
-				}
+	else
+	{
+		if (checkerr(
+			OCILobClose(session->connp->svchp, session->envp->errhp, locp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error fetching result: OCILobClose failed to close LOB",
+				oraMessage);
+		}
+	}
 }
 
 /*
@@ -1893,9 +2209,9 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 	}
 
 	/* terminate the session */
-	if (!silent && checkerr(
+	if (checkerr(
 		OCISessionEnd(connp->svchp, envp->errhp, connp->userhp, OCI_DEFAULT),
-		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS && !silent)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error closing session: OCISessionEnd failed to terminate session",
@@ -1906,10 +2222,10 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
 	(void)OCIHandleFree((dvoid *)connp->userhp, OCI_HTYPE_SESSION);
 
 	/* get the transaction handle */
-	if (!silent && checkerr(
+	if (checkerr(
 		OCIAttrGet((dvoid *)connp->svchp, (ub4)OCI_HTYPE_SVCCTX,
 			(dvoid *)&txnhp, (ub4 *)0, (ub4)OCI_ATTR_TRANS, envp->errhp),
-		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS && !silent)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error closing session: OCIAttrGet failed to get transaction handle",
@@ -2122,4 +2438,126 @@ freeHandle(dvoid *handlep, struct connEntry *connp)
 		preventry->next = entry->next;
 
 	free(entry);
+}
+
+/*
+ * getOraType
+ * 		Find oracle's name for a given oraType.
+ */
+
+ub2
+getOraType(oraType arg)
+{
+	switch (arg)
+	{
+		case ORA_TYPE_BLOB:
+			return SQLT_BLOB;
+		case ORA_TYPE_BFILE:
+			return SQLT_BFILE;
+		case ORA_TYPE_CLOB:
+			return SQLT_CLOB;
+		case ORA_TYPE_RAW:
+			return SQLT_BIN;
+		case ORA_TYPE_LONG:
+			return SQLT_LVC;
+		case ORA_TYPE_LONGRAW:
+			return SQLT_LVB;
+		default:
+			/* all other columns are converted to strings */
+			return SQLT_STR;
+	}
+}
+
+/*
+ * bind_out_callback
+ * 		Point Oracle to where it should write the output value.
+ */
+
+sb4
+bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep)
+{
+	struct oraColumn *column = (struct oraColumn *)octxp;
+
+	if (column->oratype == ORA_TYPE_BLOB || column->oratype == ORA_TYPE_CLOB)
+	{
+		/* for LOBs, data should be written to the LOB locator */
+		*bufpp = *((OCILobLocator **)column->val);
+	}
+	else
+	{
+		/* for other types, data should be written to the buffer */
+		*bufpp = column->val;
+	}
+	column->val_len4 = (unsigned int)column->val_size;
+	*alenp = &(column->val_len4);
+	*indp = &(column->val_null);
+	*rcodep = NULL;
+
+	if (*piecep == OCI_ONE_PIECE)
+		return OCI_CONTINUE;
+	else
+		return OCI_ERROR;
+}
+
+/*
+ * bind_in_callback
+ * 		Provide a NULL value.
+ */
+
+sb4
+bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp)
+{
+	struct oraColumn *column = (struct oraColumn *)ictxp;
+
+	*piecep = OCI_ONE_PIECE;
+	column->val_null = -1;
+	*indpp = &(column->val_null);
+
+	return OCI_CONTINUE;
+}
+
+/*
+ * oracleWriteLob
+ * 		Write the value in "value" to the LOB Locator in "locptr".
+ * 		"value" is supposed to be in LVB/LVC format (first 4 bytes are the length).
+ */
+
+void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
+{
+	oraub8 byte_count = *((sb4 *)value), char_count = 0;
+
+	/* empty LOB */
+	if (byte_count == 0)
+		return;
+
+	/* open the LOB */
+	if (checkerr(
+		OCILobOpen(session->connp->svchp, session->envp->errhp, locptr, OCI_LOB_READWRITE),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error writing data: OCILobOpen failed to open LOB",
+			oraMessage);
+	}
+
+	/* write the whole LOB in one piece */
+	if (checkerr(
+		OCILobWrite2(session->connp->svchp, session->envp->errhp, locptr, &byte_count, &char_count,
+			(oraub8)1, value + 4, byte_count, OCI_ONE_PIECE, NULL, NULL, (ub2)0, (ub1)0),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error writing data: OCILobWrite2 failed to write LOB",
+			oraMessage);
+	}
+
+	/* close the LOB */
+	if (checkerr(
+		OCILobClose(session->connp->svchp, session->envp->errhp, locptr),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error writing data: OCILobClose failed to close LOB",
+			oraMessage);
+	}
 }

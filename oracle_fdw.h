@@ -57,9 +57,11 @@ struct oraColumn
 	Oid pgtype;              /* PostgreSQL data type */
 	int pgtypmod;            /* PostgreSQL type modifier */
 	int used;                /* is the column used in the query? */
-	char *val;               /* buffer for Oracle to return results in */
+	int pkey;                /* nonzero for primary keys, later set to the resjunk attribute number */
+	char *val;               /* buffer for Oracle to return results in (LOB locator for LOBs) */
 	long val_size;           /* allocated size in val */
 	unsigned short val_len;  /* actual length of val */
+	unsigned int val_len4;   /* actual length of val - for bind callbacks */
 	short val_null;          /* indicator for NULL value */
 };
 
@@ -77,7 +79,12 @@ struct oraTable
 typedef enum {
 	BIND_STRING,
 	BIND_NUMBER,
-	BIND_TIMESTAMP
+	BIND_TIMESTAMP,
+	BIND_BLOB,
+	BIND_CLOB,
+	BIND_LONG,
+	BIND_LONGRAW,
+	BIND_OUTPUT
 } oraBindType;
 
 struct paramDesc
@@ -85,8 +92,10 @@ struct paramDesc
 	char *name;            /* name we give the parameter */
 	Oid type;              /* PostgreSQL data type */
 	oraBindType bindType;  /* which type to use for binding to Oracle statement */
-	char *value;           /* value rendered as string */
+	char *value;           /* value rendered for Oracle */
 	void *node;            /* the executable expression */
+	int colnum;            /* corresponding column in oraTable for output parameters */
+	void *bindh;           /* bind handle */
 	struct paramDesc *next;
 };
 
@@ -104,19 +113,20 @@ typedef enum
 /*
  * functions defined in oracle_utils.c
  */
-extern oracleSession *oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int transaction);
-extern void oracleReleaseSession(oracleSession *session, int close, int error);
+extern oracleSession *oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel, int readonly);
 extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
+extern void oracleEndTransaction(void *arg, int is_commit, int silent);
+extern void oracleEndSubtransaction(void *arg, int nest_level, int is_commit);
 extern int oracleIsStatementOpen(oracleSession *session);
 extern struct oraTable *oracleDescribe(oracleSession *session, char *schema, char *table, char *pgname, long max_long);
 extern void oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, int block_size, double *startup_cost, double *total_cost, double *rows, int *width);
 extern void oracleExplain(oracleSession *session, const char *query, int *nrows, char ***plan);
-extern int oracleExecuteQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, struct paramDesc *paramList);
+extern void oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable);
+extern int oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, struct paramDesc *paramList);
 extern int oracleFetchNext(oracleSession *session);
 extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
-extern void oracleCleanupTransaction(void *arg);
 
 /*
  * functions defined in oracle_fdw.c
