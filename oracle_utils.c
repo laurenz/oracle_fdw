@@ -121,10 +121,9 @@ static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *
  * 		Look up an Oracle connection in the cache, create a new one if there is none.
  * 		The result is a palloc'ed data structure containing the connection.
  * 		"curlevel" is the current PostgreSQL transaction level.
- * 		If "readonly" is true, start a read-only transaction.
  */
 oracleSession
-*oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel, int readonly)
+*oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel)
 {
 	OCIEnv *envhp = NULL;
 	OCIError *errhp = NULL;
@@ -485,8 +484,7 @@ oracleSession
 
 		/* start a read-only or "serializable" (= repeatable read) transaction */
 		if (checkerr(
-			OCITransStart(svchp, errhp, (uword)0,
-			readonly ? OCI_TRANS_READONLY : OCI_TRANS_SERIALIZABLE),
+			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,

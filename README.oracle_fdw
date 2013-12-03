@@ -328,6 +328,10 @@ the option is set on *all* columns that belong to the primary key.
 
 The RETURNING clause on INSERT, UPDATE and DELETE is supported.
 
+Transactions are forwarded to Oracle, so BEGIN, COMMIT, ROLLBACK and
+SAVEPOINT work as expected.  Prepared statements involving Oracle are
+not supported.  See "Internals" for details.
+
 EXPLAIN
 -------
 
@@ -420,6 +424,19 @@ column contains only the first 1000 bytes of the query.
 Therefore, oracle_fdw adds a comment to the query that contains an MD5 hash
 of the query text.  This is used to search in V$SQL.
 The actual execution plan or cost information is retrieved from V$SQL_PLAN.
+
+oracle_fdw uses transaction isolation level "serializable" on the Oracle side,
+which corresponds to PostgreSQL's repeatable read.  This is necessary because
+a single PostgreSQL statement can lead to multiple Oracle queries (e.g. during
+a nested loop join) and the results need to be consistent.
+
+The Oracle transaction is committed immediately before the local transaction
+commits, so that a completed PostgreSQL transaction guarantees that the Oracle
+transaction has completed.  However, there is a small chance that the
+PostgreSQL transaction cannot complete even though the Oracle transaction
+is committed.  This cannot be avoided without using two-phase transactions
+and a transaction manager, which is clearly beyond what a foreign data wrapper
+can reasonably provide.
 
 8. Problems
 ===========

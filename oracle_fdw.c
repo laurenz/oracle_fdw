@@ -753,10 +753,8 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 			fdw_state->nls_lang,
 			fdw_state->oraTable->pgname,
 #ifdef WRITE_API
-			GetCurrentTransactionNestLevel(),
-			0
+			GetCurrentTransactionNestLevel()
 #else
-			1,
 			1
 #endif  /* WRITE_API */
 		);
@@ -1250,8 +1248,7 @@ void oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, L
 			fdw_state->password,
 			fdw_state->nls_lang,
 			fdw_state->oraTable->pgname,
-			GetCurrentTransactionNestLevel(),
-			0
+			GetCurrentTransactionNestLevel()
 		);
 
 	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable);
@@ -1527,10 +1524,8 @@ struct OracleFdwState
 		fdwState->nls_lang,
 		pgtablename,
 #ifdef WRITE_API
-		GetCurrentTransactionNestLevel(),
-		0
+		GetCurrentTransactionNestLevel()
 #else
-		1,
 		1
 #endif  /* WRITE_API */
 	);

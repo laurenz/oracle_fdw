@@ -113,7 +113,7 @@ typedef enum
 /*
  * functions defined in oracle_utils.c
  */
-extern oracleSession *oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel, int readonly);
+extern oracleSession *oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel);
 extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
