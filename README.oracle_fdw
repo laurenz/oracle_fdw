@@ -332,6 +332,16 @@ Transactions are forwarded to Oracle, so BEGIN, COMMIT, ROLLBACK and
 SAVEPOINT work as expected.  Prepared statements involving Oracle are
 not supported.  See "Internals" for details.
 
+Since oracle_fdw uses serialized transactions, it is possible that
+data modifying statements lead to a serialization failure:
+
+  ORA-08177: can't serialize access for this transaction
+
+This can happen if concurrent transactions modify the table and gets more
+likely in long running transactions.  Such errors can be identified by their
+SQLSTATE (40001).  An application using oracle_fdw should retry transactions
+that fail with this error.
+
 EXPLAIN
 -------
 
@@ -437,6 +447,7 @@ PostgreSQL transaction cannot complete even though the Oracle transaction
 is committed.  This cannot be avoided without using two-phase transactions
 and a transaction manager, which is clearly beyond what a foreign data wrapper
 can reasonably provide.
+Prepared statements involving Oracle are not supported for the same reason.
 
 8. Problems
 ===========
@@ -503,3 +514,17 @@ LDAP functions should get used.  In that case, Oracle may be able to use
 LDAP functionality, but using LDAP from PostgreSQL will crash the backend.
 
 You cannot use LDAP functionality both in PostgreSQL and in Oracle, period.
+
+Serialization errors
+--------------------
+
+In Oracle 11.2 or above, inserting the first row into a newly created
+Oracle table with oracle_fdw will lead to a serialization error.
+
+This is because of an Oracle feature called "deferred segment creation" which
+defers allocation of storage space for a new table until the first row
+is inserted.  This causes a serialization failure with serializable
+transactions (see document 1285464.1 in Oracle's knowledge base).
+
+This is no serious problem; you can work around it by either ignoring that
+first error or creating the table with "SEGMENT CREATION IMMEDIATE".
