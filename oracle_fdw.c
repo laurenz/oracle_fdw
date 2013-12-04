@@ -1347,7 +1347,7 @@ TupleTableSlot *oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, Tu
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
 				errmsg("UPDATE on Oracle table changed %d rows instead of one in iteration %lu", rows, fdw_state->rowcount),
-				errhint("This probably means that you did set the \"key\" option on all primary key columns.")));
+				errhint("This probably means that you did not set the \"key\" option on all primary key columns.")));
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -1385,7 +1385,7 @@ TupleTableSlot *oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, Tu
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
 				errmsg("DELETE on Oracle table removed %d rows instead of one in iteration %lu", rows, fdw_state->rowcount),
-				errhint("This probably means that you did set the \"key\" option on all primary key columns.")));
+				errhint("This probably means that you did not set the \"key\" option on all primary key columns.")));
 
 	MemoryContextSwitchTo(oldcontext);
 
