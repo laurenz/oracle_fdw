@@ -329,6 +329,10 @@ the option is set on *all* columns that belong to the primary key.
 
 The RETURNING clause on INSERT, UPDATE and DELETE is supported.
 
+While modifying foreign data works, the performance is not particularly
+good, specifically when many rows are affected, because (owing to the way
+foreign data wrappers work) each row has to be treated individually.
+
 Transactions are forwarded to Oracle, so BEGIN, COMMIT, ROLLBACK and
 SAVEPOINT work as expected.  Prepared statements involving Oracle are
 not supported.  See "Internals" for details.
