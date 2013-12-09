@@ -327,7 +327,9 @@ key columns of the Oracle table must have the "key" column option set.
 These columns are used to identify a foreign table row, so make sure that
 the option is set on *all* columns that belong to the primary key.
 
-The RETURNING clause on INSERT, UPDATE and DELETE is supported.
+The RETURNING clause on INSERT, UPDATE and DELETE is supported except
+for columns with Oracle data types LONG and LONG RAW (Oracle doesn't support
+these data types in the RETURNING clause).
 
 While modifying foreign data works, the performance is not particularly
 good, specifically when many rows are affected, because (owing to the way

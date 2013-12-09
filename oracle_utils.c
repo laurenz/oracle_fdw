@@ -1859,7 +1859,10 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					value_len = oraTable->cols[param->colnum]->val_size;
 					value_type = getOraType(oraTable->cols[param->colnum]->oratype);
 					if (oraTable->cols[param->colnum]->pgtype == UUIDOID)
+					{
+						/* the input function will interpret the string value correctly */
 						value_type = SQLT_STR;
+					}
 					oci_mode = OCI_DATA_AT_EXEC;
 					break;
 			}
@@ -1929,10 +1932,17 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			oraMessage);
 	}
 
-	/* set the length for all output parameters */
+	/* post processing of output parameters */
 	for (param=paramList; param; param=param->next)
 		if (param->bindType == BIND_OUTPUT)
+		{
+			/*
+			 * Store the received length in the table column.
+			 * Should not lose any data in all possible cases
+			 * since LONG and LONG RAW don't work with RETURNING anyway.
+			 */
 			oraTable->cols[param->colnum]->val_len = (unsigned short)oraTable->cols[param->colnum]->val_len4;
+		}
 
 	if (rowcount > 0)
 	{

@@ -1017,6 +1017,17 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 		for (i=0; i<fdwState->oraTable->ncols; ++i)
 			if (fdwState->oraTable->cols[i]->pgattnum == attnum)
 			{
+				/* throw an error if it is a LONG or LONG RAW column */
+				if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
+						|| fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG)
+					ereport(ERROR,
+							(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
+							errmsg("columns with Oracle type LONG or LONG RAW cannot be used in RETURNING clause"),
+							errdetail("Column \"%s\" of foreign table \"%s\" is of Oracle type LONG%s.",
+								fdwState->oraTable->cols[i]->pgname,
+								fdwState->oraTable->pgname,
+								fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG ? "" : " RAW")));
+
 				fdwState->oraTable->cols[i]->used = 1;
 				break;
 			}
