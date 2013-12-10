@@ -497,7 +497,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
 	/* check if we should add FOR UPDATE */
-	if (baserel->relid == root->parse->resultRelation &&
+	if (baserel->relid == (Index)root->parse->resultRelation &&
 			(root->parse->commandType == CMD_UPDATE ||
 			root->parse->commandType == CMD_DELETE))
 	{
