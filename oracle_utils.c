@@ -668,7 +668,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 
 	if (is_commit)
 	{
-		/**
+		/*
 		 * There is nothing to do as savepoints don't get released in Oracle:
 		 * Setting the same savepoint again just overwrites the previous one.
 		 */
@@ -1576,7 +1576,6 @@ void
 oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable)
 {
 	int i, col_pos, is_select;
-	ub2 type;
 	OCIDefine *defnhp;
 	static char dummy[4];
 	static sb4 dummy_size = 4;
@@ -1615,6 +1614,8 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 		{
 			if (is_select)
 			{
+				ub2 type;
+
 				/*
 				 * For SELECT statements, define the result columns of the query.
 				 */
@@ -1649,10 +1650,13 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 			}
 			else
 			{
+				ub2 type;
+
 				/*
 				 * For other statements, allocate LOB locators for RETURNING parameters.
 				 */
-				if (oraTable->cols[i]->oratype == ORA_TYPE_BLOB || oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
+				type = getOraType(oraTable->cols[i]->oratype);
+				if (type == ORA_TYPE_BLOB || type == SQLT_BFILE || type == ORA_TYPE_CLOB)
 				{
 					/* allocate a LOB locator, store a pointer to it in "val" */
 					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
@@ -1860,7 +1864,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					value_type = getOraType(oraTable->cols[param->colnum]->oratype);
 					if (oraTable->cols[param->colnum]->pgtype == UUIDOID)
 					{
-						/* the input function will interpret the string value correctly */
+						/* the type input function will interpret the string value correctly */
 						value_type = SQLT_STR;
 					}
 					oci_mode = OCI_DATA_AT_EXEC;
@@ -1868,6 +1872,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			}
 		}
 
+		/* bind the value to the parameter */
 		if (checkerr(
 			OCIBindByName(session->stmthp, (OCIBind **)&param->bindh, session->envp->errhp, (text *)param->name,
 				(sb4)strlen(param->name), value, value_len, value_type,
@@ -1879,9 +1884,9 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 				oraMessage);
 		}
 
+		/* for output parameters, define callbacks that provide storage space */
 		if (param->bindType == BIND_OUTPUT)
 		{
-			/* define callback */
 			if (checkerr(
 				OCIBindDynamic((OCIBind *)param->bindh, session->envp->errhp,
 					oraTable->cols[param->colnum], &bind_in_callback,
@@ -1921,7 +1926,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 	if (result == OCI_NO_DATA)
 		return 0;
 
-	/* get the number of processed rows */
+	/* get the number of processed rows (important for DML) */
 	if (checkerr(
 		OCIAttrGet((dvoid *)session->stmthp, (ub4)OCI_HTYPE_STMT,
 			(dvoid *)&rowcount, (ub4 *)0, (ub4)OCI_ATTR_ROW_COUNT, session->envp->errhp),
@@ -2531,7 +2536,8 @@ bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp,
  * 		"value" is supposed to be in LVB/LVC format (first 4 bytes are the length).
  */
 
-void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
+void
+oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
 {
 	oraub8 byte_count = *((sb4 *)value), char_count = 0;
 

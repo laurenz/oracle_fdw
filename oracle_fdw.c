@@ -81,6 +81,7 @@
 #else
 #undef WRITE_API
 #endif  /* PG_VERSION_NUM */
+
 PG_MODULE_MAGIC;
 
 /*
@@ -129,6 +130,8 @@ static struct OracleFdwOption valid_options[] = {
 #ifdef WRITE_API
 /*
  * Array to hold the type output functions during table modification.
+ * It is ok to hold this cache in a static variable because there cannot
+ * be more than one foreign table modified at the same time.
  */
 
 static regproc *output_funcs;
@@ -145,6 +148,11 @@ typedef enum {
 
 /*
  * FDW-specific information for RelOptInfo.fdw_private and ForeignScanState.fdw_state.
+ * The same structure is used to hold information for query planning and execution.
+ * The structure is initialized during query planning and passed on to the execution
+ * step serialized as a List (see serializePlanData and deserializePlanData).
+ * For DML statements, the scan stage and the modify stage both hold an
+ * OracleFdwState, and the latter is initialized by copying the former (see copyPlanData).
  */
 struct OracleFdwState {
 	char *dbserver;                /* Oracle connect string */
@@ -161,7 +169,7 @@ struct OracleFdwState {
 	handleClause *handle_clauses;  /* how to handle WHERE conditions */
 	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
-	MemoryContext temp_cxt;        /* short-lived memory for modifications */
+	MemoryContext temp_cxt;        /* short-lived memory for data modification */
 };
 
 /*
@@ -337,6 +345,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 		/* check valid values for plan_costs */
 		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0
+				|| strcmp(def->defname, OPT_READONLY) == 0
 #ifndef OLD_FDW_API
 				|| strcmp(def->defname, OPT_KEY) == 0
 #endif	/* OLD_FDW_API */
@@ -485,6 +494,12 @@ oraclePlanForeignScan(Oid foreigntableid,
 	return fdwplan;
 }
 #else
+/*
+ * oracleGetForeignRelSize
+ * 		Get an OracleFdwState for this foreign scan.
+ * 		Construct the remote SQL query.
+ * 		Provide estimates for the number of tuples, the average width and the cost.
+ */
 void
 oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 {
@@ -496,17 +511,21 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
-	/* check if we should add FOR UPDATE */
-	if (baserel->relid == (Index)root->parse->resultRelation &&
+	/* check if the foreign scan is for an UPDATE or DELETE */
+	if (baserel->relid == root->parse->resultRelation &&
 			(root->parse->commandType == CMD_UPDATE ||
 			root->parse->commandType == CMD_DELETE))
 	{
-		/* foreign scan is for UPDATE or DELETE, or FOR SHARE/UPDATE was specified */
+		/* we need the table's primary key columns */
 		need_keys = true;
 	}
 
+	/* check if FOR [KEY] SHARE/UPDATE was specified */
 	if (need_keys || get_parse_rowmark(root->parse, baserel->relid))
+	{
+		/* we should add FOR UPDATE */
 		for_update = true;
+	}
 
 	/* get connection options, connect and get the remote table description */
 	fdwState = getFdwState(foreigntableid, &plan_costs);
@@ -576,18 +595,26 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	baserel->fdw_private = (void *)fdwState;
 }
 
+/* oracleGetForeignPaths
+ * 		Create a ForeignPath node and add it as only possible path.
+ */
 void
 oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 
-	/* Create a ForeignPath node and add it as only possible path */
 	add_path(baserel,
 		(Path *)create_foreignscan_path(root, baserel, baserel->rows,
 				fdwState->startup_cost, fdwState->total_cost,
 				NIL, NULL, NIL));
 }
 
+/*
+ * oracleGetForeignPlan
+ * 		Construct a ForeignScan node containing the serialized OracleFdwState,
+ * 		the RestrictInfo clauses not handled entirely by Oracle and the list
+ * 		of parameters we need for execution.
+ */
 ForeignScan
 *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses)
 {
@@ -930,6 +957,12 @@ oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relat
 				errhint("Set the option \"%s\" on the columns that belong to the primary key.", OPT_KEY)));
 }
 
+/*
+ * oraclePlanForeignModify
+ * 		Construct an OracleFdwState or copy it from the foreign scan plan.
+ * 		Construct the Oracle DML statement and a list of necessary parameters.
+ * 		Return the serialized OracleFdwState.
+ */
 List *
 oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelation, int subplan_index)
 {
@@ -1188,6 +1221,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				appendStringInfo(&sql, ", ");
 			appendStringInfo(&sql, "%s", fdwState->oraTable->cols[i]->name);
 		}
+
+	/* add the parameters for the RETURNING clause */
 	firstcol = true;
 	for (i=0; i<fdwState->oraTable->ncols; ++i)
 		if (fdwState->oraTable->cols[i]->used)
@@ -1239,7 +1274,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
  * 		the parameters are fetched, and the column numbers of the
  * 		resjunk attributes are stored in the "pkey" field.
  */
-void oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, int eflags)
+void
+oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, int eflags)
 {
 	struct OracleFdwState *fdw_state = deserializePlanData(fdw_private);
 	EState *estate = mtstate->ps.state;
@@ -1299,7 +1335,13 @@ void oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, L
 							ALLOCSET_SMALL_MAXSIZE);
 }
 
-TupleTableSlot *oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
+/*
+ * oracleExecForeignInsert
+ * 		Set the parameter values from the slots and execute the INSERT statement.
+ * 		Returns a slot with the results from the RETRUNING clause.
+ */
+TupleTableSlot *
+oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
 	int rows;
@@ -1315,6 +1357,7 @@ TupleTableSlot *oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, Tu
 	/* extract the values from the slot and store them in the parameters */
 	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable);
 
+	/* execute the INSERT statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 
 	if (rows != 1)
@@ -1327,7 +1370,7 @@ TupleTableSlot *oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, Tu
 	/* empty the result slot */
 	ExecClearTuple(slot);
 
-	/* convert result to arrays of values and null indicators */
+	/* convert result for RETURNING to arrays of values and null indicators */
 	convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
 
 	/* store the virtual tuple */
@@ -1336,7 +1379,13 @@ TupleTableSlot *oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, Tu
 	return slot;
 }
 
-TupleTableSlot *oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
+/*
+ * oracleExecForeignUpdate
+ * 		Set the parameter values from the slots and execute the UPDATE statement.
+ * 		Returns a slot with the results from the RETRUNING clause.
+ */
+TupleTableSlot *
+oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
 	int rows;
@@ -1352,6 +1401,7 @@ TupleTableSlot *oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, Tu
 	/* extract the values from the slot and store them in the parameters */
 	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable);
 
+	/* execute the UPDATE statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 
 	if (rows != 1)
@@ -1365,7 +1415,7 @@ TupleTableSlot *oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, Tu
 	/* empty the result slot */
 	ExecClearTuple(slot);
 
-	/* convert result to arrays of values and null indicators */
+	/* convert result for RETURNING to arrays of values and null indicators */
 	convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
 
 	/* store the virtual tuple */
@@ -1374,7 +1424,13 @@ TupleTableSlot *oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, Tu
 	return slot;
 }
 
-TupleTableSlot *oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
+/*
+ * oracleExecForeignDelete
+ * 		Set the parameter values from the slots and execute the DELETE statement.
+ * 		Returns a slot with the results from the RETRUNING clause.
+ */
+TupleTableSlot *
+oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
 	int rows;
@@ -1390,6 +1446,7 @@ TupleTableSlot *oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, Tu
 	/* extract the values from the slot and store them in the parameters */
 	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable);
 
+	/* execute the DELETE statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 
 	if (rows != 1)
@@ -1403,7 +1460,7 @@ TupleTableSlot *oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, Tu
 	/* empty the result slot */
 	ExecClearTuple(slot);
 
-	/* convert result to arrays of values and null indicators */
+	/* convert result for RETURNING to arrays of values and null indicators */
 	convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
 
 	/* store the virtual tuple */
@@ -1416,7 +1473,8 @@ TupleTableSlot *oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, Tu
  * oracleEndForeignModify
  * 		Release the session (will be cached).
  */
-void oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo){
+void
+oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo){
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
 
 	elog(DEBUG1, "oracle_fdw: end foreign table modify on %d", RelationGetRelid(rinfo->ri_RelationDesc));
@@ -1429,6 +1487,11 @@ void oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo){
 	fdw_state->session = NULL;
 }
 
+/*
+ * oracleExplainForeignModify
+ * 		Show the Oracle DML statement.
+ * 		Nothing special is done for VERBOSE because the query plan is likely trivial.
+ */
 void
 oracleExplainForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, struct ExplainState *es){
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
@@ -1440,7 +1503,7 @@ oracleExplainForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List
 }
 
 /* oracleIsForeignRelUpdatable
- * 		Returns 0 if "readonly" is set, else 0x11100.
+ * 		Returns 0 if "readonly" is set, a value indicating that all DML is allowed.
  */
 int
 oracleIsForeignRelUpdatable(Relation rel)
@@ -1558,7 +1621,7 @@ struct OracleFdwState
  * 		Fetch the options for an oracle_fdw foreign table.
  * 		Returns a union of the options of the foreign data wrapper,
  * 		the foreign server, the user mapping and the foreign table,
- * 		in that order.
+ * 		in that order.  Column options are ignored.
  */
 void
 oracleGetOptions(Oid foreigntableid, List **options)
@@ -1656,7 +1719,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		Untranslatable WHERE clauses are omitted and left for PostgreSQL to check.
  * 		A NULL-terminated array of RestrictInfos is constructed which need not
  * 		be re-evaluated at execution time.
- * 		As a side effect. we also mark the used columns in oraTable.
+ * 		As a side effect, we also mark the used columns in oraTable.
  */
 char
 *createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, handleClause **handle_clauses)
@@ -3610,7 +3673,7 @@ optionIsTrue(const char *value)
 #ifdef WRITE_API
 /*
  * copyPlanData
- * 		Create a deep copy of the argument for planning purposes.
+ * 		Create a deep copy of the argument, copy only those fields needed for planning.
  */
 
 struct OracleFdwState
@@ -3810,7 +3873,7 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 						default:
 							elog(ERROR, "impossible Oracle type for interval");
 					}
-					break;
+					break;  /* from switch (param->bindType) */
 				}
 
 				/* convert the parameter value into a string */
