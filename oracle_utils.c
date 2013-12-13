@@ -1571,6 +1571,11 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 /*
  * oraclePrepareQuery
  * 		Prepares an SQL statement for execution.
+ * 		This function should handle everything that has to be done only once
+ * 		even if the statement is executed multiple times, that is:
+ * 		- For SELECT statements, defines the result values to be stored in oraTable.
+ * 		- For DML statements, allocates LOB locators for the RETURNING clause in oraTable.
+ * 		- Set the prefetch options.
  */
 void
 oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable)
@@ -1607,18 +1612,24 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 			oraMessage);
 	}
 
+	/* loop through table columns */
 	col_pos = 0;
 	for (i=0; i<oraTable->ncols; ++i)
 	{
 		if (oraTable->cols[i]->used)
 		{
+			/*
+			 * Unfortunately Oracle handles DML statements with a RETURNING clause
+			 * quite different from SELECT statements.  In the latter, the result
+			 * columns are "defined", i.e. bound to some storage space.
+			 * This definition is only necessary once, even if the query is executed
+			 * multiple times, so we do this here.
+			 * RETURNING clause are handled in oracleExecuteQuery, here we only
+			 * allocate locators for LOB columns in RETURNING clauses.
+			 */
 			if (is_select)
 			{
 				ub2 type;
-
-				/*
-				 * For SELECT statements, define the result columns of the query.
-				 */
 
 				/* figure out in which format we want the results */
 				type = getOraType(oraTable->cols[i]->oratype);
@@ -1652,9 +1663,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 			{
 				ub2 type;
 
-				/*
-				 * For other statements, allocate LOB locators for RETURNING parameters.
-				 */
+				/* for other statements, allocate LOB locators for RETURNING parameters */
 				type = getOraType(oraTable->cols[i]->oratype);
 				if (type == ORA_TYPE_BLOB || type == SQLT_BFILE || type == ORA_TYPE_CLOB)
 				{
@@ -1709,8 +1718,10 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 
 /*
  * oracleExecuteQuery
- * 		Execute a prepared query with parameters and fetches the first result row.
+ * 		Execute a prepared statement and fetches the first result row.
+ * 		The parameters ("bind variables") are filled from paramList.
  * 		Returns the count of processed rows.
+ * 		This can be called several times for a prepared SQL statement.
  */
 int
 oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, struct paramDesc *paramList)
@@ -1719,7 +1730,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 	struct paramDesc *param;
 	sword result;
 	ub4 rowcount, lob_empty = 0;
-	OCILobLocator **lob_locators;
+	OCILobLocator **lob_locators;  /* for input parameters that are LOBs */
 	int i, param_count = 0;
 
 	for (param=paramList; param; param=param->next)
@@ -1736,10 +1747,10 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 	param_count = -1;
 	for (param=paramList; param; param=param->next)
 	{
-		dvoid *value = NULL;
-		sb4 value_len = 0;
-		ub2 value_type = SQLT_STR;  /* works for NULLs of all types */
-		ub4 oci_mode = OCI_DEFAULT;
+		dvoid *value = NULL;         /* will contain the value as bound */
+		sb4 value_len = 0;           /* length of "value" */
+		ub2 value_type = SQLT_STR;   /* SQL_STR works for NULLs of all types */
+		ub4 oci_mode = OCI_DEFAULT;  /* changed only for output parameters */
 		OCIDateTime **timest;
 		OCINumber *number;
 		char *num_format, *pos;
@@ -1749,6 +1760,11 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 
 		if (param->value != NULL)
 		{
+			/*
+			 * For non-NULL LOB input parameters we insert empty LOBs in a first step.
+			 * Such columns have also been added to the RETURNING clause so that the
+			 * actual LOB contents can be written immediately after the DML statement.
+			 */
 			if (param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
 			{
 				/* allocate LOB locator for LOB columns */
@@ -1774,7 +1790,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					number = oracleAlloc(sizeof(OCINumber));
 
 					/*
-					 * construct number format
+					 * Construct number format.
 					 */
 					value_len = strlen(param->value);
 					num_format = oracleAlloc(value_len + 1);
@@ -1951,7 +1967,10 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 
 	if (rowcount > 0)
 	{
-		/* write LOB data for DML queries to the LOB locators */
+		/*
+		 * For LOB columns in DML statements we have added an empty LOB above.
+		 * Now we have to write the actual contents.
+		 */
 		for (param=paramList; param; param=param->next)
 			if ((param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
 					&& oraTable->cols[param->colnum]->val_null != -1)
@@ -2484,7 +2503,7 @@ getOraType(oraType arg)
 
 /*
  * bind_out_callback
- * 		Point Oracle to where it should write the output value.
+ * 		Point Oracle to where it should write the value for the output parameter.
  */
 
 sb4
@@ -2499,7 +2518,7 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 	}
 	else
 	{
-		/* for other types, data should be written to the buffer */
+		/* for other types, data should be written directly to the buffer */
 		*bufpp = column->val;
 	}
 	column->val_len4 = (unsigned int)column->val_size;
@@ -2516,6 +2535,7 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 /*
  * bind_in_callback
  * 		Provide a NULL value.
+ * 		This is necessary for output parameters to keep Oracle from crashing.
  */
 
 sb4
