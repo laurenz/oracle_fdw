@@ -327,6 +327,14 @@ key columns of the Oracle table must have the "key" column option set.
 These columns are used to identify a foreign table row, so make sure that
 the option is set on *all* columns that belong to the primary key.
 
+If you omit a foreign table column during INSERT, that column is set to
+the value defined in the DEFAULT clause on the PostgreSQL foreign table
+(or NULL if there is no DEFAULT clause).  DEFAULT clauses on the
+corresponding Oracle columns are not used.
+If the PostgreSQL foreign table does not include all columns of the
+Oracle table, the Oracle DEFAULT clauses will be used for the columns not
+included in the foreign table definition.
+
 The RETURNING clause on INSERT, UPDATE and DELETE is supported except
 for columns with Oracle data types LONG and LONG RAW (Oracle doesn't support
 these data types in the RETURNING clause).
