@@ -2251,7 +2251,6 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, char **wher
 				|| (strcmp(opername, "-") == 0 && rightargtype != DATEOID && rightargtype != TIMESTAMPOID
 					&& rightargtype != TIMESTAMPTZOID)
 				|| strcmp(opername, "*") == 0
-				|| strcmp(opername, "/") == 0
 				|| strcmp(opername, "~~") == 0
 				|| strcmp(opername, "!~~") == 0
 				|| strcmp(opername, "~~*") == 0

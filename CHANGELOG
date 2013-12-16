@@ -12,6 +12,10 @@ Version 0.9.10 (beta)
   - Add paths for Oracle 12.1 to the Makefile.
     Patch by Guillaume Lelarge.
 
+  Bugfixes:
+  - Don't try to push down the division operator.
+    That would produce incorrect results for numeric data types.
+
 Version 0.9.9 (beta), released 2013-08-07
   Enhancements:
   - Enable build with PostgreSQL 9.3.
