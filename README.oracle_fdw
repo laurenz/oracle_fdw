@@ -221,10 +221,12 @@ Connections
 oracle_fdw caches Oracle connections because it is expensive to create an
 Oracle session for each individual query.  All connections are automatically
 closed when the PostgreSQL session ends.
+
 The function oracle_close_connections() can be used to close all cached Oracle
 connections.  This can be useful for long-running sessions that don't access
 foreign tables all the time and want to avoid blocking the resources needed
 by an open Oracle connection.
+Don't call this function inside a transaction that modifies Oracle data.
 
 Columns
 -------
@@ -249,8 +251,9 @@ Data types
 You must define the PostgreSQL columns with data types that oracle_fdw can
 translate (see the conversion table below).  This restriction is only enforced
 if the column actually gets used, so you can define "dummy" columns for
-untranslatable data types as long as you don't access them.  If an Oracle
-value exceeds the size of the PostgreSQL column (e.g., the length of a varchar
+untranslatable data types as long as you don't access them (this trick only
+works with SELECT, not when modifying foreign data).  If an Oracle value
+exceeds the size of the PostgreSQL column (e.g., the length of a varchar
 column or the maximal integer value), you will receive a runtime error.
 
 These conversions are automatically handled by oracle_fdw:
