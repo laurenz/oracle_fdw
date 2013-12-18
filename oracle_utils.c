@@ -2511,7 +2511,7 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 {
 	struct oraColumn *column = (struct oraColumn *)octxp;
 
-	if (column->oratype == ORA_TYPE_BLOB || column->oratype == ORA_TYPE_CLOB)
+	if (column->oratype == ORA_TYPE_BLOB || column->oratype == ORA_TYPE_CLOB || column->oratype == ORA_TYPE_BFILE)
 	{
 		/* for LOBs, data should be written to the LOB locator */
 		*bufpp = *((OCILobLocator **)column->val);
