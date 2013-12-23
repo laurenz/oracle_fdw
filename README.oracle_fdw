@@ -381,14 +381,28 @@ sequential table scan.
 5. Installation Requirements
 ============================
 
-PostgreSQL 9.1 or better are required.
-Oracle client version 10 or better is required.
+oracle_fdw should compile and run on any platform supported by PostgreSQL and
+Oracle client, although I could only test it on Linux and Windows.
 
-oracle_fdw should compile and run on any platform supported by PostgreSQL,
-although I could only test it on Linux and Windows.
+PostgreSQL 9.1 or better is required.
+Support for ANALYZE is available from PostgreSQL 9.2 on.
+Support for INSERT, UPDATE and DELETE is available from PostgreSQL 9.3 on.
 
-It has been tested with Oracle 10.2 and 11.2.  It might work with other
-versions.  Both Instant Client and the regular client should work.
+Oracle client version 10.1 or better is required.
+oracle_fdw can be built and used with Oracle Instant Client as well as with
+Oracle Client and Server installations installed with Universal Installer.
+Binaries compiled with Oracle Client 10 can be used with later client versions
+without recompilation or relink.
+
+The supported Oracle server versions depend on the used client version (see the
+Oracle Client/Server Interoperability Matrix in support document 207303.1).
+For maximum coverage use Oracle Client 10.2.0.5, as this will allow you to
+connect to every server version from 8.1.7 to 12.1.0 except 9.0.1.
+
+It is advisable to use the latest Patch Set on both Oracle client and server,
+particularly with desupported Oracle versions.
+For a list of Oracle bugs that are known to affect oracle_fdw's usability,
+see the "Problems" section below.
 
 6. Installation
 ===============
@@ -398,7 +412,7 @@ Building Infrastructure "PGXS".  It should be easy to install.
 
 You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
 installed with packages, install the development package).
-You need to install Oracle's headers as well (SDK package for Instant
+You need to install Oracle's C header files as well (SDK package for Instant
 Client).
 
 Make sure that PostgreSQL is configured "--without-ldap" (at least the server).
@@ -546,6 +560,22 @@ transactions (see document 1285464.1 in Oracle's knowledge base).
 
 This is no serious problem; you can work around it by either ignoring that
 first error or creating the table with "SEGMENT CREATION IMMEDIATE".
+
+Oracle bugs
+-----------
+
+This is a list of Oracle bugs that have affected oracle_fdw in the past.
+
+Bug 6039623 can cause oracle_fdw to crash with a segmentation violation
+when larger amounts of data are selected from an Oracle table via an Oracle
+database link.
+It can occur with any Oracle server version below 12.1, and the only remedy
+is to install patch 10096945 which is included in the 11.2.0.3 Patch Set.
+
+Bug 2728408 can cause "ORA-8177 cannot serialize access for this transaction"
+even if no modification of remote data is attempted.
+It can occur with Oracle server 8.1.7.4 (install one-off patch 2728408) or
+Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 
 9. Support
 ==========
