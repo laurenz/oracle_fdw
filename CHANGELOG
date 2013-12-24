@@ -6,7 +6,6 @@ Version 0.9.10 (beta), released 2013-12-24
   - Add new column option "key" to indicate primary key columns.
     This is needed for UPDATE and DELETE.
   - Add new table option "readonly" to forbid data modifying statements.
-    Queries against such tables will use READ ONLY transactions.
   - Improved transaction handling for data modifying statements.
     COMMIT, ROLLBACK and SAVEPOINT will work as expected.
   - Add paths for Oracle 12.1 to the Makefile.
