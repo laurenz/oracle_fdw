@@ -1,4 +1,4 @@
-Version 0.9.10 (beta)
+Version 0.9.10 (beta), released 2013-12-24
   Enhancements:
   - Add support for INSERT, DELETE and UPDATE.
     This is a major rewrite that might cause some destabilization in
