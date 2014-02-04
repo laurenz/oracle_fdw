@@ -1,3 +1,7 @@
+Version 1.0.0
+  Bugfixes:
+  - Fix logic error that keeps Oracle connections from closing.
+
 Version 0.9.10 (beta), released 2013-12-24
   Enhancements:
   - Add support for INSERT, DELETE and UPDATE.

@@ -2332,9 +2332,9 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 	}
 
 	/* disconnect server */
-	if (!silent && checkerr(
+	if (checkerr(
 		OCIServerDetach(srvp->srvhp, envp->errhp, OCI_DEFAULT),
-		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS && !silent)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error closing session: OCIServerDetach failed to detach from server",
