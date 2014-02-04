@@ -99,6 +99,14 @@ FUNCTION oracle_close_connections() RETURNS void
 This function can be used to close all open Oracle connections in this session.
 See "Usage" below for when this might be useful.
 
+FUNCTION oracle_version(name DEFAULT NULL) RETURNS text
+
+This function is useful for diagnostic purposes only.  It will return
+the versions of oracle_fdw, PostgreSQL server and Oracle client used if
+you pass no argument or NULL.
+If the name of a foreign server is passed, it will additionally return
+the Oracle server version.
+
 3. Options
 ==========
 
@@ -407,6 +415,12 @@ see the "Problems" section below.
 6. Installation
 ===============
 
+If you use a binary distribution of oracle_fdw, skip to "Installing the
+extension" below.
+
+Building oracle_fdw:
+--------------------
+
 oracle_fdw has been written as a PostgreSQL extension and uses the Extension
 Building Infrastructure "PGXS".  It should be easy to install.
 
@@ -431,6 +445,13 @@ Then the software installation should be as simple as
 For the second step you need write permission to PostgreSQL's shared library
 directory.
 
+Installing the extension:
+-------------------------
+
+Make sure that the oracle_fdw shared library is installed in the PostgreSQL
+library directory and that oracle_fdw.control and the SQL files are in
+the PostgreSQL extension directory.
+
 Since the Oracle client shared library is probably not in the standard
 library path, you have to make sure that the PostgreSQL server will be able
 to find it.  How this is done varies from operating system to operating
@@ -445,6 +466,10 @@ To install the extension in a database, connect as superuser and
   CREATE EXTENSION oracle_fdw;
 
 That will define the required functions and create a foreign data wrapper.
+
+To upgrade from an oracle_fdw version before 1.0.0, use
+
+  ALTER EXTENSION oracle_fdw UPDATE;
 
 7. Internals
 ============
@@ -580,8 +605,18 @@ Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 9. Support
 ==========
 
-If you have a problem or question, the preferred option is to send an
-e-mail to oracle-fdw-general@lists.pgfoundry.org
+If you want to report a problem with oracle_fdw, and the name of the
+foreign server is (for example) "ora_serv", please include the output of
+
+  SELECT oracle_version('ora_serv');
+
+in your problem report.
+If that causes an error, please also include the output of
+
+  SELECT oracle_version();
+
+If you have a problem or question or any kind of feedback, the preferred
+option is to send an e-mail to oracle-fdw-general@lists.pgfoundry.org
 You can subscribe here:
 http://lists.pgfoundry.org/mailman/listinfo/oracle-fdw-general
 There is a mail archive here:

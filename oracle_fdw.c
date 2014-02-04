@@ -178,10 +178,12 @@ struct OracleFdwState {
 extern PGDLLEXPORT Datum oracle_fdw_handler(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_fdw_validator(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_close_connections(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum oracle_version(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(oracle_fdw_handler);
 PG_FUNCTION_INFO_V1(oracle_fdw_validator);
 PG_FUNCTION_INFO_V1(oracle_close_connections);
+PG_FUNCTION_INFO_V1(oracle_version);
 
 /*
  * on-load initializer
@@ -415,6 +417,106 @@ oracle_close_connections(PG_FUNCTION_ARGS)
 	oracleCloseConnections();
 
 	PG_RETURN_VOID();
+}
+
+/*
+ * oracle_version
+ * 		Get the Oracle client version.
+ * 		If a non-NULL argument is supplied, it must be a foreign server name.
+ * 		In this case, the remote server version is returned as well.
+ */
+PGDLLEXPORT Datum
+oracle_version(PG_FUNCTION_ARGS)
+{
+	Oid srvId = InvalidOid;
+	int major, minor, update, patch, port_patch;
+	StringInfoData version;
+	text *result;
+	int l;
+
+	/* get the client version */
+	oracleClientVersion(&major, &minor, &update, &patch, &port_patch);
+	initStringInfo(&version);
+	appendStringInfo(&version, "oracle_fdw %s, PostgreSQL %s, Oracle client %d.%d.%d.%d.%d", ORACLE_FDW_VERSION, PG_VERSION, major, minor, update, patch, port_patch);
+
+	/* get the server version only if a non-null argument was given */
+	if (! PG_ARGISNULL(0))
+	{
+		HeapTuple tup;
+		Relation rel;
+		Name srvname = PG_GETARG_NAME(0);
+		ForeignServer *server;
+		UserMapping *mapping;
+		ForeignDataWrapper *wrapper;
+		List *options;
+		ListCell *cell;
+		char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+		oracleSession *session;
+
+		/* look up foreign server with this name */
+		rel = heap_open(ForeignServerRelationId, AccessShareLock);
+
+		tup = SearchSysCacheCopy1(FOREIGNSERVERNAME, NameGetDatum(srvname));
+		if (!HeapTupleIsValid(tup))
+			ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				errmsg("server \"%s\" does not exist", NameStr(*srvname))));
+
+		srvId = HeapTupleGetOid(tup);
+
+		heap_close(rel, AccessShareLock);
+
+		/* get the foreign server, the user mapping and the FDW */
+		server = GetForeignServer(srvId);
+		mapping = GetUserMapping(GetUserId(), srvId);
+		wrapper = GetForeignDataWrapper(server->fdwid);
+
+		/* get all options for these objects */
+		options = wrapper->options;
+		options = list_concat(options, server->options);
+		options = list_concat(options, mapping->options);
+
+		foreach(cell, options)
+		{
+			DefElem *def = (DefElem *) lfirst(cell);
+			if (strcmp(def->defname, OPT_NLS_LANG) == 0)
+				nls_lang = ((Value *) (def->arg))->val.str;
+			if (strcmp(def->defname, OPT_DBSERVER) == 0)
+				dbserver = ((Value *) (def->arg))->val.str;
+			if (strcmp(def->defname, OPT_USER) == 0)
+				user = ((Value *) (def->arg))->val.str;
+			if (strcmp(def->defname, OPT_PASSWORD) == 0)
+				password = ((Value *) (def->arg))->val.str;
+		}
+
+		/* guess a good NLS_LANG environment setting */
+		nls_lang = guessNlsLang(nls_lang);
+
+		/* connect to Oracle database */
+		session = oracleGetSession(
+			dbserver,
+			user,
+			password,
+			nls_lang,
+			NULL,
+			1
+		);
+
+		/* get the server version */
+		oracleServerVersion(session, &major, &minor, &update, &patch, &port_patch);
+		appendStringInfo(&version, ", Oracle server %d.%d.%d.%d.%d", major, minor, update, patch, port_patch);
+
+		/* free the session (connection will be cached) */
+		pfree(session);
+	}
+
+	/* create a "text" with the client version */
+	l = strlen(version.data) + VARHDRSZ;
+	result = (text *)palloc(l);
+	SET_VARSIZE(result, l);
+	memcpy(VARDATA(result), version.data, l - VARHDRSZ);
+
+	PG_RETURN_TEXT_P(result);
 }
 
 /*
@@ -851,7 +953,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 
 /*
  * oracleEndForeignScan
- * 		Release the Oracle session (will be cached).
+ * 		Close the currently active Oracle statement.
  */
 void
 oracleEndForeignScan(ForeignScanState *node)
@@ -1486,7 +1588,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 
 /*
  * oracleEndForeignModify
- * 		Release the session (will be cached).
+ * 		Close the currently active Oracle statement.
  */
 void
 oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo){

@@ -1,7 +1,7 @@
 MODULE_big = oracle_fdw
 OBJS = oracle_fdw.o oracle_utils.o
 EXTENSION = oracle_fdw
-DATA = oracle_fdw--1.0.sql
+DATA = oracle_fdw--1.1.sql oracle_fdw--1.0--1.1.sql
 DOCS = README.oracle_fdw
 
 # Oracle's shared library is oci.dll on Windows and libclntsh elsewhere

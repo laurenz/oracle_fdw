@@ -14,6 +14,9 @@
 
 #include <sys/types.h>
 
+/* oracle_fdw version */
+#define ORACLE_FDW_VERSION "1.0.0devel"
+
 /* opaque type encapsulating the real Oracle connection */
 typedef struct oracleSession oracleSession;
 
@@ -128,6 +131,8 @@ extern void oraclePrepareQuery(oracleSession *session, const char *query, const 
 extern int oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, struct paramDesc *paramList);
 extern int oracleFetchNext(oracleSession *session);
 extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
+extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
+extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
 
 /*
  * functions defined in oracle_fdw.c

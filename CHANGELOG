@@ -1,4 +1,9 @@
 Version 1.0.0
+  Enhancements:
+  - Add function oracle_version(name) for diagnostic purposes.
+    ATTENTION: Use "ALTER EXTENSION oracle_fdw UPDATE" when upgrading
+    from a previous version of oracle_fdw.
+
   Bugfixes:
   - Fix logic error that keeps Oracle connections from closing.
 

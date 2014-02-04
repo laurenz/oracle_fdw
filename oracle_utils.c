@@ -285,9 +285,14 @@ oracleSession
 			OCIServerAttach(srvhp, errhp, (text *)connectstring, strlen(connectstring), 0),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError_sd(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
-				"connection for foreign table \"%s\" cannot be established", tablename,
-				oraMessage);
+			if (tablename)
+				oracleError_sd(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+					"connection for foreign table \"%s\" cannot be established", tablename,
+					oraMessage);
+			else
+				oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+					"cannot connect to foreign Oracle server",
+					oraMessage);
 		}
 
 		/* add server handle to cache */
@@ -2112,6 +2117,43 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 				oraMessage);
 		}
 	}
+}
+
+/*
+ * oracleClientVersion
+ * 		Returns the five components of the client version.
+ */
+void
+oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch)
+{
+	OCIClientVersion(major, minor, update, patch, port_patch);
+}
+
+/*
+ * oracleServerVersion
+ * 		Returns the five components of the server version.
+ */
+void
+oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch)
+{
+	OraText version_text[1000];
+	ub4 version;
+
+	/* get version information from remote server */
+	if (checkerr(
+		OCIServerRelease(session->srvp->srvhp, session->envp->errhp, version_text, 1000, OCI_HTYPE_SERVER, &version),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
+			"error getting server version: OCIServerRelease failed to retrieve version",
+			oraMessage);
+	}
+
+	*major = (version >> 24) & 0x000000FF;
+	*minor = (version >> 20) & 0x0000000F;
+	*update = (version >> 12) & 0x000000FF;
+	*patch = (version >> 8) & 0x0000000F;
+	*port_patch = (version >> 0) & 0x000000FF;
 }
 
 /*
