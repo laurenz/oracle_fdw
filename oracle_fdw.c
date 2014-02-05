@@ -429,15 +429,22 @@ PGDLLEXPORT Datum
 oracle_version(PG_FUNCTION_ARGS)
 {
 	Oid srvId = InvalidOid;
+	char *pgversion;
 	int major, minor, update, patch, port_patch;
 	StringInfoData version;
-	text *result;
-	int l;
 
-	/* get the client version */
+	/*
+	 * Get the PostgreSQL server version.
+	 * We cannot use PG_VERSION because that would give the version against which
+	 * oracle_fdw was compiled, not the version it is running with.
+	 */
+	pgversion = GetConfigOptionByName("server_version", NULL);
+
+	/* get the Oracle client version */
 	oracleClientVersion(&major, &minor, &update, &patch, &port_patch);
+
 	initStringInfo(&version);
-	appendStringInfo(&version, "oracle_fdw %s, PostgreSQL %s, Oracle client %d.%d.%d.%d.%d", ORACLE_FDW_VERSION, PG_VERSION, major, minor, update, patch, port_patch);
+	appendStringInfo(&version, "oracle_fdw %s, PostgreSQL %s, Oracle client %d.%d.%d.%d.%d", ORACLE_FDW_VERSION, pgversion, major, minor, update, patch, port_patch);
 
 	/* get the server version only if a non-null argument was given */
 	if (! PG_ARGISNULL(0))
@@ -510,13 +517,7 @@ oracle_version(PG_FUNCTION_ARGS)
 		pfree(session);
 	}
 
-	/* create a "text" with the client version */
-	l = strlen(version.data) + VARHDRSZ;
-	result = (text *)palloc(l);
-	SET_VARSIZE(result, l);
-	memcpy(VARDATA(result), version.data, l - VARHDRSZ);
-
-	PG_RETURN_TEXT_P(result);
+	PG_RETURN_TEXT_P(cstring_to_text(version.data));
 }
 
 /*
@@ -3584,18 +3585,10 @@ List
 Const
 *serializeString(const char *s)
 {
-	text *datum;
-	size_t length;
-
 	if (s == NULL)
 		return makeNullConst(TEXTOID, -1, InvalidOid);
-
-	length = strlen(s);
-	datum = (text *)palloc(length + VARHDRSZ);
-	memcpy(VARDATA(datum), s, length);
-	SET_VARSIZE(datum, length + VARHDRSZ);
-
-	return makeConst(TEXTOID, -1, InvalidOid, -1, PointerGetDatum(datum), 0, 0);
+	else
+		return makeConst(TEXTOID, -1, InvalidOid, -1, PointerGetDatum(cstring_to_text(s)), 0, 0);
 }
 
 /*
@@ -3744,17 +3737,10 @@ struct OracleFdwState
 char
 *deserializeString(Const *constant)
 {
-	char *result;
-	Datum datum = constant->constvalue;
-
 	if (constant->constisnull)
 		return NULL;
-
-	result = palloc(VARSIZE(datum) - VARHDRSZ + 1);
-	memcpy(result, VARDATA(datum), VARSIZE(datum) - VARHDRSZ);
-	result[VARSIZE(datum) - VARHDRSZ] = '\0';
-
-	return result;
+	else
+		return text_to_cstring(DatumGetTextP(constant->constvalue));
 }
 
 /*
