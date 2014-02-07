@@ -446,9 +446,30 @@ oracle_version(PG_FUNCTION_ARGS)
 	initStringInfo(&version);
 	appendStringInfo(&version, "oracle_fdw %s, PostgreSQL %s, Oracle client %d.%d.%d.%d.%d", ORACLE_FDW_VERSION, pgversion, major, minor, update, patch, port_patch);
 
-	/* get the server version only if a non-null argument was given */
-	if (! PG_ARGISNULL(0))
+	if (PG_ARGISNULL(0))
 	{
+		/* display some important Oracle environment variables */
+		static const char const * const oracle_env[] = {
+			"ORACLE_HOME",
+			"ORACLE_SID",
+			"TNS_ADMIN",
+			"TWO_TASK",
+			"LDAP_ADMIN",
+			NULL
+		};
+		int i;
+
+		for (i=0; oracle_env[i] != NULL; ++i)
+		{
+			char *val = getenv(oracle_env[i]);
+
+			if (val != NULL)
+				appendStringInfo(&version, ", %s=%s", oracle_env[i], val);
+		}
+	}
+	else
+	{
+		/* get the server version only if a non-null argument was given */
 		HeapTuple tup;
 		Relation rel;
 		Name srvname = PG_GETARG_NAME(0);
