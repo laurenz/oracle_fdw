@@ -863,7 +863,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 
 		if (paramDesc->type == TEXTOID || paramDesc->type == VARCHAROID
 				|| paramDesc->type == BPCHAROID || paramDesc->type == CHAROID)
-			paramDesc->type = BIND_STRING;
+			paramDesc->bindType = BIND_STRING;
 		else if (paramDesc->type == DATEOID || paramDesc->type == TIMESTAMPOID
 				|| paramDesc->type == TIMESTAMPTZOID)
 			paramDesc->bindType = BIND_TIMESTAMP;

@@ -6,6 +6,8 @@ Version 1.0.0
 
   Bugfixes:
   - Fix logic error that keeps Oracle connections from closing.
+  - Fix "cache lookup failed for type 0" in queries with string parameters.
+    Per report from Adolfho Lopes.
 
 Version 0.9.10 (beta), released 2013-12-24
   Enhancements:
