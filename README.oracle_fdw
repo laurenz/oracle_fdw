@@ -99,12 +99,13 @@ FUNCTION oracle_close_connections() RETURNS void
 This function can be used to close all open Oracle connections in this session.
 See "Usage" below for when this might be useful.
 
-FUNCTION oracle_version(name DEFAULT NULL) RETURNS text
+FUNCTION oracle_diag(name DEFAULT NULL) RETURNS text
 
-This function is useful for diagnostic purposes only.  It will return
-the versions of oracle_fdw, PostgreSQL server and Oracle client used if
-you pass no argument or NULL.
-If the name of a foreign server is passed, it will additionally return
+This function is useful for diagnostic purposes only.
+It will return the versions of oracle_fdw, PostgreSQL server and Oracle client.
+If called with no argument or NULL, it will additionally return the values of
+some environment variables used for establishing Oracle connections.
+If called with the name of a foreign server, it will additionally return
 the Oracle server version.
 
 3. Options
@@ -608,12 +609,12 @@ Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 If you want to report a problem with oracle_fdw, and the name of the
 foreign server is (for example) "ora_serv", please include the output of
 
-  SELECT oracle_version('ora_serv');
+  SELECT oracle_diag('ora_serv');
 
 in your problem report.
 If that causes an error, please also include the output of
 
-  SELECT oracle_version();
+  SELECT oracle_diag();
 
 If you have a problem or question or any kind of feedback, the preferred
 option is to send an e-mail to oracle-fdw-general@lists.pgfoundry.org

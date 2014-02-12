@@ -178,12 +178,12 @@ struct OracleFdwState {
 extern PGDLLEXPORT Datum oracle_fdw_handler(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_fdw_validator(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_close_connections(PG_FUNCTION_ARGS);
-extern PGDLLEXPORT Datum oracle_version(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum oracle_diag(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(oracle_fdw_handler);
 PG_FUNCTION_INFO_V1(oracle_fdw_validator);
 PG_FUNCTION_INFO_V1(oracle_close_connections);
-PG_FUNCTION_INFO_V1(oracle_version);
+PG_FUNCTION_INFO_V1(oracle_diag);
 
 /*
  * on-load initializer
@@ -420,13 +420,13 @@ oracle_close_connections(PG_FUNCTION_ARGS)
 }
 
 /*
- * oracle_version
+ * oracle_diag
  * 		Get the Oracle client version.
  * 		If a non-NULL argument is supplied, it must be a foreign server name.
  * 		In this case, the remote server version is returned as well.
  */
 PGDLLEXPORT Datum
-oracle_version(PG_FUNCTION_ARGS)
+oracle_diag(PG_FUNCTION_ARGS)
 {
 	Oid srvId = InvalidOid;
 	char *pgversion;

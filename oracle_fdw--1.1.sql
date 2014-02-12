@@ -19,11 +19,11 @@ LANGUAGE C STRICT;
 COMMENT ON FUNCTION oracle_close_connections()
 IS 'closes all open Oracle connections';
 
-CREATE FUNCTION oracle_version(name DEFAULT NULL) RETURNS text
+CREATE FUNCTION oracle_diag(name DEFAULT NULL) RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C STABLE CALLED ON NULL INPUT;
 
-COMMENT ON FUNCTION oracle_version(name)
+COMMENT ON FUNCTION oracle_diag(name)
 IS 'shows the version of oracle_fdw, PostgreSQL, Oracle client and Oracle server';
 
 CREATE FOREIGN DATA WRAPPER oracle_fdw
