@@ -619,10 +619,11 @@ void
 oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 {
 	struct OracleFdwState *fdwState;
-	bool plan_costs, need_keys = false, for_update = false;
+	bool plan_costs, need_keys = false, for_update = false, has_trigger;
 	List *local_conditions = NIL;
 	int i;
 	double ntuples = -1;
+	Relation rel;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
@@ -650,6 +651,27 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 		/* we need to fetch all primary key columns */
 		for (i=0; i<fdwState->oraTable->ncols; ++i)
 			if (fdwState->oraTable->cols[i]->pkey)
+				fdwState->oraTable->cols[i]->used = 1;
+	}
+
+	/*
+  	* Core code already has some lock on each rel being planned, so we can
+  	* use NoLock here.
+  	*/
+	rel = heap_open(foreigntableid, NoLock);
+
+	/* is there an AFTER trigger FOR EACH ROW? */
+	has_trigger = (baserel->relid == root->parse->resultRelation)
+					&& ((root->parse->commandType == CMD_UPDATE && rel->trigdesc && rel->trigdesc->trig_update_after_row)
+						|| (root->parse->commandType == CMD_DELETE && rel->trigdesc && rel->trigdesc->trig_delete_after_row));
+
+	heap_close(rel, NoLock);
+
+	if (has_trigger)
+	{
+		/* we need to fetch and return all columns */
+		for (i=0; i<fdwState->oraTable->ncols; ++i)
+			if (fdwState->oraTable->cols[i]->pgname)
 				fdwState->oraTable->cols[i]->used = 1;
 	}
 
@@ -1083,16 +1105,19 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 {
 	CmdType operation = plan->operation;
 	RangeTblEntry *rte = planner_rt_fetch(resultRelation, root);
-	Relation rel;
+	Relation rel = NULL;
 	StringInfoData sql;
 	List *targetAttrs = NIL;
 	List *returningList = NIL;
 	struct OracleFdwState *fdwState;
 	int attnum, i;
 	ListCell *cell;
-	bool firstcol;
+	bool has_trigger, firstcol;
 	struct paramDesc *param;
 	char paramName[10];
+	TupleDesc tupdesc;
+	Bitmapset *tmpset;
+	AttrNumber col;
 
 	/* check if the foreign table is scanned */
 	if (resultRelation < root->simple_rel_array_size
@@ -1112,58 +1137,70 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	initStringInfo(&sql);
 
 	/*
-	 * In an INSERT, we transmit all columns that are defined in the foreign
-	 * table.  In an UPDATE, we transmit only columns that were explicitly
-	 * targets of the UPDATE, so as to avoid unnecessary data transmission.
-	 * (We can't do that for INSERT since we would miss sending default values
-	 * for columns not listed in the source statement.)
-	 */
-	if (operation == CMD_INSERT)
+  	* Core code already has some lock on each rel being planned, so we can
+  	* use NoLock here.
+  	*/
+	rel = heap_open(rte->relid, NoLock);
+
+	/* figure out which attributes are affected and if there is a trigger */
+    switch (operation)
 	{
-		TupleDesc tupdesc;
+		case CMD_INSERT:
+			/*
+	 		* In an INSERT, we transmit all columns that are defined in the foreign
+	 		* table.  In an UPDATE, we transmit only columns that were explicitly
+	 		* targets of the UPDATE, so as to avoid unnecessary data transmission.
+	 		* (We can't do that for INSERT since we would miss sending default values
+	 		* for columns not listed in the source statement.)
+	 		*/
 
-		/*
- 	 	* Core code already has some lock on each rel being planned, so we can
- 	 	* use NoLock here.
- 	 	*/
-		rel = heap_open(rte->relid, NoLock);
+			tupdesc = RelationGetDescr(rel);
 
-		tupdesc = RelationGetDescr(rel);
+			for (attnum = 1; attnum <= tupdesc->natts; attnum++)
+			{
+				Form_pg_attribute attr = tupdesc->attrs[attnum - 1];
 
-		for (attnum = 1; attnum <= tupdesc->natts; attnum++)
-		{
-			Form_pg_attribute attr = tupdesc->attrs[attnum - 1];
+				if (!attr->attisdropped)
+					targetAttrs = lappend_int(targetAttrs, attnum);
+			}
 
-			if (!attr->attisdropped)
-				targetAttrs = lappend_int(targetAttrs, attnum);
-		}
+			/* is there a row level AFTER trigger? */
+			has_trigger = rel->trigdesc && rel->trigdesc->trig_insert_after_row;
 
-		heap_close(rel, NoLock);
+			break;
+		case CMD_UPDATE:
+			tmpset = bms_copy(rte->modifiedCols);
+
+			while ((col = bms_first_member(tmpset)) >= 0)
+			{
+				col += FirstLowInvalidHeapAttributeNumber;
+				if (col <= InvalidAttrNumber)  /* shouldn't happen */
+					elog(ERROR, "system-column update is not supported");
+				targetAttrs = lappend_int(targetAttrs, col);
+			}
+
+			/* is there a row level AFTER trigger? */
+			has_trigger = rel->trigdesc && rel->trigdesc->trig_update_after_row;
+
+			break;
+		case CMD_DELETE:
+
+			/* is there a row level AFTER trigger? */
+			has_trigger = rel->trigdesc && rel->trigdesc->trig_delete_after_row;
+
+			break;
+		default:
+			elog(ERROR, "unexpected operation: %d", (int) operation);
 	}
-	else if (operation == CMD_UPDATE)
+
+	heap_close(rel, NoLock);
+
+	/* mark all attributes for which we need a RETURNING clause */
+	if (has_trigger)
 	{
-		Bitmapset  *tmpset = bms_copy(rte->modifiedCols);
-		AttrNumber      col;
-
-		while ((col = bms_first_member(tmpset)) >= 0)
-		{
-			col += FirstLowInvalidHeapAttributeNumber;
-			if (col <= InvalidAttrNumber)  /* shouldn't happen */
-				elog(ERROR, "system-column update is not supported");
-			targetAttrs = lappend_int(targetAttrs, col);
-		}
-	}
-
-	/* extract the relevant RETURNING list if any */
-	if (plan->returningLists)
-		returningList = (List *) list_nth(plan->returningLists, subplan_index);
-	/* mark the corresponding columns as used */
-	foreach(cell, returningList)
-	{
-		attnum = ((TargetEntry *)lfirst(cell))->resorigcol;
-
+		/* all attributes are needed for the RETURNING clause */
 		for (i=0; i<fdwState->oraTable->ncols; ++i)
-			if (fdwState->oraTable->cols[i]->pgattnum == attnum)
+			if (fdwState->oraTable->cols[i]->pgname != NULL)
 			{
 				/* throw an error if it is a LONG or LONG RAW column */
 				if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
@@ -1177,8 +1214,37 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 								fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG ? "" : " RAW")));
 
 				fdwState->oraTable->cols[i]->used = 1;
-				break;
 			}
+	}
+	else
+	{
+		/* extract the relevant RETURNING list if any */
+		if (plan->returningLists)
+			returningList = (List *) list_nth(plan->returningLists, subplan_index);
+
+		/* mark the corresponding columns as used */
+		foreach(cell, returningList)
+		{
+			attnum = ((TargetEntry *)lfirst(cell))->resorigcol;
+
+			for (i=0; i<fdwState->oraTable->ncols; ++i)
+				if (fdwState->oraTable->cols[i]->pgattnum == attnum)
+				{
+					/* throw an error if it is a LONG or LONG RAW column */
+					if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
+							|| fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG)
+						ereport(ERROR,
+								(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
+								errmsg("columns with Oracle type LONG or LONG RAW cannot be used in RETURNING clause"),
+								errdetail("Column \"%s\" of foreign table \"%s\" is of Oracle type LONG%s.",
+									fdwState->oraTable->cols[i]->pgname,
+									fdwState->oraTable->pgname,
+									fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG ? "" : " RAW")));
+
+					fdwState->oraTable->cols[i]->used = 1;
+					break;
+				}
+		}
 	}
 
 	/* construct the SQL command string */
@@ -1306,7 +1372,6 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 			break;
 		default:
 			elog(ERROR, "unexpected operation: %d", (int) operation);
-			break;
 	}
 
 	if (operation == CMD_UPDATE || operation == CMD_DELETE)
