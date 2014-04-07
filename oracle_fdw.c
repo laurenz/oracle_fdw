@@ -661,9 +661,9 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	rel = heap_open(foreigntableid, NoLock);
 
 	/* is there an AFTER trigger FOR EACH ROW? */
-	has_trigger = (baserel->relid == root->parse->resultRelation)
-					&& ((root->parse->commandType == CMD_UPDATE && rel->trigdesc && rel->trigdesc->trig_update_after_row)
-						|| (root->parse->commandType == CMD_DELETE && rel->trigdesc && rel->trigdesc->trig_delete_after_row));
+	has_trigger = (baserel->relid == root->parse->resultRelation) && rel->trigdesc
+					&& ((root->parse->commandType == CMD_UPDATE && rel->trigdesc->trig_update_after_row)
+						|| (root->parse->commandType == CMD_DELETE && rel->trigdesc->trig_delete_after_row));
 
 	heap_close(rel, NoLock);
 
