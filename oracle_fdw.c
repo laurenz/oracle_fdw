@@ -440,7 +440,7 @@ oracle_diag(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(0))
 	{
 		/* display some important Oracle environment variables */
-		static const char const * const oracle_env[] = {
+		static const char * const oracle_env[] = {
 			"ORACLE_HOME",
 			"ORACLE_SID",
 			"TNS_ADMIN",
@@ -1112,7 +1112,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	struct OracleFdwState *fdwState;
 	int attnum, i;
 	ListCell *cell;
-	bool has_trigger, firstcol;
+	bool has_trigger = false, firstcol;
 	struct paramDesc *param;
 	char paramName[10];
 	TupleDesc tupdesc;

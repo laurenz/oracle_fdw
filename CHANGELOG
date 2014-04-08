@@ -1,10 +1,11 @@
-Version 1.0.0
+Version 1.0.0, released 2014-04-08
   Enhancements:
   - Add function oracle_diag(name) for diagnostic purposes.
     ATTENTION: Use "ALTER EXTENSION oracle_fdw UPDATE" when upgrading
     from a previous version of oracle_fdw.
   - Avoid unnecessary local filtering for pushed down WHERE clauses with
     internal parameters.
+  - Add support for triggers on foreign tables for PostgreSQL 9.4.
 
   Bugfixes:
   - Fix logic error that keeps Oracle connections from closing.

@@ -15,7 +15,7 @@
 #include <sys/types.h>
 
 /* oracle_fdw version */
-#define ORACLE_FDW_VERSION "1.0.0devel"
+#define ORACLE_FDW_VERSION "1.0.0"
 
 /* opaque type encapsulating the real Oracle connection */
 typedef struct oracleSession oracleSession;
