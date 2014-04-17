@@ -451,6 +451,10 @@ Then the software installation should be as simple as
 For the second step you need write permission to PostgreSQL's shared library
 directory.
 
+If you want to build oracle_fdw in a source tree of PostgreSQL, use
+
+ $ make NO_PGXS=1
+
 Installing the extension:
 -------------------------
 
