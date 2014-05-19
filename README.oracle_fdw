@@ -65,7 +65,7 @@ pgdb=> CREATE USER MAPPING FOR pguser SERVER oradb
 see below.)
 
 pgdb=> CREATE FOREIGN TABLE oratab (
-          id        integer           NOT NULL,
+          id        integer           OPTIONS (key 'true')  NOT NULL,
           text      character varying(30),
           floating  double precision  NOT NULL
        ) SERVER oradb OPTIONS (schema 'ORAUSER', table 'ORATAB');
