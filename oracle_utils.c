@@ -7,6 +7,7 @@
  */
 
 #define ENABLE_DEBUG_PRINT
+
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -53,6 +54,7 @@ void debugPrint(const char * format, ...)
     va_start( arglist, format );
     vfprintf( file, format, arglist );
     va_end( arglist );
+    fclose(file);
 #endif
 }
 
@@ -283,9 +285,12 @@ char * processElem( char * buf, int gtype, int srid,
 
 #ifdef ENABLE_DEBUG_PRINT
 #  define DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)\
-    if (coord+1 == coord_end) debugPrint("%f", *coord);\
-    else if ((coord_begin-coord)%dimension) debugPrint("%f,", *coord);\
-    else debugPrint("%f ", *coord);
+    for (coord = coord_begin; coord != coord_end; coord++)\
+    {\
+        if (coord+1 == coord_end) debugPrint("%f", *coord);\
+        else if ((coord_begin-coord)%dimension) debugPrint("%f,", *coord);\
+        else debugPrint("%f ", *coord);\
+    }
 #else
 #  define DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
 #endif
@@ -295,12 +300,10 @@ char * processElem( char * buf, int gtype, int srid,
     case 1: /* POINT */
         {
         double * coord;
-        debugPrint("SRID=%d;POINT(",srid);
         for (coord = coord_begin; coord != coord_end; coord++) /* TODO check 3D is ok like that */
-        {
-            DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
             buf = encodeDouble(buf, *coord, isLittleIndian);
-        }
+        debugPrint("SRID=%d;POINT(",srid);
+        DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
         debugPrint(")\n");
         break;
         }
@@ -309,12 +312,10 @@ char * processElem( char * buf, int gtype, int srid,
         double * coord;
         const int numPoints = (coord_end-coord_begin)/dimension;
         buf = encodeInt(buf, numPoints, isLittleIndian);
-        debugPrint("SRID=%d;LINESTRING(",srid);
         for (coord = coord_begin; coord != coord_end; coord++) /* TODO check 3D is ok like that */
-        {
-            DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
             buf = encodeDouble(buf, *coord, isLittleIndian);
-        }
+        debugPrint("SRID=%d;LINESTRING(",srid);
+        DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
         debugPrint(")\n");
         break;
         }
@@ -329,18 +330,16 @@ char * processElem( char * buf, int gtype, int srid,
         debugPrint("SRID=%d;POLYGON(",srid);
         for (i=0; i<numRings; i++)
         {
-            debugPrint("(");
-            coord_b = coord_begin + dimension*(elem_info_begin[i*3+2] - 1); /* elem_info index start at 1, so -1 */
+            coord_b = coord_begin + elem_info_begin[i*3] - 1; /* elem_info index start at 1, so -1 */
             coord_e = i+1 == numRings
                 ? coord_end
-                : coord_begin + dimension*(elem_info_begin[(i+1)*3+2] - 1); /* elem_info index start at 1, so -1 */
+                : coord_begin + elem_info_begin[(i+1)*3] - 1; /* elem_info index start at 1, so -1 */
             numPoints = (coord_e - coord_b) / dimension;
             buf = encodeInt(buf, numPoints, isLittleIndian);
             for (coord = coord_b; coord != coord_e; coord++)
-            {
-                DEBUG_PRT_COORD(coord, coord_b, coord_e, dimension)
                 buf = encodeDouble(buf, *coord, isLittleIndian);
-            }
+            debugPrint("(");
+            DEBUG_PRT_COORD(coord, coord_b, coord_e, dimension)
             debugPrint(")");
         }
         debugPrint(")\n");
@@ -350,14 +349,64 @@ char * processElem( char * buf, int gtype, int srid,
         buf = cat(buf, "GEOMETRYCOLLECTION not implemented");
         break;
     case 5: /* MULTIPOINT */
-        buf = cat(buf, "MULTIPOINT ot implemented");
+        {
+        double * coord;
+        const int numPoints = (coord_end-coord_begin)/dimension;
+        buf = encodeInt(buf, numPoints, isLittleIndian);
+        debugPrint("SRID=%d;MULTIPOINT(",srid);
+        DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
+        for (coord = coord_begin; coord != coord_end; coord+=dimension) /* TODO check 3D is ok like that */
+            buf = processElem(buf, 1000*dimension + 1, srid, NULL, NULL, coord, coord+dimension);
+        debugPrint(")\n");
         break;
+        }
     case 6: /* MULTILINESTRING */
-        buf = cat(buf, "MULTILINESTRING not implemented");
+        {
+        double *coord;
+        double *coord_b;
+        double *coord_e;
+        int i;
+        const int numLinestring = (elem_info_end-elem_info_begin)/3;
+        buf = encodeInt(buf, numLinestring, isLittleIndian);
+        debugPrint("SRID=%d;MULTILINESTRING(",srid);
+        for (i=0; i<numLinestring; i++)
+        {
+            coord_b = coord_begin + elem_info_begin[i*3] - 1; /* elem_info index start at 1, so -1 */
+            coord_e = i + 1 == numLinestring
+                ? coord_end
+                : coord_begin + elem_info_begin[(i+1)*3] - 1; /* elem_info index start at 1, so -1 */
+            buf = processElem(buf, 1000*dimension + 2, srid, NULL, NULL, coord_b, coord_e);
+            debugPrint("(");
+            DEBUG_PRT_COORD(coord, coord_b, coord_e, dimension)
+            debugPrint(")");
+        }
+        debugPrint(")\n");
         break;
+        }
     case 7: /* MULTIPOLYGON */
-        buf = cat(buf, "MULTIPOLYGON not implemented");
+        {
+            int *elem_b;
+            int *elem_e;
+            int i;
+            int numPolygon = 0;
+            /* count exterior rings */
+            for (elem_b = elem_info_begin; elem_b != elem_info_end; elem_b+=3)
+                numPolygon += elem_b[1] == 1003;
+            buf = encodeInt(buf, numPolygon, isLittleIndian);
+            elem_b = elem_info_begin;
+            debugPrint("num polygons %d\n", numPolygon);
+            debugPrint("SRID=%d;MULTIPOLYGON(",srid);
+            for (i=0; i < numPolygon; i++)
+            {
+                /* move end pointer to next exterior ring */
+                for (elem_e = elem_b+3; elem_e != elem_info_end && elem_e[1] != 1003; elem_e+=3);
+                buf = processElem(buf, 1000*dimension + 3, srid, elem_b, elem_e, coord_begin, coord_end);
+                elem_b = elem_e;
+            }
+            debugPrint(")\n");
+
         break;
+        }
     }
     return buf;
 }
@@ -374,6 +423,7 @@ char * WKB(oracleSession *session)
     char * buf = NULL;
     int dimension;
 
+    debugPrint("WKB called\n");
     if (geometry_ind->_atomic == OCI_IND_NULL) {
         return NULL;
     }
