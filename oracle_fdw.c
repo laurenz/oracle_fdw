@@ -3453,6 +3453,14 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			&& pgtype == INTERVALOID)
 		return;
 
+	if (oratype == ORA_TYPE_NAMED_OBJECT)
+	{
+		ereport(WARNING, (errcode(ERRCODE_WARNING), 
+			errmsg("vmodbg found geometry, maybe, pgtype %d %d", pgtype, BYTEAOID)));
+		return;
+	}
+
+
 	/* otherwise, report an error */
 	ereport(ERROR,
 			(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
@@ -3953,6 +3961,10 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
 					errmsg("cannot update or insert BFILE column in Oracle foreign table")));
+		case ORA_TYPE_NAMED_OBJECT:
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
+					errmsg("cannot update or insert named type column in Oracle foreign table")));
 		default:
 			param->bindType = BIND_STRING;
 	}
@@ -4304,6 +4316,11 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			/* terminating zero byte (needed for LONGs) */
 			value[value_len] = '\0';
 		}
+		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_NAMED_OBJECT)
+		{
+                        value = WKB((oracleSession *)fdw_state->session);
+                        value_len = strlen(value)+1;
+		}
 		else
 		{
 			/* for other data types, oraTable contains the results */
@@ -4377,6 +4394,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
 			pfree(value);
+                else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_NAMED_OBJECT)
+                    free(value);
 	}
 }
 

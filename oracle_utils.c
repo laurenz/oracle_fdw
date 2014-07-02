@@ -6,6 +6,7 @@
  *-------------------------------------------------------------------------
  */
 
+#define ENABLE_DEBUG_PRINT
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -38,6 +39,22 @@ static sb4 err_code;
 
 /* set to "1" as soon as OCIEnvCreate is called */
 static int oci_initialized = 0;
+
+#define MAX(x,y) ( (x) > (y) ? (x) : (y) )
+#define MIN(x,y) ( (x) < (y) ? (x) : (y) )
+
+static void debugPrint(const char * format, ...);
+void debugPrint(const char * format, ...)
+{
+#ifdef ENABLE_DEBUG_PRINT
+    va_list arglist;
+    FILE *file = fopen("/tmp/oracle_utils.log", "a");
+
+    va_start( arglist, format );
+    vfprintf( file, format, arglist );
+    va_end( arglist );
+#endif
+}
 
 /*
  * Linked list for temporary Oracle handles and descriptors.
@@ -98,6 +115,46 @@ struct oracleSession
 	OCIStmt *stmthp;
 };
 
+/* Geometry */
+typedef struct 
+{
+   OCINumber x;
+   OCINumber y;
+   OCINumber z;
+} SDO_POINT;
+
+typedef OCIArray sdo_elem_info_array;
+typedef OCIArray sdo_ordinate_array;
+
+typedef struct
+{
+   OCINumber      sdo_gtype;
+   OCINumber      sdo_srid;
+   SDO_POINT      sdo_point;
+   OCIArray       *sdo_elem_info;
+   OCIArray       *sdo_ordinates;
+} SDO_GEOMETRY;
+
+typedef struct
+{
+   OCIInd _atomic;
+   OCIInd x;
+   OCIInd y;
+   OCIInd z;
+} SDO_POINT_ind;
+
+typedef struct
+{
+   OCIInd                    _atomic;
+   OCIInd                    sdo_gtype;
+   OCIInd                    sdo_srid;
+   SDO_POINT_ind             sdo_point;
+   OCIInd                    sdo_elem_info;
+   OCIInd                    sdo_ordinates;
+} SDO_GEOMETRY_ind;
+
+OCIType *geometry_type_desc;
+
 /*
  * Helper functions
  */
@@ -115,6 +172,308 @@ static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
 static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value);
+static char *cat(char * str1, const char * str2);
+static char *encodeInt(char * buf, unsigned i, int isLittleIndian);
+static char *encodeLong(char * buf, int64_t l, int isLittleIndian);
+static char *encodeDouble(char * buf, double d, int isLittleIndian);
+static char * processElem( char * buf, int gtype, int srid, int * elem_info_begin, int * elem_info_end, double * coord_begin, double * coord_end );
+
+/* TODO replace those hugly globals by something else */
+SDO_GEOMETRY      *geometry_obj = NULL;
+SDO_GEOMETRY_ind  *geometry_ind = NULL;
+
+
+char *cat(char * str1, const char * str2)
+{
+    return str1
+           ? strcat((char *)realloc(str1, 1 + strlen(str1) + strlen(str2)), str2)
+           : strcpy((char*)malloc(1 + strlen(str2)), str2);
+}
+
+char *encodeInt( char * buf, unsigned i, int isLittleIndian )
+{
+    char str[32+1];
+    if (isLittleIndian) sprintf(str, "%02X%02X%02X%02X",
+                                    (unsigned char)(i),
+                                    (unsigned char)(i >> 8),
+                                    (unsigned char)(i >> 16),
+                                    (unsigned char)(i >> 24));
+    else sprintf(str, "%02X%02X%02X%02X",
+                     (unsigned char)(i >> 24),
+                     (unsigned char)(i >> 16),
+                     (unsigned char)(i >> 8),
+                     (unsigned char)(i));
+    return cat(buf, str);
+}
+
+char *encodeLong( char * buf, int64_t l, int isLittleIndian )
+{
+    char str[64+1];
+    if (isLittleIndian) sprintf(str, "%02X%02X%02X%02X%02X%02X%02X%02X",
+                                    (unsigned char)(l),
+                                    (unsigned char)(l >> 8),
+                                    (unsigned char)(l >> 16),
+                                    (unsigned char)(l >> 24),
+                                    (unsigned char)(l >> 32),
+                                    (unsigned char)(l >> 40),
+                                    (unsigned char)(l >> 48),
+                                    (unsigned char)(l >> 56));
+    else sprintf(str, "%02X%02X%02X%02X%02X%02X%02X%02X",
+                     (unsigned char)(l >> 56),
+                     (unsigned char)(l >> 48),
+                     (unsigned char)(l >> 40),
+                     (unsigned char)(l >> 32),
+                     (unsigned char)(l >> 24),
+                     (unsigned char)(l >> 16),
+                     (unsigned char)(l >> 8),
+                     (unsigned char)(l));
+    return cat(buf, str);
+}
+
+char *encodeDouble( char * buf, double d, int isLittleIndian )
+{
+    int64_t l;
+    memcpy(&l, &d, sizeof(double));
+    return encodeLong(buf, l, isLittleIndian);
+}
+
+
+char * processElem( char * buf, int gtype, int srid,
+                    int * elem_info_begin, int * elem_info_end,
+                    double * coord_begin, double * coord_end )
+{
+    const int isLittleIndian = 1;
+    const int dimension = MAX(2,(gtype / 1000));
+    unsigned wkbType = 0;
+
+    switch (gtype%1000)
+    {
+    case 1: /* POINT */
+        wkbType = 1;
+        break;
+    case 2: /* LINESTRING */
+        wkbType = 2;
+        break;
+    case 3: /* POLYGON */
+        wkbType = 3;
+        break;
+    case 4: /* GEOMETRYCOLLECTION */
+        wkbType = 7;
+        break;
+    case 5: /* MULTIPOINT */
+        wkbType = 4;
+        break;
+    case 6: /* MULTILINESTRING */
+        wkbType = 5;
+        break;
+    case 7: /* MULTIOLYGON */
+        wkbType = 6;
+        break;
+    }
+
+    if (srid) wkbType |= 0x20000000;
+    if (3 == dimension) wkbType |= 0x80000000;
+    buf = cat(buf, isLittleIndian ? "01" : "00" );
+    buf = encodeInt(buf, wkbType, isLittleIndian);
+    if (srid)
+    {
+        /* TODO convert oracle->postgis SRID when needed*/
+        buf = encodeInt(buf, (unsigned)srid, isLittleIndian);
+    }
+
+#ifdef ENABLE_DEBUG_PRINT
+#  define DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)\
+    if (coord+1 == coord_end) debugPrint("%f", *coord);\
+    else if ((coord_begin-coord)%dimension) debugPrint("%f,", *coord);\
+    else debugPrint("%f ", *coord);
+#else
+#  define DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
+#endif
+
+    switch (gtype%1000)
+    {
+    case 1: /* POINT */
+        {
+        double * coord;
+        debugPrint("SRID=%d;POINT(",srid);
+        for (coord = coord_begin; coord != coord_end; coord++) /* TODO check 3D is ok like that */
+        {
+            DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
+            buf = encodeDouble(buf, *coord, isLittleIndian);
+        }
+        debugPrint(")\n");
+        break;
+        }
+    case 2: /* LINESTRING */
+        {
+        double * coord;
+        const int numPoints = (coord_end-coord_begin)/dimension;
+        buf = encodeInt(buf, numPoints, isLittleIndian);
+        debugPrint("SRID=%d;LINESTRING(",srid);
+        for (coord = coord_begin; coord != coord_end; coord++) /* TODO check 3D is ok like that */
+        {
+            DEBUG_PRT_COORD(coord, coord_begin, coord_end, dimension)
+            buf = encodeDouble(buf, *coord, isLittleIndian);
+        }
+        debugPrint(")\n");
+        break;
+        }
+    case 3: /* POLYGON */
+        {
+        double *coord;
+        double *coord_b;
+        double *coord_e;
+        int i, numPoints;
+        const int numRings = (elem_info_end-elem_info_begin)/3;
+        buf = encodeInt(buf, numRings, isLittleIndian);
+        debugPrint("SRID=%d;POLYGON(",srid);
+        for (i=0; i<numRings; i++)
+        {
+            debugPrint("(");
+            coord_b = coord_begin + dimension*(elem_info_begin[i*3+2] - 1); /* elem_info index start at 1, so -1 */
+            coord_e = i+1 == numRings
+                ? coord_end
+                : coord_begin + dimension*(elem_info_begin[(i+1)*3+2] - 1); /* elem_info index start at 1, so -1 */
+            numPoints = (coord_e - coord_b) / dimension;
+            buf = encodeInt(buf, numPoints, isLittleIndian);
+            for (coord = coord_b; coord != coord_e; coord++)
+            {
+                DEBUG_PRT_COORD(coord, coord_b, coord_e, dimension)
+                buf = encodeDouble(buf, *coord, isLittleIndian);
+            }
+            debugPrint(")");
+        }
+        debugPrint(")\n");
+        break;
+        }
+    case 4: /* GEOMETRYCOLLECTION */
+        buf = cat(buf, "GEOMETRYCOLLECTION not implemented");
+        break;
+    case 5: /* MULTIPOINT */
+        buf = cat(buf, "MULTIPOINT ot implemented");
+        break;
+    case 6: /* MULTILINESTRING */
+        buf = cat(buf, "MULTILINESTRING not implemented");
+        break;
+    case 7: /* MULTIPOLYGON */
+        buf = cat(buf, "MULTIPOLYGON not implemented");
+        break;
+    }
+    return buf;
+}
+
+/* return null terminated wkb representation of geometry */
+char * WKB(oracleSession *session)
+{
+    boolean   exists;
+    OCINumber *oci_number;
+    int n_elem_info;
+    long      i;
+    int gtype = 0;
+    int srid = 0;
+    char * buf = NULL;
+    int dimension;
+
+    if (geometry_ind->_atomic == OCI_IND_NULL) {
+        return NULL;
+    }
+
+    if (geometry_ind->sdo_gtype == OCI_IND_NOTNULL) {
+        OCINumberToInt (
+            session->envp->errhp,
+            &(geometry_obj->sdo_gtype),
+            (uword) sizeof (int),
+            OCI_NUMBER_SIGNED,
+            (dvoid *) &gtype);
+    }
+
+    dimension = MAX(2,(gtype / 1000));
+
+    if (geometry_ind->sdo_srid == OCI_IND_NOTNULL) {
+        OCINumberToInt (
+            session->envp->errhp,
+            &(geometry_obj->sdo_srid),
+            (uword) sizeof (int),
+            OCI_NUMBER_SIGNED,
+            (dvoid *) & srid);
+    }
+
+    /* Extract SDO_POINT */
+    if (geometry_ind->sdo_point._atomic == OCI_IND_NOTNULL)
+    {
+        double    xyz[3];
+        if (geometry_ind->sdo_point.x == OCI_IND_NOTNULL)
+            OCINumberToReal( session->envp->errhp,
+                             &(geometry_obj->sdo_point.x),
+                             (uword)sizeof(double),
+                             (dvoid *)&xyz[0]);
+        if (geometry_ind->sdo_point.y == OCI_IND_NOTNULL)
+            OCINumberToReal( session->envp->errhp,
+                             &(geometry_obj->sdo_point.y),
+                             (uword)sizeof(double),
+                             (dvoid *)&xyz[1]);
+        if (3 == dimension)
+        {
+            if (geometry_ind->sdo_point.z == OCI_IND_NOTNULL)
+                OCINumberToReal( session->envp->errhp,
+                                 &(geometry_obj->sdo_point.z),
+                                 (uword)sizeof(double),
+                                 (dvoid *)&xyz[2]);
+        }
+        buf = processElem(buf, gtype, srid, NULL, NULL, xyz, xyz+dimension);
+    }
+
+    OCICollSize (session->envp->envhp, session->envp->errhp, (OCIColl *)(geometry_obj->sdo_elem_info), &n_elem_info);
+
+    if (n_elem_info)
+    {
+        int *elem_info;
+        double *coord;
+        int n_ordinates;
+
+        elem_info = (int *)malloc(n_elem_info*sizeof(int));
+        for (i=0; i<n_elem_info; i++)
+        {
+            OCICollGetElem(session->envp->envhp, session->envp->errhp,
+                           (OCIColl *) (geometry_obj->sdo_elem_info),
+                           (sb4)       i,
+                           (boolean *) &exists,
+                           (dvoid **)  &oci_number,
+                           (dvoid **)  0);
+            OCINumberToInt(session->envp->errhp, oci_number,
+                           (uword)sizeof(int),
+                           OCI_NUMBER_UNSIGNED,
+                           (dvoid *)&elem_info[i]);
+        }
+
+        OCICollSize(session->envp->envhp, session->envp->errhp,
+                    (OCIColl *)(geometry_obj->sdo_ordinates), &n_ordinates);
+        coord = (double *)malloc(n_ordinates*sizeof(double));
+        for (i=0; i<n_ordinates; i++)
+        {
+            /* extract one element from the varray */
+            OCICollGetElem(session->envp->envhp, session->envp->errhp,
+                           (OCIColl *) (geometry_obj->sdo_ordinates),
+                           (sb4)       i,
+                           (boolean *) &exists,
+                           (dvoid **)  &oci_number,
+                           (dvoid **)  0);
+            /* convert the element to double */
+            OCINumberToReal(session->envp->errhp, oci_number,
+                            (uword)sizeof(double),
+                            (dvoid *)&coord[i]);
+        }
+
+        buf = processElem( buf, gtype, srid, elem_info, elem_info+n_elem_info, coord, coord+n_ordinates );
+
+        free(coord);
+        free(elem_info);
+    }
+
+    return buf;
+}
+
+
 
 /*
  * oracleGetSession
@@ -137,6 +496,8 @@ oracleSession
 	struct connEntry *connp;
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
+
+	debugPrint( "oracleGetSession\n");
 
 	/* it's easier to deal with empty strings */
 	if (!connectstring)
@@ -176,7 +537,7 @@ oracleSession
 
 		/* create environment handle */
 		if (checkerr(
-			OCIEnvCreate((OCIEnv **) &envhp, (ub4) OCI_DEFAULT,
+			OCIEnvCreate((OCIEnv **) &envhp, (ub4)(OCI_DEFAULT+OCI_OBJECT),
 				(dvoid *) 0, (dvoid * (*)(dvoid *,size_t)) 0,
 				(dvoid * (*)(dvoid *, dvoid *, size_t)) 0,
 				(void (*)(dvoid *, dvoid *)) 0, (size_t) 0, (dvoid **) 0),
@@ -499,6 +860,7 @@ oracleSession
 
 		connp->xact_level = 1;
 	}
+
 
 	/* palloc a data structure pointing to the cached entries */
 	session = oracleAlloc(sizeof(struct oracleSession));
@@ -1069,8 +1431,14 @@ struct oraTable
 				/* use binary size for RAWs */
 				reply->cols[i-1]->val_size = 2 * bin_size + 1;
 				break;
+			case SQLT_NTY:
+				/* named object type */
+				reply->cols[i-1]->oratype = ORA_TYPE_NAMED_OBJECT;
+				reply->cols[i-1]->val_size = 0;
+				reply->cols[i-1]->val_null = 0;
+				break;
 			default:
-				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
+				reply->cols[i-1]->oratype = 1000+oraType;
 				reply->cols[i-1]->val_size = 0;
 		}
 	}
@@ -1150,6 +1518,8 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 		" CONNECT BY prior id = parent_id AND prior sql_id = sql_id AND prior child_number = child_number"
 		" START WITH id=0 AND sql_id=:sql_id and child_number=:child_number"
 		" ORDER BY id";
+
+	debugPrint( "oracleExplain\n");
 
 	/* execute the query and get the first result row */
 	oracleQueryPlan(session, query, desc_query, 1, (dvoid **)&r, &res_size, &res_type, &res_len, &res_ind);
@@ -1663,6 +2033,44 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 						"error executing query: OCIDefineByPos failed to define result value",
 						oraMessage);
 				}
+				if (type == SQLT_NTY)
+				{
+					/* Get type descriptor for geometry object type */
+					if (checkerr(
+                                                OCITypeByName (
+						session->envp->envhp,
+						session->envp->errhp,
+						session->connp->svchp,
+						(const oratext *)"MDSYS",
+						strlen("MDSYS"),
+						(const oratext *)"SDO_GEOMETRY",
+						strlen("SDO_GEOMETRY"),
+						0,
+						0,
+						OCI_DURATION_SESSION,
+						OCI_TYPEGET_HEADER,
+						&geometry_type_desc), 
+                                                (dvoid *)session->envp->errhp, 
+                                                OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"cannot get type desc for geometry",
+						oraMessage);
+					if (checkerr(
+                                                OCIDefineObject(
+						defnhp,
+						session->envp->errhp,
+						geometry_type_desc,
+						(dvoid **) &geometry_obj,
+						(ub4 *)0,                        /* (in)  Value Size (NOT USED) */
+						(dvoid **) &geometry_ind,        /* (in)  Indicator Pointer */
+						(ub4 *)0                         /* (in)  Indicator Size */
+						), 
+                                                (dvoid *)session->envp->errhp, 
+                                                OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"cannot define object",
+						oraMessage);
+				}
 			}
 			else
 			{
@@ -1695,7 +2103,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error executing query: OCIDefineByPos failed to define result value",
+				"error executing query: OCIDefineByPos failed to define dummy result value",
 				oraMessage);
 		}
 	}
@@ -1738,6 +2146,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 	OCILobLocator **lob_locators;  /* for input parameters that are LOBs */
 	int i, param_count = 0;
 
+	debugPrint( "oracleExecuteQuery\n");
 	for (param=paramList; param; param=param->next)
 		++param_count;
 
@@ -1994,6 +2403,7 @@ oracleFetchNext(oracleSession *session)
 {
 	sword result;
 
+	debugPrint( "oracleFetchNext\n");
 	/* make sure there is a statement handle stored in "session" */
 	if (session->stmthp == NULL)
 	{
@@ -2537,6 +2947,8 @@ getOraType(oraType arg)
 			return SQLT_LVC;
 		case ORA_TYPE_LONGRAW:
 			return SQLT_LVB;
+		case ORA_TYPE_NAMED_OBJECT:
+			return SQLT_NTY;
 		default:
 			/* all other columns are converted to strings */
 			return SQLT_STR;
