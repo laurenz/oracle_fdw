@@ -296,11 +296,16 @@ TIMESTAMP WITH LOCAL TIME ZOME | date, timestamp, timestamptz, char,
                                |   varchar, text
 INTERVAL YEAR TO MONTH         | interval, char, varchar, text
 INTERVAL DAY TO SECOND         | interval, char, varchar, text
+MDSYS.SDO_GEOMETRY             | geometry, bytea (read-only)
 
 If a NUMBER is converted to a boolean, "0" means "false", everything else "true".
 
 NCLOB is currently not supported because Oracle cannot automatically convert
 it to the client encoding.
+
+The data type "geometry" is only available when PostGIS is installed.
+When geometry data are converted to bytea, the WKB (well-known binary) format
+will be used.
 
 If you need conversions exceeding the above, define an appropriate view in
 Oracle or PostgreSQL.

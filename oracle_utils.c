@@ -771,8 +771,8 @@ struct oraTable
 	sb2 precision;
 	sb1 scale;
 	char *qtable, *qschema = NULL, *tablename, *query;
-	OraText *ident;
-	ub4 ncols, ident_size;
+	OraText *ident, *typname, *typschema;
+	ub4 ncols, ident_size, typname_size, typschema_size;
 	int i, length;
 
 	/* get a complete quoted table name */
@@ -866,6 +866,7 @@ struct oraTable
 		reply->cols[i-1]->val = NULL;
 		reply->cols[i-1]->val_len = 0;
 		reply->cols[i-1]->val_null = 1;
+		reply->cols[i-1]->srid = 0;
 
 		/* get the parameter descriptor for the column */
 		if (checkerr(
@@ -898,6 +899,28 @@ struct oraTable
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column type",
+				oraMessage);
+		}
+
+		/* get the column type name */
+		if (checkerr(
+			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&typname,
+				&typname_size, (ub4)OCI_ATTR_TYPE_NAME, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
+				"error describing remote table: OCIAttrGet failed to get column type name",
+				oraMessage);
+		}
+
+		/* get the column type schema */
+		if (checkerr(
+			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&typschema,
+				&typschema_size, (ub4)OCI_ATTR_SCHEMA_NAME, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
+				"error describing remote table: OCIAttrGet failed to get column type schema name",
 				oraMessage);
 		}
 
@@ -1069,6 +1092,17 @@ struct oraTable
 				/* use binary size for RAWs */
 				reply->cols[i-1]->val_size = 2 * bin_size + 1;
 				break;
+			case SQLT_NTY:
+				/* named type */
+				if ((strcmp((char *)typschema, "MDSYS") == 0)
+					&& (strcmp((char *)typname, "SDO_GEOMETRY") == 0))
+				{
+					reply->cols[i-1]->oratype = ORA_TYPE_GEOMETRY;
+					/* will be transferred as BLOB in a LOB locator */
+					reply->cols[i-1]->val_size = sizeof(OCILobLocator *);
+					break;
+				}
+				/* for other types, fall through */
 			default:
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
 				reply->cols[i-1]->val_size = 0;
@@ -1662,6 +1696,25 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIDefineByPos failed to define result value",
 						oraMessage);
+				}
+
+				/* for geometry data, define the next result column as SRID */
+				if (oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY)
+				{
+					static ub2 dummy_len;  /* persistent */
+
+					defnhp = NULL;
+					if (checkerr(
+						OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)++col_pos,
+							(dvoid *)&oraTable->cols[i]->srid, (sb4)sizeof(int),
+							SQLT_INT, (dvoid *)&oraTable->cols[i]->val_null,
+							&dummy_len, NULL, OCI_DEFAULT),
+						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					{
+						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+							"error executing query: OCIDefineByPos failed to define SRID result value",
+							oraMessage);
+					}
 				}
 			}
 			else
@@ -2537,6 +2590,8 @@ getOraType(oraType arg)
 			return SQLT_LVC;
 		case ORA_TYPE_LONGRAW:
 			return SQLT_LVB;
+		case ORA_TYPE_GEOMETRY:
+			return SQLT_BLOB;
 		default:
 			/* all other columns are converted to strings */
 			return SQLT_STR;
