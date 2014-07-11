@@ -42,6 +42,7 @@ typedef enum
 	ORA_TYPE_BFILE,
 	ORA_TYPE_LONG,
 	ORA_TYPE_LONGRAW,
+	ORA_TYPE_GEOMETRY,
 	ORA_TYPE_OTHER
 } oraType;
 
@@ -66,6 +67,7 @@ struct oraColumn
 	unsigned short val_len;  /* actual length of val */
 	unsigned int val_len4;   /* actual length of val - for bind callbacks */
 	short val_null;          /* indicator for NULL value */
+	int srid;                /* spatial reference system identifier (for geometry data) */
 };
 
 struct oraTable
