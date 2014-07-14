@@ -1670,7 +1670,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 
 				/* for other statements, allocate LOB locators for RETURNING parameters */
 				type = getOraType(oraTable->cols[i]->oratype);
-				if (type == ORA_TYPE_BLOB || type == SQLT_BFILE || type == ORA_TYPE_CLOB)
+				if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
 				{
 					/* allocate a LOB locator, store a pointer to it in "val" */
 					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
