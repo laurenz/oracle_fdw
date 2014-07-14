@@ -42,6 +42,7 @@ typedef enum
 	ORA_TYPE_BFILE,
 	ORA_TYPE_LONG,
 	ORA_TYPE_LONGRAW,
+	ORA_TYPE_NAMED_OBJECT,
 	ORA_TYPE_OTHER
 } oraType;
 
@@ -148,3 +149,5 @@ extern void oracleError_ssdh(oraError sqlstate, const char *message, const char 
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
 extern void oracleDebug2(const char *message);
+
+extern char * WKB( oracleSession *session );
