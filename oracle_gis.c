@@ -11,6 +11,8 @@
 
 #include "oracle_fdw.h"
 
+#include <string.h>
+
 /* generated with OTT */
 typedef struct
 {
@@ -54,8 +56,7 @@ struct ora_geometry
 
 /*
  * ewkbToGeom
- * 		Creates a PostGIS EWKB from an Oracle SDO_GEOMETRY.
- * 		The result is a palloc'ed structure.
+ * 		Creates an Oracle SDO_GEOMETRY from a PostGIS EWKB.
  */
 ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom)
 {
@@ -64,10 +65,13 @@ ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom)
 
 /*
  * geomToEwkb
- * 		Creates an Oracle SDO_GEOMETRY from a PostGIS EWKB.
+ * 		Creates a PostGIS EWKB from an Oracle SDO_GEOMETRY.
  * 		The result is a palloc'ed structure.
  */
 ewkb *geomToEwkb(oracleSession *session, ora_geometry *oracle_geom)
 {
-	return NULL;
+        const char * emptyPoint = "01040000206A08000000000000";
+        void * p = oracleAlloc(strlen(emptyPoint)+1);
+        memcpy(p, emptyPoint, strlen(emptyPoint)+1);
+        return p;
 }
