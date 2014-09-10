@@ -17,7 +17,20 @@
 /* oracle_fdw version */
 #define ORACLE_FDW_VERSION "1.0.0"
 
-/* opaque type encapsulating the real Oracle connection */
+#ifdef OCI_ORACLE
+/*
+ * Represents one Oracle connection, points to cached entries.
+ * This is necessary to be able to pass them back to
+ * oracle_fdw.c without having to #include oci.h there.
+ */
+struct oracleSession
+{
+	struct envEntry *envp;
+	struct srvEntry *srvp;
+	struct connEntry *connp;
+	OCIStmt *stmthp;
+};
+#endif
 typedef struct oracleSession oracleSession;
 
 /* types for the Oracle table description */
@@ -148,3 +161,17 @@ extern void oracleError_ssdh(oraError sqlstate, const char *message, const char 
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
 extern void oracleDebug2(const char *message);
+
+/*
+ * types and functions defined in oracle_gis.c
+ */
+
+typedef struct ora_geometry ora_geometry;
+typedef struct
+{
+	int	  length;
+	char *data;
+} ewkb;
+
+extern ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom);
+extern ewkb *geomToEwkb(oracleSession *session, ora_geometry *oracle_geom);

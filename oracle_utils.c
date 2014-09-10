@@ -86,19 +86,6 @@ static struct envEntry
 } *envlist = NULL;
 
 /*
- * Represents one Oracle connection, points to cached entries.
- * This is necessary to be able to pass them back to
- * oracle_fdw.c without having to #include oci.h there.
- */
-struct oracleSession
-{
-	struct envEntry *envp;
-	struct srvEntry *srvp;
-	struct connEntry *connp;
-	OCIStmt *stmthp;
-};
-
-/*
  * Helper functions
  */
 static void oracleSetSavepoint(oracleSession *session, int nest_level);

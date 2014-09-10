@@ -1,5 +1,5 @@
 MODULE_big = oracle_fdw
-OBJS = oracle_fdw.o oracle_utils.o
+OBJS = oracle_fdw.o oracle_utils.o oracle_gis.o
 EXTENSION = oracle_fdw
 DATA = oracle_fdw--1.1.sql oracle_fdw--1.0--1.1.sql
 DOCS = README.oracle_fdw
