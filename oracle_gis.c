@@ -336,25 +336,25 @@ char *ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 
 unsigned ewkbMultiPointLen(oracleSession *session, ora_geometry *geom)
 {
-    // same code as Line
+    /* same code as Line */
     return ewkbLineLen(session, geom);
 }
 
 char *ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-    // same code as Line
+    /* same code as Line */
     return ewkbLineFill(session, geom, dest);
 }
 
 unsigned ewkbMultiLineLen(oracleSession *session, ora_geometry *geom)
 {
-    // same code as polygon
+    /* same code as Line */
     return ewkbPolygonLen(session, geom);
 }
 
 char *ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-    // same code as polygon
+    /* same code as Line */
     return ewkbPolygonFill(session, geom, dest);
 }
 
@@ -386,16 +386,17 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
     for (i=0, j=0; i < numPolygon; i++)
     {
         unsigned numRings = 1;
-        j++;
-        // move j to the next ext ring, or the end
-        for (; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++, numRings++);
+        /* move j to the next ext ring, or the end */
+        for (j++; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++, numRings++);
         memcpy(dest, &numRings, sizeof(unsigned));
         dest += sizeof(unsigned);
-        j -= numRings; // reset j to be on the exterior ring of the current polygon
+
+        /* reset j to be on the exterior ring of the current polygon 
+         * and output rings */
+        j -= numRings; 
 
         dest = ringFill(session, geom, dest, j);
-        j++;
-        for (; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++)
+        for (j++; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++)
             dest = ringFill(session, geom, dest, j);
     }
     return dest;
