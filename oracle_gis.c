@@ -80,6 +80,23 @@ struct envEntry
 	struct srvEntry *srvlist;
 };
 
+unsigned ewkbType(oracleSession *session, ora_geometry *geom);
+unsigned ewkbDimension(oracleSession *session, ora_geometry *geom);
+unsigned ewkbSrid(oracleSession *session, ora_geometry *geom);
+unsigned numCoord(oracleSession *session, ora_geometry *geom);
+double coord(oracleSession *session, ora_geometry *geom, unsigned i);
+unsigned numElemInfo(oracleSession *session, ora_geometry *geom);
+unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i);
+unsigned ewkbHeaderLen(oracleSession *session, ora_geometry *geom);
+void ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest);
+unsigned ewkbPointLen(oracleSession *session, ora_geometry *geom);
+void ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest);
+unsigned ewkbLineLen(oracleSession *session, ora_geometry *geom);
+void ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest);
+unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom);
+void ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest);
+unsigned ewkbGeomLen(oracleSession *session, ora_geometry *geom);
+void ewkbGeomFill(oracleSession *session, ora_geometry *geom, char * dest);
 
 /*
  * ewkbToGeom
@@ -98,30 +115,24 @@ ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom)
  */
 ewkb *geomToEwkb(oracleSession *session, ora_geometry *geom)
 {
-        const char * emptyPoint = "01040000206A08000000000000";
-        void * p = oracleAlloc(strlen(emptyPoint)+1);
-        memcpy(p, emptyPoint, strlen(emptyPoint)+1);
-        return p;
+#ifdef HEX_ENCODE
+        unsigned numBytes = ewkbGeomLen(session, geom);
+        unsigned i;
+        char * data = (char *)oracleAlloc( 2*numBytes+1 );
+        ewkbGeomFill(session, geom, data);
+        data[2*numBytes] = '\0';
+        for (i=numBytes-1; i>=0; i--)
+        {
+            data[2*i]   = (uint8_t)data[i];
+            data[2*i+1] = (uint8_t)(data[i] >> 4);
+        }
+        return (ewkb *)data;
+#else
+        char * data = (char *)oracleAlloc( ewkbGeomLen(session, geom) );
+        ewkbGeomFill(session, geom, data);
+        return (ewkb *)data;
+#endif
 }
-
-unsigned ewkbType(oracleSession *session, ora_geometry *geom);
-unsigned ewkbDimension(oracleSession *session, ora_geometry *geom);
-unsigned ewkbSrid(oracleSession *session, ora_geometry *geom);
-unsigned numCoord(oracleSession *session, ora_geometry *geom);
-double coord(oracleSession *session, ora_geometry *geom, unsigned i);
-unsigned numElemInfo(oracleSession *session, ora_geometry *geom);
-unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i);
-unsigned ewkbHeaderLen(oracleSession *session, ora_geometry *geom);
-void ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest);
-unsigned ewkbPointLen(oracleSession *session, ora_geometry *geom);
-void ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest);
-unsigned ewkbLineLen(oracleSession *session, ora_geometry *geom);
-void ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest);
-unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom);
-void ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest);
-unsigned geomEwkbLen(oracleSession *session, ora_geometry *geom);
-void geomEwkbFill(oracleSession *session, ora_geometry *geom, char * dest);
-
 
 unsigned ewkbType(oracleSession *session, ora_geometry *geom)
 {
@@ -343,7 +354,7 @@ unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 }
 
 
-unsigned geomEwkbLen(oracleSession *session, ora_geometry *geom)
+unsigned ewkbGeomLen(oracleSession *session, ora_geometry *geom)
 {
     switch (ewkbType(session, geom)) 
     {
@@ -357,7 +368,7 @@ unsigned geomEwkbLen(oracleSession *session, ora_geometry *geom)
     }
 }
 
-void geomEwkbFill(oracleSession *session, ora_geometry *geom, char * dest)
+void ewkbGeomFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
     const unsigned headerLength = ewkbHeaderLen(session, geom);
     ewkbHeaderFill(session, geom, dest);
