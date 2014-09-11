@@ -116,6 +116,7 @@ ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom)
 ewkb *geomToEwkb(oracleSession *session, ora_geometry *geom)
 {
 #ifdef HEX_ENCODE
+        const char *hexchr = "0123456789ABCDEF";
         unsigned numBytes = ewkbGeomLen(session, geom);
         unsigned i;
         char * data = (char *)oracleAlloc( 2*numBytes+1 );
@@ -123,8 +124,8 @@ ewkb *geomToEwkb(oracleSession *session, ora_geometry *geom)
         data[2*numBytes] = '\0';
         for (i=numBytes-1; i>=0; i--)
         {
-            data[2*i]   = (uint8_t)data[i];
-            data[2*i+1] = (uint8_t)(data[i] >> 4);
+            data[2*i] = hexchr[(uint8_t)data[i] >> 4];
+            data[2*i+1] = hexchr[(uint8_t)data[i] & 0x0F];
         }
         return (ewkb *)data;
 #else
