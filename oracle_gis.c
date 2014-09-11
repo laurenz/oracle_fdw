@@ -95,6 +95,10 @@ unsigned ewkbLineLen(oracleSession *session, ora_geometry *geom);
 void ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest);
 unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom);
 void ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest);
+unsigned ewkbMultiPointLen(oracleSession *session, ora_geometry *geom);
+void ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char *dest);
+unsigned ewkbMultiLineLen(oracleSession *session, ora_geometry *geom);
+void ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest);
 unsigned ewkbGeomLen(oracleSession *session, ora_geometry *geom);
 void ewkbGeomFill(oracleSession *session, ora_geometry *geom, char * dest);
 
@@ -245,7 +249,7 @@ void ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 
 unsigned ewkbLineLen(oracleSession *session, ora_geometry *geom)
 {
-    return sizeof(double)*numCoord(session, geom);
+    return sizeof(unsigned) + sizeof(double)*numCoord(session, geom);
 }
 
 void ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest)
@@ -296,6 +300,30 @@ void ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
             dest += sizeof(double);
         }
     }
+}
+
+unsigned ewkbMultiPointLen(oracleSession *session, ora_geometry *geom)
+{
+    // same code as Line
+    return ewkbLineLen(session, geom);
+}
+
+void ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
+{
+    // same code as Line
+    ewkbLineFill(session, geom, dest);
+}
+
+unsigned ewkbMultiLineLen(oracleSession *session, ora_geometry *geom)
+{
+    // same code as polygon
+    return ewkbPolygonLen(session, geom);
+}
+
+void ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest)
+{
+    // same code as polygon
+    ewkbPolygonFill(session, geom, dest);
 }
 
 unsigned numCoord(oracleSession *session, ora_geometry *geom)
@@ -355,6 +383,7 @@ unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 }
 
 
+
 unsigned ewkbGeomLen(oracleSession *session, ora_geometry *geom)
 {
     switch (ewkbType(session, geom)) 
@@ -362,8 +391,8 @@ unsigned ewkbGeomLen(oracleSession *session, ora_geometry *geom)
     case POINTTYPE:              return ewkbHeaderLen(session, geom) + ewkbPointLen(session, geom);
     case LINETYPE:               return ewkbHeaderLen(session, geom) + ewkbLineLen(session, geom);
     case POLYGONTYPE:            return ewkbHeaderLen(session, geom) + ewkbPolygonLen(session, geom);
-    //case MULTIPOINTTYPE:         return ewkbHeaderLen(session, geom) + ewkbMultiPointLen(session, geom);
-    //case MULTILINETYPE:          return ewkbHeaderLen(session, geom) + ewkbMultiLineLen(session, geom);
+    case MULTIPOINTTYPE:         return ewkbHeaderLen(session, geom) + ewkbMultiPointLen(session, geom);
+    case MULTILINETYPE:          return ewkbHeaderLen(session, geom) + ewkbMultiLineLen(session, geom);
     //case MULTIPOLYGONTYPE:       return ewkbHeaderLen(session, geom) + ewkbMultiPolygonLen(session, geom);
     default: return 0;
     }
@@ -378,8 +407,8 @@ void ewkbGeomFill(oracleSession *session, ora_geometry *geom, char * dest)
     case POINTTYPE: ewkbPointFill(session, geom, dest+headerLength); break;
     case LINETYPE: ewkbLineFill(session, geom, dest+headerLength); break;
     case POLYGONTYPE: ewkbPolygonFill(session, geom, dest+headerLength); break;
-    //case MULTIPOINTTYPE: ewkbMultiPointFill(session, geom, dest+headerLength); break;
-    //case MULTILINETYPE: ewkbMultiLineFill(session, geom, dest+headerLength); break;
+    case MULTIPOINTTYPE: ewkbMultiPointFill(session, geom, dest+headerLength); break;
+    case MULTILINETYPE: ewkbMultiLineFill(session, geom, dest+headerLength); break;
     //case MULTIPOLYGONTYPE: ewkbMultiPolygonFill(session, geom, dest+headerLength); break;
     }
 }
