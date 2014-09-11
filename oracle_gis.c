@@ -120,22 +120,29 @@ ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom)
 ewkb *geomToEwkb(oracleSession *session, ora_geometry *geom)
 {
 #ifdef HEX_ENCODE
-        const char *hexchr = "0123456789ABCDEF";
-        unsigned numBytes = ewkbGeomLen(session, geom);
-        unsigned i;
-        char * data = (char *)oracleAlloc( 2*numBytes+1 );
-        ewkbGeomFill(session, geom, data);
-        data[2*numBytes] = '\0';
-        for (i=numBytes-1; i>=0; i--)
-        {
-            data[2*i] = hexchr[(uint8_t)data[i] >> 4];
-            data[2*i+1] = hexchr[(uint8_t)data[i] & 0x0F];
-        }
-        return (ewkb *)data;
+    /* For hex encoding, we allocate twice as much space, plus one char
+     * for the null character
+     * we set the bits in the first half of the allocated memory
+     * we then convert, from end to start
+     */
+    const char *hexchr = "0123456789ABCDEF";
+    unsigned numBytes = ewkbGeomLen(session, geom);
+    unsigned i;
+    char * data = (char *)oracleAlloc( 2*numBytes+1 );
+    ewkbGeomFill(session, geom, data);
+    data[2*numBytes] = '\0';
+    for (i=numBytes-1; i>=0; i--)
+    {
+        /* watch out: if we write at [2*i] first, then we loose
+         * the value when i=0 and we have a strange bug */
+        data[2*i+1] = hexchr[(uint8_t)data[i] & 0x0F];
+        data[2*i] = hexchr[(uint8_t)data[i] >> 4];
+    }
+    return (ewkb *)data;
 #else
-        char * data = (char *)oracleAlloc( ewkbGeomLen(session, geom) );
-        ewkbGeomFill(session, geom, data);
-        return (ewkb *)data;
+    char * data = (char *)oracleAlloc( ewkbGeomLen(session, geom) );
+    ewkbGeomFill(session, geom, data);
+    return (ewkb *)data;
 #endif
 }
 
