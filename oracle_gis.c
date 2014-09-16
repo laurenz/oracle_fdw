@@ -115,6 +115,10 @@ char *ewkbGeomFill(oracleSession *session, ora_geometry *geom, char * dest);
 const char *setType(oracleSession *session, ora_geometry *geom, const char *data);
 const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data);
 const char *setPoint(oracleSession *session, ora_geometry *geom, const char *data);
+const char *setLine(oracleSession *session, ora_geometry *geom, const char *data);
+const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *data);
+void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
+void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
 
 /*
  * ewkbToGeom
@@ -139,8 +143,8 @@ ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom)
     switch ( ewkbType(session, geom) ) 
     {
     case POINTTYPE:        data = setPoint(session, geom, data); break;
-    //case LINETYPE:         data = setLine(session, geom, data); break;
-    //case POLYGONTYPE:      data = setPolygon(session, geom, data); break;
+    case LINETYPE:         data = setLine(session, geom, data); break;
+    case POLYGONTYPE:      data = setPolygon(session, geom, data); break;
     //case MULTIPOINTTYPE:   data = setMultiPoint(session, geom, data); break;
     //case MULTILINETYPE:    data = setMultiLine(session, geom, data); break;
     //case MULTIPOLYGONTYPE: data = setMultiPolygon(session, geom, data); break;
@@ -163,6 +167,39 @@ ewkb *geomToEwkb(oracleSession *session, ora_geometry *geom)
     char * data = (char *)oracleAlloc( ewkbGeomLen(session, geom) );
     ewkbGeomFill(session, geom, data);
     return (ewkb *)data;
+}
+
+void appendElemInfo(oracleSession *session, ora_geometry *geom, int info )
+{
+    OCINumber n;
+    OCINumberFromInt (
+        session->envp->errhp,
+        (CONST dvoid *) &info,
+        (uword) sizeof(int),
+        OCI_NUMBER_SIGNED,
+        &n);
+
+    OCICollAppend( session->envp->envhp, 
+                   session->envp->errhp,
+                  (CONST dvoid*) &n, 
+                  NULL,
+                  geom->geometry.sdo_elem_info );
+}
+
+void appendCoord(oracleSession *session, ora_geometry *geom, double coord )
+{
+    OCINumber n;
+    OCINumberFromReal (
+        session->envp->errhp,
+        (const dvoid*)&coord,
+        (uword) sizeof(double),
+        &n);
+
+    OCICollAppend( session->envp->envhp, 
+                   session->envp->errhp,
+                   (CONST dvoid*) &n, 
+                   NULL,
+                   geom->geometry.sdo_ordinates );
 }
 
 unsigned ewkbType(oracleSession *session, ora_geometry *geom)
@@ -383,6 +420,21 @@ char *ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest)
     return dest;
 }
 
+const char *setLine(oracleSession *session, ora_geometry *geom, const char *data)
+{
+    unsigned i;
+    const unsigned n = *((unsigned *)data) * ewkbDimension(session, geom);
+    data += sizeof(unsigned);
+    for (i=0; i<n; i++)
+    {
+        appendCoord(session, geom, *((double *)data));
+        data += sizeof(double);
+    }
+    appendElemInfo(session, geom, 1); // start index + 1
+    appendElemInfo(session, geom, 2); // SDO_ETYPE linestring
+    appendElemInfo(session, geom, 1); // SDO_INTERPRETATION straight line segments
+    return data;
+}
 unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 {
     const unsigned numRings = numElemInfo(session, geom)/3;
@@ -413,6 +465,31 @@ char *ringFill(oracleSession *session, ora_geometry *geom, char * dest, unsigned
         dest += sizeof(double);
     }
     return dest;
+}
+
+const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *data)
+{
+    unsigned r, i;
+    const unsigned dim = ewkbDimension(session, geom);
+    const unsigned numRings = *((unsigned *)data);
+    data += sizeof(unsigned);
+    for (r=0; r<numRings; r++)
+    {
+        const unsigned n= *((unsigned *)data) * dim;
+        data += sizeof(unsigned);
+
+        appendElemInfo(session, geom, numCoord(session, geom) + 1); // start index + 1
+        appendElemInfo(session, geom, r == 0 ? 1003 : 2003); // SDO_ETYPE ext ring or int ring
+        appendElemInfo(session, geom, 1); // SDO_INTERPRETATION straight line segments
+        
+        for (i=0; i<n; i++)
+        {
+            appendCoord(session, geom, *((double *)data));
+            data += sizeof(double);
+        }
+    }
+
+    return data;
 }
 
 char *ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
@@ -540,7 +617,7 @@ unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
     OCICollGetElem(session->envp->envhp, session->envp->errhp,
                    (OCIColl *) (geom->geometry.sdo_elem_info),
                    (sb4)       i,
-                   (boolean *) &exists,
+                   &exists,
                    (dvoid **)  &oci_number,
                    (dvoid **)  0);
     OCINumberToInt(session->envp->errhp, oci_number,
