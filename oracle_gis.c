@@ -109,6 +109,19 @@ const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const ch
 void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
 void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
 
+unsigned char indianess(void)
+{
+    const char big = 0;
+    const char little = 1;
+    union {
+        unsigned i;
+        char c[sizeof(unsigned)];
+    } bint = {0x01020304};
+
+    return bint.c[0] == 1 ? little : big; 
+}
+
+
 /*
  * ewkbToGeom
  * 		Creates an Oracle SDO_GEOMETRY from a PostGIS EWKB.
@@ -120,11 +133,8 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
     unsigned type = UNKNOWNTYPE;
     ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
     
-#ifdef BIG_INDIAN
-    assert( *data == 0 );
-#else
-    assert( *data == 1 );
-#endif
+    assert( *data == indianess() );
+
     ++data;
 
     data = setType(session, geom, data);
@@ -357,12 +367,9 @@ char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
     if (srid) wkbType |= WKBSRIDFLAG;
     if (3 == ewkbDimension(session, geom)) wkbType |= WKBZOFFSET;
 
-#ifdef BIG_INDIAN
-    dest[0] = 0 ;
-#else
-    dest[0] = 1 ;
-#endif
+    dest[0] = indianess() ;
     dest += 1;
+
     memcpy(dest, &wkbType, sizeof(unsigned));
     dest += sizeof(unsigned);
 
