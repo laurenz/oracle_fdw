@@ -10,6 +10,7 @@
 #include <oci.h>
 
 #include <string.h>
+#include <stdint.h>
 
 #include "oracle_fdw.h"
 
@@ -38,7 +39,7 @@
 #define QUOTE(x) _QUOTE(x)
 #ifndef NDEBUG
 #   define ORA_ASSERT( expr ) \
-    ((expr) ? (void)assertionFailed( __FILE__":"QUOTE(__LINE__)" assertion ("#expr") failed" ) : (void)0 )
+    ((expr) ? (void)0 : (void)assertionFailed( __FILE__":"QUOTE(__LINE__)" assertion ("#expr") failed" ) )
 #else
 #   define ORA_ASSERT( expr ) ((void(0))
 #endif
@@ -136,7 +137,7 @@ unsigned char indianess(void)
         char c[sizeof(unsigned)];
     } bint = {0x01020304};
 
-    return bint.c[0] == 1 ? little : big; 
+    return bint.c[0] == 1 ? big : little; 
 }
 
 
@@ -243,6 +244,7 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
 unsigned int
 oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 {
+    oracleDebug2("oracle_fdw: oracleGetEWKBLen");
     switch (ewkbType(session, geom)) 
     {
     	case POINTTYPE:              return ewkbHeaderLen(session, geom) + ewkbPointLen(session, geom);
@@ -251,7 +253,7 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
     	case MULTIPOINTTYPE:         return ewkbHeaderLen(session, geom) + ewkbMultiPointLen(session, geom);
     	case MULTILINETYPE:          return ewkbHeaderLen(session, geom) + ewkbMultiLineLen(session, geom);
     	case MULTIPOLYGONTYPE:       return ewkbHeaderLen(session, geom) + ewkbMultiPolygonLen(session, geom);
-    	default: return 0;
+    	default: ORA_ASSERT(0);
     }
 }
 
@@ -262,6 +264,8 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 char *
 oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest)
 {
+    const char * orig = dest;
+    oracleDebug2("oracle_fdw: oracleFillEWKB");
     dest = ewkbHeaderFill(session, geom, dest);
     switch (ewkbType(session, geom)) 
     {
@@ -271,6 +275,30 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest)
     	case MULTIPOINTTYPE: ewkbMultiPointFill(session, geom, dest); break;
     	case MULTILINETYPE: ewkbMultiLineFill(session, geom, dest); break;
     	case MULTIPOLYGONTYPE: ewkbMultiPolygonFill(session, geom, dest); break;
+    	default: ORA_ASSERT(0);
+    }
+
+    {
+        const char *hexchr = "0123456789ABCDEF";
+        unsigned numBytes = oracleGetEWKBLen(session, geom);
+        
+        //ORA_ASSERT( dest - orig == numBytes );
+
+        unsigned i;
+        char * data = (char *)oracleAlloc( 2*numBytes+1 );
+        oracleDebug2("oracle_fdw: hex encode for debug");
+        data[2*numBytes] = '\0';
+        for (i=0; i<numBytes; i++)
+        {
+            const unsigned idx2 = ((uint8_t)orig[i]) & 0x0F;
+            const unsigned idx1 = ((uint8_t)orig[i]) >> 4;
+            ORA_ASSERT(idx1 < 16);
+            ORA_ASSERT(idx2 < 16);
+            data[2*i+1] = hexchr[idx2];
+            data[2*i] = hexchr[idx1];
+        }
+        oracleDebug2(data);
+        oracleFree( data );
     }
     return dest;
 }
@@ -385,6 +413,7 @@ char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
     if (srid) wkbType |= WKBSRIDFLAG;
     if (3 == ewkbDimension(session, geom)) wkbType |= WKBZOFFSET;
 
+    ORA_ASSERT( indianess() == 1);
     dest[0] = indianess() ;
     dest += 1;
 
@@ -453,6 +482,7 @@ unsigned ewkbPointLen(oracleSession *session, ora_geometry *geom)
 
 char *ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 {
+    oracleDebug2("oracle_fdw: ewkbPointFill");
     if (geom->indicator->sdo_point.x == OCI_IND_NOTNULL)
         OCINumberToReal( session->envp->errhp,
                          &(geom->geometry->sdo_point.x),
@@ -474,6 +504,7 @@ char *ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
                              (dvoid *)dest);
         dest += sizeof(double);
     }
+
     return dest;
 }
 
