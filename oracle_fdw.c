@@ -550,6 +550,8 @@ _PG_init(void)
 	ScanKeyData key;
 	SysScanDesc scan;
 	HeapTuple tuple;
+        Snapshot snapshot;
+
 
 	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
@@ -557,7 +559,8 @@ _PG_init(void)
 	/* initialize index scan for "st_geomfromwkb" in pg_proc */
 	proc_rel = heap_open(ProcedureRelationId, AccessShareLock);
 	ScanKeyInit(&key, Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum("st_geomfromwkb"));
-	scan = systable_beginscan(proc_rel, ProcedureNameArgsNspIndexId, true, NULL, 1, &key);
+        snapshot = GetLatestSnapshot();//RegisterSnapshot(GetCatalogSnapshot(relid));
+	scan = systable_beginscan(proc_rel, ProcedureNameArgsNspIndexId, true, snapshot, 1, &key);
 
 	/* find the first function with two arguments */
 	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
