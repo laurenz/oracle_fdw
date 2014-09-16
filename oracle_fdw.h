@@ -19,6 +19,38 @@
 
 #ifdef OCI_ORACLE
 /*
+ * Types for a linked list for various handles.
+ * Oracle sessions can be multiplexed over one server connection.
+ */
+struct connEntry
+{
+	char *user;
+	OCISvcCtx *svchp;
+	OCISession *userhp;
+	OCIType *geomtype;
+	struct handleEntry *handlelist;
+	int xact_level;  /* 0 = none, 1 = main, else subtransaction */
+	struct connEntry *next;
+};
+
+struct srvEntry
+{
+	char *connectstring;
+	OCIServer *srvhp;
+	struct srvEntry *next;
+	struct connEntry *connlist;
+};
+
+struct envEntry
+{
+	char *nls_lang;
+	OCIEnv *envhp;
+	OCIError *errhp;
+	struct envEntry *next;
+	struct srvEntry *srvlist;
+};
+
+/*
  * Represents one Oracle connection, points to cached entries.
  * This is necessary to be able to pass them back to
  * oracle_fdw.c without having to #include oci.h there.
@@ -55,10 +87,11 @@ typedef enum
 	ORA_TYPE_BFILE,
 	ORA_TYPE_LONG,
 	ORA_TYPE_LONGRAW,
+	ORA_TYPE_GEOMETRY,
 	ORA_TYPE_OTHER
 } oraType;
 
-/* PostgreSQL has no constant definition for the OID of type uuid */
+/* Some PostgreSQL versions have no constant definition for the OID of type uuid */
 #ifndef UUIDOID
 #define UUIDOID 2950
 #endif
@@ -127,6 +160,13 @@ typedef enum
 	FDW_SERIALIZATION_FAILURE
 } oraError;
 
+/* encapsulates an Oracle geometry object */
+typedef struct
+{
+	struct sdo_geometry *geometry;
+	struct sdo_geometry_ind *indicator;
+} ora_geometry;
+
 /*
  * functions defined in oracle_utils.c
  */
@@ -146,6 +186,7 @@ extern int oracleFetchNext(oracleSession *session);
 extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
 extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
+extern void oracleGeometryFree(oracleSession *session, ora_geometry *geom);
 
 /*
  * functions defined in oracle_fdw.c
@@ -163,15 +204,9 @@ extern void oracleError(oraError sqlstate, const char *message);
 extern void oracleDebug2(const char *message);
 
 /*
- * types and functions defined in oracle_gis.c
+ * functions defined in oracle_gis.c
  */
 
-typedef struct ora_geometry ora_geometry;
-typedef struct
-{
-	int	  length;
-	char *data;
-} ewkb;
-
-extern ora_geometry *ewkbToGeom(oracleSession *session, ewkb *postgis_geom);
-extern ewkb *geomToEwkb(oracleSession *session, ora_geometry *oracle_geom);
+extern ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data);
+extern unsigned int oracleGetEWKBLen(oracleSession *session, ora_geometry *geom);
+extern char *oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest);

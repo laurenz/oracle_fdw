@@ -85,6 +85,11 @@
 PG_MODULE_MAGIC;
 
 /*
+ * PostGIS geometry type, set upon library initialization.
+ */
+static Oid GEOMETRYOID = InvalidOid;
+
+/*
  * Describes the valid options for objects that use this wrapper.
  */
 struct OracleFdwOption
@@ -534,13 +539,58 @@ oracle_diag(PG_FUNCTION_ARGS)
 
 /*
  * _PG_init
- * 		Library load-time initalization, sets exitHook() callback for
- * 		backend shutdown.
+ * 		Library load-time initalization.
+ * 		Sets exitHook() callback for backend shutdown.
+ * 		Also finds the OIDs of PostGIS the PostGIS geometry type.
  */
 void
 _PG_init(void)
 {
+	Relation proc_rel;
+	ScanKeyData key;
+	SysScanDesc scan;
+	HeapTuple tuple;
+
+	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
+
+	/* initialize index scan for "st_geomfromwkb" in pg_proc */
+	proc_rel = heap_open(ProcedureRelationId, AccessShareLock);
+	ScanKeyInit(&key, Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum("st_geomfromwkb"));
+	scan = systable_beginscan(proc_rel, ProcedureNameArgsNspIndexId, true, NULL, 1, &key);
+
+	/* find the first function with two arguments */
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		oidvector argtypes;
+		Form_pg_proc proc_tuple = (Form_pg_proc)GETSTRUCT(tuple);
+
+		argtypes = proc_tuple->proargtypes;
+		if (argtypes.dim1 != 2)
+			continue;
+
+		/*
+		 * If we find two two-argument functions called 
+		 * "st_geomfromwkb", assume that two copies of PostGIS
+		 * are installed and give up.
+		 */
+		if (GEOMETRYOID != InvalidOid)
+		{
+			elog(DEBUG1, "oracle_fdw: more than one PostGIS installation found, giving up");
+
+			GEOMETRYOID = InvalidOid;
+			break;
+		}
+
+		/* the return type must be the PostGIS geometry type */
+		GEOMETRYOID = proc_tuple->prorettype;
+
+		elog(DEBUG1, "oracle_fdw: PostGIS is installed, GEOMETRYOID = %d", GEOMETRYOID);
+	}
+
+	/* end scan */
+	systable_endscan(scan);
+	heap_close(proc_rel, AccessShareLock);
 }
 
 #ifdef OLD_FDW_API
@@ -2084,6 +2134,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 		/* don't get LONG, LONG RAW and untranslatable values */
 		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG
 				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY
 				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_OTHER)
 		{
 			fdw_state->oraTable->cols[i]->used = 0;
@@ -3452,6 +3503,11 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			|| oratype == ORA_TYPE_INTERVALD2S)
 			&& pgtype == INTERVALOID)
 		return;
+	/* SDO_GEOMETRY can be converted to geometry or bytea */
+	if (oratype == ORA_TYPE_GEOMETRY
+			&& (pgtype == GEOMETRYOID
+			|| pgtype == BYTEAOID))
+		return;
 
 	/* otherwise, report an error */
 	ereport(ERROR,
@@ -4294,6 +4350,17 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 				(void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype,
 				&value, &value_len, trunc_lob ? (WIDTH_THRESHOLD+1) : 0);
 		}
+		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
+		{
+			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
+
+			if (geom->geometry == NULL)
+				value_len = 0;  /* NULL value */
+			else
+				value_len = oracleGetEWKBLen(fdw_state->session, geom);
+
+			value = NULL;  /* we will fetch that later to avoid unnecessary copying */
+		}
 		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONG
 				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONGRAW)
 		{
@@ -4320,6 +4387,27 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			SET_VARSIZE(result, value_len + VARHDRSZ);
 
 			values[j] = PointerGetDatum(result);
+		}
+		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
+		{
+			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
+			bytea *result = NULL;
+
+			if (value_len == 0)
+			{
+				nulls[j] = true;
+			}
+			else
+			{
+				result = (bytea *)palloc(value_len + VARHDRSZ);
+				oracleFillEWKB(fdw_state->session, geom, VARDATA(result));
+				SET_VARSIZE(result, value_len + VARHDRSZ);
+			}
+
+			values[j] = PointerGetDatum(result);
+
+			/* free the storage for the object */
+			oracleGeometryFree(fdw_state->session, geom);
 		}
 		else
 		{
@@ -4360,7 +4448,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 					/* these functions require the type modifier */
 					values[j] = OidFunctionCall3(typinput,
 						dat,
-								ObjectIdGetDatum(InvalidOid),
+						ObjectIdGetDatum(InvalidOid),
 						Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
 					break;
 				default:

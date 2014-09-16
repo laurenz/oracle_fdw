@@ -54,36 +54,9 @@ struct handleEntry
 };
 
 /*
- * Linked list for connection, server and environment handles.
- * "envlist" is the starting point.
- * Oracle sessions can be multiplexed over one server connection.
+ * Linked list of handles for cached Oracle connections.
  */
-struct connEntry
-{
-	char *user;
-	OCISvcCtx *svchp;
-	OCISession *userhp;
-	struct handleEntry *handlelist;
-	int xact_level;  /* 0 = none, 1 = main, else subtransaction */
-	struct connEntry *next;
-};
-
-struct srvEntry
-{
-	char *connectstring;
-	OCIServer *srvhp;
-	struct srvEntry *next;
-	struct connEntry *connlist;
-};
-
-static struct envEntry
-{
-	char *nls_lang;
-	OCIEnv *envhp;
-	OCIError *errhp;
-	struct envEntry *next;
-	struct srvEntry *srvlist;
-} *envlist = NULL;
+static struct envEntry *envlist = NULL;
 
 /*
  * Helper functions
@@ -102,6 +75,7 @@ static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
 static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value);
+static OCIType *getGeometryType(oracleSession *session);
 
 /*
  * oracleGetSession
@@ -163,7 +137,7 @@ oracleSession
 
 		/* create environment handle */
 		if (checkerr(
-			OCIEnvCreate((OCIEnv **) &envhp, (ub4) OCI_DEFAULT,
+			OCIEnvCreate((OCIEnv **) &envhp, (ub4)OCI_OBJECT,
 				(dvoid *) 0, (dvoid * (*)(dvoid *,size_t)) 0,
 				(dvoid * (*)(dvoid *, dvoid *, size_t)) 0,
 				(void (*)(dvoid *, dvoid *)) 0, (size_t) 0, (dvoid **) 0),
@@ -461,6 +435,7 @@ oracleSession
 		}
 		connp->svchp = svchp;
 		connp->userhp = userhp;
+		connp->geomtype = NULL;
 		connp->handlelist = NULL;
 		connp->xact_level = 0;
 		connp->next = srvp->connlist;
@@ -758,8 +733,8 @@ struct oraTable
 	sb2 precision;
 	sb1 scale;
 	char *qtable, *qschema = NULL, *tablename, *query;
-	OraText *ident;
-	ub4 ncols, ident_size;
+	OraText *ident, *typname, *typschema;
+	ub4 ncols, ident_size, typname_size, typschema_size;
 	int i, length;
 
 	/* get a complete quoted table name */
@@ -885,6 +860,28 @@ struct oraTable
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 				"error describing remote table: OCIAttrGet failed to get column type",
+				oraMessage);
+		}
+
+		/* get the column type name */
+		if (checkerr(
+			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&typname,
+				&typname_size, (ub4)OCI_ATTR_TYPE_NAME, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
+				"error describing remote table: OCIAttrGet failed to get column type name",
+				oraMessage);
+		}
+
+		/* get the column type schema */
+		if (checkerr(
+			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&typschema,
+				&typschema_size, (ub4)OCI_ATTR_SCHEMA_NAME, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
+				"error describing remote table: OCIAttrGet failed to get column type schema name",
 				oraMessage);
 		}
 
@@ -1056,6 +1053,16 @@ struct oraTable
 				/* use binary size for RAWs */
 				reply->cols[i-1]->val_size = 2 * bin_size + 1;
 				break;
+			case SQLT_NTY:
+				/* named type */
+				if ((strcmp((char *)typschema, "MDSYS") == 0)
+					&& (strcmp((char *)typname, "SDO_GEOMETRY") == 0))
+				{
+					reply->cols[i-1]->oratype = ORA_TYPE_GEOMETRY;
+					reply->cols[i-1]->val_size = sizeof(ora_geometry);
+					break;
+				}
+				/* for other types, fall through */
 			default:
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
 				reply->cols[i-1]->val_size = 0;
@@ -1650,6 +1657,31 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 						"error executing query: OCIDefineByPos failed to define result value",
 						oraMessage);
 				}
+
+				if (oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY)
+				{
+					/*
+					 * The actual object and indicator will be allocated when data are
+					 * fetched and must be freed with OCIObjectFree().
+					 */
+					ora_geometry *geom = (ora_geometry *)oraTable->cols[i]->val;
+					geom->geometry = NULL;
+					geom->indicator = NULL;
+
+					/* define the result for the named type */
+					if (checkerr(
+						OCIDefineObject(defnhp, session->envp->errhp, getGeometryType(session),
+							(void **)&geom->geometry, 0, (void **)&geom->indicator, 0),
+							session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					{
+						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+							"error executing query: OCIDefineObject failed to define geometry",
+							oraMessage);
+					}
+
+					/* set the column's indicator to NOT NULL for a later convertTuple */
+					oraTable->cols[i]->val_null = 0;
+				}
 			}
 			else
 			{
@@ -2144,6 +2176,25 @@ oracleServerVersion(oracleSession *session, int *major, int *minor, int *update,
 }
 
 /*
+ * oracleGeometryFree
+ * 		Free the memory allocated with a geometry object.
+ */
+void
+oracleGeometryFree(oracleSession *session, ora_geometry *geom)
+{
+	if (geom->geometry == NULL)
+	{
+		if (geom->indicator != NULL)
+			(void)OCIObjectFree(session->envp->envhp, session->envp->errhp, geom->indicator, 0);
+	}
+	else
+		(void)OCIObjectFree(session->envp->envhp, session->envp->errhp, geom->geometry, 0);
+
+	geom->geometry = NULL;
+	geom->indicator = NULL;
+}
+
+/*
  * checkerr
  * 		Call OCIErrorGet to get error message and error code.
  */
@@ -2386,7 +2437,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
 
 /*
  * removeEnvironment
- * 		Deallocate environment, error and service handle and remove cache entry.
+ * 		Deallocate environment and error handle and remove cache entry.
  */
 void
 removeEnvironment(OCIEnv *envhp)
@@ -2524,6 +2575,8 @@ getOraType(oraType arg)
 			return SQLT_LVC;
 		case ORA_TYPE_LONGRAW:
 			return SQLT_LVB;
+		case ORA_TYPE_GEOMETRY:
+			return SQLT_NTY;
 		default:
 			/* all other columns are converted to strings */
 			return SQLT_STR;
@@ -2624,4 +2677,29 @@ oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
 			"error writing data: OCILobClose failed to close LOB",
 			oraMessage);
 	}
+}
+
+/*
+ * getGeometryType
+ * 		Get the MDSYS.DSO_GEOMETRY type.
+ * 		The result is cached in the session' connEntry.
+ */
+OCIType *getGeometryType(oracleSession *session)
+{
+	if (session->connp->geomtype == NULL)
+	{
+		/* type is not cached, get it */
+		if (checkerr(
+			OCITypeByName(session->envp->envhp, session->envp->errhp, session->connp->svchp,
+				(const oratext *)"MDSYS", 5, (const oratext *)"SDO_GEOMETRY", 12, NULL, 0,
+				OCI_DURATION_SESSION, OCI_TYPEGET_HEADER,
+				&session->connp->geomtype), (dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"Error getting type MDSYS.SDO_GEOMETRY",
+				oraMessage);
+		}
+	}
+
+	return session->connp->geomtype;
 }
