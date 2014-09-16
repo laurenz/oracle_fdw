@@ -10,7 +10,6 @@
 #include <oci.h>
 
 #include <string.h>
-#include <assert.h>
 
 #include "oracle_fdw.h"
 
@@ -34,6 +33,16 @@
 #define WKBSRIDFLAG 0x20000000
 #define WKBZOFFSET  0x80000000
 #define WKBMOFFSET  0x40000000
+
+#define _QUOTE(x) #x
+#define QUOTE(x) _QUOTE(x)
+#ifndef NDEBUG
+#   define ORA_ASSERT( expr ) \
+    ((expr) ? (void)assertionFailed( __FILE__":"QUOTE(__LINE__)" assertion ("#expr") failed" ) : (void)0 )
+#else
+#   define ORA_ASSERT( expr ) ((void(0))
+#endif
+
 
 /*
  * Structures needed for managing the MDSYS.SDO_GEOMETRY Oracle type.
@@ -108,6 +117,15 @@ const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char 
 const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data);
 void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
 void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
+unsigned char indianess(void);
+int assertionFailed(const char * msg);
+
+int assertionFailed(const char * msg)
+{
+    oracleError( FDW_ERROR, msg );
+    return 0;
+}
+
 
 unsigned char indianess(void)
 {
@@ -129,11 +147,11 @@ unsigned char indianess(void)
  */
 ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data)
 {
-	const char *data = ewkb_data;
+    const char *data = ewkb_data;
     unsigned type = UNKNOWNTYPE;
     ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
     
-    assert( *data == indianess() );
+    ORA_ASSERT( *data == indianess() );
 
     ++data;
 
@@ -209,11 +227,11 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
     case MULTIPOINTTYPE:   data = setMultiPoint(session, geom, data); break;
     case MULTILINETYPE:    data = setMultiLine(session, geom, data); break;
     case MULTIPOLYGONTYPE: data = setMultiPolygon(session, geom, data); break;
-    default: assert(0);
+    default: ORA_ASSERT(0);
     }
 
     // check that we reached the end of input data
-    assert( data - ewkb_data == ewkb_length );
+    ORA_ASSERT( data - ewkb_data == ewkb_length );
 
     return geom;
 }
@@ -225,6 +243,7 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
 unsigned int
 oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 {
+    oracleError(FDW_ERROR, "here\n");
     switch (ewkbType(session, geom)) 
     {
     	case POINTTYPE:              return ewkbHeaderLen(session, geom) + ewkbPointLen(session, geom);
@@ -319,7 +338,7 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
 {
     const unsigned wkbType =  *((unsigned *)data) & 0x0FFFFFFF;
     int gtype = *((unsigned *)data) & WKBZOFFSET ? 3000 : 2000;
-    assert(! (*((unsigned *)data) & WKBMOFFSET )); // M not supported
+    ORA_ASSERT(! (*((unsigned *)data) & WKBMOFFSET )); // M not supported
     switch (wkbType)
     {
     case POINTTYPE:        gtype += 1; break;
@@ -329,7 +348,7 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
     case MULTIPOINTTYPE:   gtype += 5; break;
     case MULTILINETYPE:    gtype += 6; break;
     case MULTIPOLYGONTYPE: gtype += 7; break;
-    default: assert(0);
+    default: ORA_ASSERT(0);
     }
 
     geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
