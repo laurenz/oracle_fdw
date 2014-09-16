@@ -243,7 +243,6 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
 unsigned int
 oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 {
-    oracleError(FDW_ERROR, "here\n");
     switch (ewkbType(session, geom)) 
     {
     	case POINTTYPE:              return ewkbHeaderLen(session, geom) + ewkbPointLen(session, geom);
