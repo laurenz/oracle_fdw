@@ -4379,16 +4379,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		}
 
 		/* fill the TupleSlot with the data (after conversion if necessary) */
-		if (pgtype == BYTEAOID)
-		{
-			/* binary columns are not converted */
-			bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
-			memcpy(VARDATA(result), value, value_len);
-			SET_VARSIZE(result, value_len + VARHDRSZ);
-
-			values[j] = PointerGetDatum(result);
-		}
-		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
+		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
 		{
 			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
 			bytea *result = NULL;
@@ -4413,6 +4404,15 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 
 			/* free the storage for the object */
 			oracleGeometryFree(fdw_state->session, geom);
+		}
+		else if (pgtype == BYTEAOID)
+		{
+			/* binary columns are not converted */
+			bytea *result = (bytea *)palloc(value_len + VARHDRSZ);
+			memcpy(VARDATA(result), value, value_len);
+			SET_VARSIZE(result, value_len + VARHDRSZ);
+
+			values[j] = PointerGetDatum(result);
 		}
 		else
 		{
