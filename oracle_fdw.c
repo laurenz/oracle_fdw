@@ -4402,8 +4402,13 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			}
 			else
 			{
+                            char msg[1000];
+
 				result = (bytea *)palloc(value_len + VARHDRSZ);
+                                sprintf(msg, "VARHDRSZ %d", VARHDRSZ);
+                                oracleDebug2(msg); 
 				oracleFillEWKB(fdw_state->session, geom, VARDATA(result));
+                                
 				SET_VARSIZE(result, value_len + VARHDRSZ);
 			}
 

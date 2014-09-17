@@ -397,13 +397,12 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
 
 
 /* Header contains:
- * - char indianess 0/1 -> big/little
- * - unsigned type, with additionnal flag to know if srid is specified
- * - unsigned srid, IF NEEDED
+ * - srid : 3 bytes
+ * - flags : 1 byte
  */
 unsigned ewkbHeaderLen(oracleSession *session, ora_geometry *geom)
 {
-    return 1 + sizeof(unsigned) + ( 0 != ewkbSrid(session, geom) ? sizeof(unsigned) : 0 );
+    return 4 + sizeof(unsigned);
 }
 
 char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
@@ -413,18 +412,16 @@ char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
     if (srid) wkbType |= WKBSRIDFLAG;
     if (3 == ewkbDimension(session, geom)) wkbType |= WKBZOFFSET;
 
-    ORA_ASSERT( indianess() == 1);
-    dest[0] = indianess() ;
-    dest += 1;
+    //ORA_ASSERT( indianess() == 1);
+    //dest[0] = indianess() ;
+    //dest += 1;
 
+    memcpy(dest, &srid, sizeof(unsigned));
+    dest += 3;
+    memcpy(dest, &srid, sizeof(unsigned));
+    dest += 1;
     memcpy(dest, &wkbType, sizeof(unsigned));
     dest += sizeof(unsigned);
-
-    if ( 0 != srid ) 
-    {
-        memcpy(dest, &srid, sizeof(unsigned));
-        dest += sizeof(unsigned);
-    }
     return dest;
 }
 
@@ -477,11 +474,17 @@ const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data
 
 unsigned ewkbPointLen(oracleSession *session, ora_geometry *geom)
 {
-    return sizeof(double)*ewkbDimension(session, geom);
+    return sizeof(unsigned) + sizeof(double)*ewkbDimension(session, geom);
 }
 
 char *ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 {
+    unsigned nbPt = (geom->indicator->sdo_point.x == OCI_IND_NULL
+                  && geom->indicator->sdo_point.y == OCI_IND_NULL
+                  && geom->indicator->sdo_point.z == OCI_IND_NULL) ? 0 : 1;
+    memcpy(dest, &nbPt, sizeof(unsigned));
+    dest += sizeof(unsigned);
+
     oracleDebug2("oracle_fdw: ewkbPointFill");
     if (geom->indicator->sdo_point.x == OCI_IND_NOTNULL)
         OCINumberToReal( session->envp->errhp,
