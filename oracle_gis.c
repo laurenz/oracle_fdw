@@ -117,7 +117,6 @@ static const char *setMultiLine(oracleSession *session, ora_geometry *geom, cons
 static const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data);
 static void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
 static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
-static unsigned char endianess(void);
 static int assertionFailed(const char * msg);
 char *doubleFill(double x, char * dest);
 char *unsignedFill(unsigned i, char * dest);
@@ -143,18 +142,6 @@ int assertionFailed(const char * msg)
     return 0;
 }
 
-/*
- * endianess
- * 		Return 1 for "little endian", 0 for "big endian".
- */
-unsigned char endianess(void)
-{
-	ub2 shortval;
-	unsigned char *byte = (unsigned char *)&shortval;
-	memcpy(byte, "\x01\x00", 2);
-	return(shortval == 1 ? 1 : 0);
-}
-
 
 /*
  * ewkbToGeom
@@ -166,11 +153,9 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
     const char *data = ewkb_data;
     unsigned type = UNKNOWNTYPE;
     ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
+
+    ORA_ASSERT(0); // TODO: fix the pg->ora conversion
     
-    ORA_ASSERT( *data == endianess() );
-
-    ++data;
-
     data = setType(session, geom, data);
     data = setSrid(session, geom, data);
 
@@ -789,16 +774,12 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
 
     for (i=0, j=0; i < numPolygon; i++)
     {
-        char msg[1000];
         unsigned end, k;
         unsigned numRings = 1;
         /* move j to the next ext ring, or the end */
         for (j++; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++, numRings++);
         dest = unsignedFill(POLYGONTYPE, dest);
         dest = unsignedFill(numRings, dest);
-
-        sprintf(msg, "polygon %d has %d rings (j=%d/%d)", i, numRings, j, totalNumRings);
-        oracleDebug2(msg);
 
         /* reset j to be on the exterior ring of the current polygon 
          * and output rings number of points */
@@ -810,8 +791,6 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
                 : elemInfo(session, geom, (j+1)*3) - 1;
             const unsigned numPoints = (coord_e - coord_b) / dimension;
             dest = unsignedFill(numPoints, dest);
-            sprintf(msg, "rings %d %d -> %d (total %d)", j, coord_b/dimension, coord_e/dimension, numC/dimension );
-            oracleDebug2(msg);
         }
 
         if (numRings%2) dest = unsignedFill(0, dest); /* padding */
