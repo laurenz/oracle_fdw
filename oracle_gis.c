@@ -108,18 +108,18 @@ static char *ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char 
 static unsigned ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom);
 static char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest);
 
-const char *setType(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setPoint(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setLine(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char *data);
-const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data);
-void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
-void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
-unsigned char indianess(void);
-int assertionFailed(const char * msg);
+static const char *setType(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setPoint(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setLine(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data);
+static void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
+static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
+static unsigned char endianess(void);
+static int assertionFailed(const char * msg);
 
 int assertionFailed(const char * msg)
 {
@@ -127,17 +127,16 @@ int assertionFailed(const char * msg)
     return 0;
 }
 
-
-unsigned char indianess(void)
+/*
+ * endianess
+ * 		Return 1 for "little endian", 0 for "big endian".
+ */
+unsigned char endianess(void)
 {
-    const char big = 0;
-    const char little = 1;
-    union {
-        unsigned i;
-        char c[sizeof(unsigned)];
-    } bint = {0x01020304};
-
-    return bint.c[0] == 1 ? big : little; 
+	ub2 shortval;
+	unsigned char *byte = (unsigned char *)&shortval;
+	memcpy(byte, "\x01\x00", 2);
+	return(shortval == 1 ? 1 : 0);
 }
 
 
@@ -152,7 +151,7 @@ ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char 
     unsigned type = UNKNOWNTYPE;
     ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
     
-    ORA_ASSERT( *data == indianess() );
+    ORA_ASSERT( *data == endianess() );
 
     ++data;
 
@@ -397,7 +396,7 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
 
 
 /* Header contains:
- * - char indianess 0/1 -> big/little
+ * - char endianess 0/1 -> big/little
  * - unsigned type, with additionnal flag to know if srid is specified
  * - unsigned srid, IF NEEDED
  */
@@ -413,8 +412,8 @@ char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
     if (srid) wkbType |= WKBSRIDFLAG;
     if (3 == ewkbDimension(session, geom)) wkbType |= WKBZOFFSET;
 
-    ORA_ASSERT( indianess() == 1);
-    dest[0] = indianess() ;
+    ORA_ASSERT( endianess() == 1);
+    dest[0] = endianess() ;
     dest += 1;
 
     memcpy(dest, &wkbType, sizeof(unsigned));
