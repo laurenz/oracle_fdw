@@ -396,34 +396,28 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
 
 
 /* Header contains:
- * - char endianess 0/1 -> big/little
- * - unsigned type, with additionnal flag to know if srid is specified
- * - unsigned srid, IF NEEDED
+ * - srid : 3 bytes
+ * - flags : 1 byte
  */
 unsigned ewkbHeaderLen(oracleSession *session, ora_geometry *geom)
 {
-    return 1 + sizeof(unsigned) + ( 0 != ewkbSrid(session, geom) ? sizeof(unsigned) : 0 );
+    return sizeof(unsigned);
 }
 
 char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-    unsigned wkbType = ewkbType(session, geom);
-    unsigned srid = ewkbSrid(session, geom);
-    if (srid) wkbType |= WKBSRIDFLAG;
-    if (3 == ewkbDimension(session, geom)) wkbType |= WKBZOFFSET;
+    const unsigned srid= ewkbSrid(session, geom);
+    const uint8_t flags = ((3 == ewkbDimension(session, geom) ) ? 0x02 : 0x00 );
+    uint8_t s[3];
 
-    ORA_ASSERT( endianess() == 1);
-    dest[0] = endianess() ;
+    s[0] = (srid & 0x001F0000) >> 16;
+    s[1] = (srid & 0x0000FF00) >> 8;
+    s[2] = (srid & 0x000000FF);
+
+    memcpy(dest, s, 3);
+    dest += 3;
+    memcpy(dest, &flags, 1);
     dest += 1;
-
-    memcpy(dest, &wkbType, sizeof(unsigned));
-    dest += sizeof(unsigned);
-
-    if ( 0 != srid ) 
-    {
-        memcpy(dest, &srid, sizeof(unsigned));
-        dest += sizeof(unsigned);
-    }
     return dest;
 }
 
@@ -476,11 +470,22 @@ const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data
 
 unsigned ewkbPointLen(oracleSession *session, ora_geometry *geom)
 {
-    return sizeof(double)*ewkbDimension(session, geom);
+    return 2*sizeof(unsigned) + sizeof(double)*ewkbDimension(session, geom);
 }
 
 char *ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 {
+    const unsigned type = POINTTYPE;
+    const unsigned numPoints = 
+        (geom->indicator->sdo_point.x == OCI_IND_NULL
+        && geom->indicator->sdo_point.y == OCI_IND_NULL
+        && geom->indicator->sdo_point.z == OCI_IND_NULL) ? 0 : 1;
+
+    memcpy(dest, &type, sizeof(unsigned));
+    dest += sizeof(unsigned);
+    memcpy(dest, &numPoints, sizeof(unsigned));
+    dest += sizeof(unsigned);
+
     oracleDebug2("oracle_fdw: ewkbPointFill");
     if (geom->indicator->sdo_point.x == OCI_IND_NOTNULL)
         OCINumberToReal( session->envp->errhp,
@@ -535,16 +540,20 @@ const char *setPoint(oracleSession *session, ora_geometry *geom, const char *dat
 
 unsigned ewkbLineLen(oracleSession *session, ora_geometry *geom)
 {
-    return sizeof(unsigned) + sizeof(double)*numCoord(session, geom);
+    return 2*sizeof(unsigned) + sizeof(double)*numCoord(session, geom);
 }
 
 char *ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-    const unsigned num = numCoord(session, geom);
+    const unsigned numC = numCoord(session, geom);
+    const unsigned numPoints = numC / ewkbDimension(session, geom);
     unsigned i;
-    memcpy(dest, &num, sizeof(unsigned));
+    const unsigned type = LINETYPE;
+    memcpy(dest, &type, sizeof(unsigned));
     dest += sizeof(unsigned);
-    for (i=0; i<num; i++)
+    memcpy(dest, &numPoints, sizeof(unsigned));
+    dest += sizeof(unsigned);
+    for (i=0; i<numC; i++)
     {
         const double x = coord(session, geom, i);
         memcpy(dest, &x, sizeof(double));
@@ -573,8 +582,9 @@ const char *setLine(oracleSession *session, ora_geometry *geom, const char *data
 unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 {
     const unsigned numRings = numElemInfo(session, geom)/3;
-    /* there is the number of rings, and, for each ring the number of points */ 
-    return (numRings+1)*sizeof(unsigned)
+    /* there is the number of rings, and, for each ring the number of points */
+    /* numRings%2 is there for padding */
+    return (numRings+2+numRings%2)*sizeof(unsigned)
         + sizeof(double)*numCoord(session, geom);
 }
 
@@ -589,7 +599,6 @@ char *ringFill(oracleSession *session, ora_geometry *geom, char * dest, unsigned
         : elemInfo(session, geom, (ringIdx+1)*3) - 1;
     const unsigned numPoints = (coord_e - coord_b) / dimension;
     unsigned j;
-
     memcpy(dest, &numPoints, sizeof(unsigned));
     dest += sizeof(unsigned);
 
@@ -629,25 +638,60 @@ const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *d
 
 char *ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
+    const unsigned dimension = ewkbDimension(session, geom);
     const unsigned numRings = numElemInfo(session, geom)/3;
+    const unsigned numC = numCoord(session, geom);
     unsigned i;
+    const unsigned type = POLYGONTYPE;
+    memcpy(dest, &type, sizeof(unsigned));
+    dest += sizeof(unsigned);
+
     memcpy(dest, &numRings, sizeof(unsigned));
     dest += sizeof(unsigned);
+
     for (i=0; i<numRings; i++)
-        dest = ringFill(session, geom, dest, i);
+    {
+        const unsigned coord_b = elemInfo(session, geom, i*3) - 1; 
+        const unsigned coord_e = i+1 == numRings
+            ? numC
+            : elemInfo(session, geom, (i+1)*3) - 1;
+        const unsigned numPoints = (coord_e - coord_b) / dimension;
+        unsigned j;
+        memcpy(dest, &numPoints, sizeof(unsigned));
+        dest += sizeof(unsigned);
+    }
+
+    /* padding */
+    if ( numRings % 2 != 0 )
+    { 
+        memset(dest, 0, sizeof(unsigned));
+        dest += sizeof(unsigned);
+    }
+
+    for (i=0; i<numC; i++)
+    {
+        const double x = coord(session, geom, i);
+        memcpy(dest, &x, sizeof(double));
+        dest += sizeof(double);
+    }
+
     return dest;
 }
 
 unsigned ewkbMultiPointLen(oracleSession *session, ora_geometry *geom)
 {
-    /* same code as Line */
+    /* same code as Line*/
     return ewkbLineLen(session, geom);
 }
 
 char *ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-    /* same code as Line */
-    return ewkbLineFill(session, geom, dest);
+    /* same code as Line except for type*/
+    const char * orig = dest;
+    const unsigned type = MULTIPOINTTYPE;
+    dest = ewkbLineFill(session, geom, dest);
+    memcpy(orig, type, sizeof(unsigned));
+    return orig;
 }
 
 const char *setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
@@ -674,8 +718,12 @@ unsigned ewkbMultiLineLen(oracleSession *session, ora_geometry *geom)
 
 char *ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-    /* same code as Line */
-    return ewkbPolygonFill(session, geom, dest);
+    /* same code as Line except for type*/
+    const char * orig = dest;
+    const unsigned type = MULTILINETYPE;
+    dest = ewkbLineFill(session, geom, dest);
+    memcpy(orig, type, sizeof(unsigned));
+    return dest;
 }
 
 const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char *data)
@@ -713,7 +761,7 @@ unsigned ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 
     /* there is the number of polygons, for each polygon the number of rings and
      * for each ring the number of points */
-    return (1+numPolygon+numRings)*sizeof(unsigned)
+    return (2+numPolygon+numRings)*sizeof(unsigned)
         + sizeof(double)*numCoord(session, geom);
 }
 
@@ -723,6 +771,10 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
     const unsigned totalNumRings = numElemInfo(session, geom)/3;
     unsigned numPolygon = 0;
     unsigned i,j;
+    const unsigned type = MULTIPOLYGONTYPE;
+    memcpy(dest, &type, sizeof(unsigned));
+    dest += sizeof(unsigned);
+
     for (i = 0; i<totalNumRings; i++)
         numPolygon += elemInfo(session, geom, i*3+1) == 1003 ;
     memcpy(dest, &numPolygon, sizeof(unsigned));
