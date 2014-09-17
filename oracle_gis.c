@@ -781,15 +781,15 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
     unsigned numPolygon = 0;
     unsigned i, j;
 
-    const unsigned type = MULTIPOLYGONTYPE;
-    dest = unsignedFill(type, dest);
-
     for (i = 0; i<totalNumRings; i++)
         numPolygon += elemInfo(session, geom, i*3+1) == 1003 ;
+
+    dest = unsignedFill(MULTIPOLYGONTYPE, dest);
     dest = unsignedFill(numPolygon, dest);
 
     for (i=0, j=0; i < numPolygon; i++)
     {
+        char msg[1000];
         unsigned end, k;
         unsigned numRings = 1;
         /* move j to the next ext ring, or the end */
@@ -797,16 +797,21 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
         dest = unsignedFill(POLYGONTYPE, dest);
         dest = unsignedFill(numRings, dest);
 
+        sprintf(msg, "polygon %d has %d rings (j=%d/%d)", i, numRings, j, totalNumRings);
+        oracleDebug2(msg);
+
         /* reset j to be on the exterior ring of the current polygon 
          * and output rings number of points */
         for (end = j, j -= numRings; j<end; j++)
         {
             const unsigned coord_b = elemInfo(session, geom, j*3) - 1; 
-            const unsigned coord_e = j+1 == numRings
+            const unsigned coord_e = j+1 == totalNumRings
                 ? numC
                 : elemInfo(session, geom, (j+1)*3) - 1;
             const unsigned numPoints = (coord_e - coord_b) / dimension;
             dest = unsignedFill(numPoints, dest);
+            sprintf(msg, "rings %d %d -> %d (total %d)", j, coord_b/dimension, coord_e/dimension, numC/dimension );
+            oracleDebug2(msg);
         }
 
         if (numRings%2) dest = unsignedFill(0, dest); /* padding */
@@ -814,7 +819,7 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
         for (end = j, j -= numRings; j<end; j++)
         {
             const unsigned coord_b = elemInfo(session, geom, j*3) - 1; 
-            const unsigned coord_e = j+1 == numRings
+            const unsigned coord_e = j+1 == totalNumRings
                 ? numC
                 : elemInfo(session, geom, (j+1)*3) - 1;
 
