@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "oracle_fdw.h"
 
@@ -317,7 +318,7 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest)
 
 	{
 		char msg[1000];
-		sprintf( msg, " dest - orig = %d, len = %d ",
+		sprintf( msg, " dest - orig = %lu, len = %u ",
 			dest - orig, oracleGetEWKBLen(session, geom) );
 		oracleDebug2(msg);
 	}
@@ -657,7 +658,7 @@ unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 {
 	const unsigned numRings = numElemInfo(session, geom)/3;
 	/* there is the number of rings, and, for each ring the number of points
-	/* numRings%2 is there for padding
+	 * numRings%2 is there for padding
      */
 	return (numRings+2+numRings%2)*sizeof(unsigned)
 		   + sizeof(double)*numCoord(session, geom);
@@ -811,29 +812,30 @@ const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char 
 unsigned ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 {
 	/* polygons are padded, so the size detremination is a bit trickier */
-	const unsigned numRings = numElemInfo(session, geom)/3;
+	const unsigned totalNumRings = numElemInfo(session, geom)/3;
 	unsigned numPolygon = 0;
-	unsigned i, numRingOfCurrentPoly;
+	unsigned i, j;
 	unsigned padding = 0;
-	for (i=0, numRingOfCurrentPoly=0; i<numRings; i++, numRingOfCurrentPoly++)
-	{
-		if (elemInfo(session, geom, i*3+1) == 1003)
-		{
-			if (numRingOfCurrentPoly%2) ++padding;
-			++numPolygon;
-			numRingOfCurrentPoly = 0;
-		}
-	}
-	if (numRingOfCurrentPoly%2) ++padding;
 
+	for (i = 0; i<totalNumRings; i++)
+		numPolygon += elemInfo(session, geom, i*3+1) == 1003 ;
 
-	/* there is the number of polygons, for each polygon the type
+	for (i=0, j=0; i < numPolygon; i++)
+    {
+		unsigned numRings = 1;
+		/* move j to the next ext ring, or the end */
+		for (j++; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++, numRings++);
+		padding += numRings%2;
+
+    }
+
+	/* there is the type and the number of polygons, for each polygon the type
 	 * and number of rings and
 	 * for each ring the number of points and the padding
      */
-	return sizeof(unsigned) +
+	return 2*sizeof(unsigned) +
 		   + numPolygon*(2*sizeof(unsigned))
-		   + (numRings + padding)*(sizeof(unsigned))
+		   + (totalNumRings + padding)*(sizeof(unsigned))
 		   + sizeof(double)*numCoord(session, geom);
 }
 
