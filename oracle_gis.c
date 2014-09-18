@@ -108,7 +108,7 @@ static unsigned ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom);
 static char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest);
 
 static const char *setType(oracleSession *session, ora_geometry *geom, const char *data);
-static const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data);
+static const char *setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setPoint(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setLine(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *data);
@@ -120,6 +120,7 @@ static void appendCoord(oracleSession *session,  ora_geometry *geom, double coor
 static int assertionFailed(const char * msg);
 char *doubleFill(double x, char * dest);
 char *unsignedFill(unsigned i, char * dest);
+void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom);
 
 
 char *doubleFill(double x, char * dest)
@@ -142,83 +143,85 @@ int assertionFailed(const char * msg)
     return 0;
 }
 
+void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom)
+{
+    OCIType * tdo;
+    OCITypeByName(session->envp->envhp, 
+                  session->envp->errhp, 
+                  session->connp->svchp, 
+                  (const oratext *)"MDSYS",
+                  strlen("MDSYS"), 
+                  (const oratext *)"SDO_ORDINATE_ARRAY", 
+                  strlen("SDO_ORDINATE_ARRAY"), 
+                  NULL,
+                  0,
+                  OCI_DURATION_TRANS,
+                  OCI_TYPEGET_ALL,
+                  &tdo );
+    OCIObjectNew( session->envp->envhp, 
+                  session->envp->errhp, 
+                  session->connp->svchp, 
+                  OCI_TYPECODE_VARRAY,
+                  tdo, 
+                  (dvoid *)NULL, 
+                  OCI_DURATION_TRANS,
+                  FALSE, 
+                  (dvoid **)geom->geometry->sdo_ordinates);
+
+    OCITypeByName(session->envp->envhp, 
+                  session->envp->errhp, 
+                  session->connp->svchp, 
+                  (const oratext *)"MDSYS",
+                  strlen("MDSYS"), 
+                  (const oratext *)"SDO_ELEM_INFO_ARRAY", 
+                  strlen("SDO_ELEM_INFO_ARRAY"), 
+                  NULL,
+                  0,
+                  OCI_DURATION_TRANS,
+                  OCI_TYPEGET_ALL,
+                  &tdo );
+    OCIObjectNew( session->envp->envhp, 
+                  session->envp->errhp, 
+                  session->connp->svchp, 
+                  OCI_TYPECODE_VARRAY,
+                  tdo, 
+                  (dvoid *)NULL, 
+                  OCI_DURATION_TRANS,
+                  FALSE, 
+                  (dvoid **)geom->geometry->sdo_elem_info);
+
+    geom->indicator->sdo_ordinates = OCI_IND_NOTNULL;
+    geom->indicator->sdo_elem_info = OCI_IND_NOTNULL;
+}
 
 /*
  * ewkbToGeom
  * 		Creates an Oracle SDO_GEOMETRY from a PostGIS EWKB.
- * 		The result is a palloc'ed structure.
+ * 		The result is a partially palloc'ed structure.
  */
 ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data)
 {
     const char *data = ewkb_data;
-    unsigned type = UNKNOWNTYPE;
-    ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
+    unsigned type;
 
-    ORA_ASSERT(0); // TODO: fix the pg->ora conversion
-    
-    data = setType(session, geom, data);
-    data = setSrid(session, geom, data);
+    ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
+    geom->geometry->sdo_ordinates = NULL;
+    geom->geometry->sdo_elem_info = NULL;
+    geom->indicator->sdo_ordinates = OCI_IND_NULL;
+    geom->indicator->sdo_elem_info = OCI_IND_NULL;
+
+    data = setSridAndFlags(session, geom, data);
+
+    /* we don't move the data pointer, so we can check it in
+     * set functions and reuse the same function 
+     * for collections (i.e. multi*) 
+     */
+    setType(session, geom, data);
 
     type = ewkbType(session, geom);
 
-    // we allocate array except for points
-    if ( type == POINTTYPE )
-    {
-        geom->geometry->sdo_ordinates = NULL;
-        geom->geometry->sdo_elem_info = NULL;
-        geom->indicator->sdo_ordinates = OCI_IND_NULL;
-        geom->indicator->sdo_elem_info = OCI_IND_NULL;
-    }
-    else
-    {
-        OCIType * tdo;
-        OCITypeByName(session->envp->envhp, 
-                      session->envp->errhp, 
-                      session->connp->svchp, 
-                      (const oratext *)"MDSYS",
-                      strlen("MDSYS"), 
-                      (const oratext *)"SDO_ORDINATE_ARRAY", 
-                      strlen("SDO_ORDINATE_ARRAY"), 
-                      NULL,
-                      0,
-                      OCI_DURATION_TRANS,
-                      OCI_TYPEGET_ALL,
-                      &tdo );
-        OCIObjectNew( session->envp->envhp, 
-                      session->envp->errhp, 
-                      session->connp->svchp, 
-                      OCI_TYPECODE_VARRAY,
-                      tdo, 
-                      (dvoid *)NULL, 
-                      OCI_DURATION_TRANS,
-                      FALSE, 
-                      (dvoid **)geom->geometry->sdo_ordinates);
-
-        OCITypeByName(session->envp->envhp, 
-                      session->envp->errhp, 
-                      session->connp->svchp, 
-                      (const oratext *)"MDSYS",
-                      strlen("MDSYS"), 
-                      (const oratext *)"SDO_ELEM_INFO_ARRAY", 
-                      strlen("SDO_ELEM_INFO_ARRAY"), 
-                      NULL,
-                      0,
-                      OCI_DURATION_TRANS,
-                      OCI_TYPEGET_ALL,
-                      &tdo );
-        OCIObjectNew( session->envp->envhp, 
-                      session->envp->errhp, 
-                      session->connp->svchp, 
-                      OCI_TYPECODE_VARRAY,
-                      tdo, 
-                      (dvoid *)NULL, 
-                      OCI_DURATION_TRANS,
-                      FALSE, 
-                      (dvoid **)geom->geometry->sdo_elem_info);
-
-        geom->indicator->sdo_ordinates = OCI_IND_NOTNULL;
-        geom->indicator->sdo_elem_info = OCI_IND_NOTNULL;
-    }
+    /* we allocate array except for points */
+    if ( type != POINTTYPE ) oracleAllocOrdinatesAndElemInfo(session, geom);
 
     switch ( type ) 
     {
@@ -360,12 +363,13 @@ unsigned ewkbType(oracleSession *session, ora_geometry *geom)
     }
 }
 
-// srid indicator is also set
 const char *setType(oracleSession *session, ora_geometry *geom, const char * data)
 {
-    const unsigned wkbType =  *((unsigned *)data) & 0x0FFFFFFF;
-    int gtype = *((unsigned *)data) & WKBZOFFSET ? 3000 : 2000;
-    ORA_ASSERT(! (*((unsigned *)data) & WKBMOFFSET )); // M not supported
+    const unsigned wkbType =  *((unsigned *)data);
+    unsigned gtype = ewkbType(session, geom);
+
+    data += sizeof(unsigned);
+
     switch (wkbType)
     {
     case POINTTYPE:        gtype += 1; break;
@@ -386,11 +390,6 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
         OCI_NUMBER_SIGNED,
         &(geom->geometry->sdo_gtype));
 
-    geom->indicator->sdo_srid =  *((unsigned *)data) &  WKBSRIDFLAG
-        ? OCI_IND_NOTNULL
-        : OCI_IND_NULL;
-
-    data += sizeof(unsigned);
     return data;
 }
 
@@ -408,7 +407,7 @@ unsigned ewkbHeaderLen(oracleSession *session, ora_geometry *geom)
 char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
     const unsigned srid= ewkbSrid(session, geom);
-    const uint8_t flags = ((3 == ewkbDimension(session, geom) ) ? 0x02 : 0x00 );
+    const uint8_t flags = ((3 == ewkbDimension(session, geom) ) ? 0x01 : 0x00 );
     uint8_t s[3];
 
     s[0] = (srid & 0x001F0000) >> 16;
@@ -452,10 +451,25 @@ unsigned ewkbSrid(oracleSession *session, ora_geometry *geom)
     return srid;
 }
 
-const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data)
+const char *setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 {
+    unsigned srid = 0;
+    unsigned gtype = 0;
+
+    srid |= ((uint8_t)data[0]) << 16;
+    srid |= ((uint8_t)data[1]) << 8;
+    srid |= ((uint8_t)data[2]);
+    /* Only the first 21 bits are set. Slide up and back to pull
+       the negative bits down, if we need them. */
+    srid = (srid<<11)>>11;
+
+    data += 3;
+
     /* TODO convert oracle->postgis SRID when needed*/
-    const int srid = *((unsigned *)data);
+    
+
+    geom->indicator->sdo_srid =  srid !=0 ? OCI_IND_NOTNULL : OCI_IND_NULL;
+    
     if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
     {
         OCINumberFromInt (
@@ -464,8 +478,22 @@ const char *setSrid(oracleSession *session, ora_geometry *geom, const char *data
             (uword) sizeof (unsigned),
             OCI_NUMBER_SIGNED,
             &(geom->geometry->sdo_srid));
-        data += sizeof(unsigned);
     }
+
+    gtype = (((uint8_t)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
+    ORA_ASSERT(! (((uint8_t)data[0]) & 0x02 )); // M not supported
+
+    data += 1;
+
+    geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
+
+    OCINumberFromInt (
+        session->envp->errhp,
+        (dvoid *) &gtype,
+        (uword) sizeof (int),
+        OCI_NUMBER_SIGNED,
+        &(geom->geometry->sdo_gtype));
+
     return data;
 }
 
@@ -512,6 +540,11 @@ char *ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 
 const char *setPoint(oracleSession *session, ora_geometry *geom, const char *data)
 {
+    ORA_ASSERT( *((unsigned *)data) == POINTTYPE );
+    data += sizeof(unsigned);
+    ORA_ASSERT( *( (unsigned *)data ) == 1 );
+    data += sizeof(unsigned);
+
     geom->indicator->sdo_point.x = OCI_IND_NOTNULL;
     OCINumberFromReal( session->envp->errhp,
                      (dvoid *)data,
@@ -554,18 +587,21 @@ char *ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 
 const char *setLine(oracleSession *session, ora_geometry *geom, const char *data)
 {
-    unsigned i;
-    const unsigned n = *((unsigned *)data) * ewkbDimension(session, geom);
+    unsigned i, n;
+    ORA_ASSERT( *((unsigned *)data) == LINETYPE );
     data += sizeof(unsigned);
+    n = *((unsigned *)data) * ewkbDimension(session, geom);
+    data += sizeof(unsigned);
+    
+    appendElemInfo(session, geom, numCoord(session, geom) + 1); // start index + 1
+    appendElemInfo(session, geom, 2); // SDO_ETYPE linestring
+    appendElemInfo(session, geom, 1); // SDO_INTERPRETATION straight line segments
 
     for (i=0; i<n; i++)
     {
         appendCoord(session, geom, *((double *)data));
         data += sizeof(double);
     }
-    appendElemInfo(session, geom, 1); // start index + 1
-    appendElemInfo(session, geom, 2); // SDO_ETYPE linestring
-    appendElemInfo(session, geom, 1); // SDO_INTERPRETATION straight line segments
     return data;
 }
 
@@ -580,14 +616,20 @@ unsigned ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 
 const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 {
-    unsigned r, i;
-    const unsigned dim = ewkbDimension(session, geom);
-    const unsigned numRings = *((unsigned *)data);
+    unsigned r, i, numRings;
+    const unsigned dimension = ewkbDimension(session, geom);
+    const char * ringSizeData;
+
+    ORA_ASSERT( *((unsigned *)data) == POLYGONTYPE );
     data += sizeof(unsigned);
+
+    ringSizeData = data;
+    numRings = *((unsigned *)data);
+    data += (numRings+1+numRings%2)*sizeof(unsigned);
     for (r=0; r<numRings; r++)
     {
-        const unsigned n= *((unsigned *)data) * dim;
-        data += sizeof(unsigned);
+        const unsigned n= *((unsigned *)ringSizeData) * dimension;
+        ringSizeData += sizeof(unsigned);
 
         appendElemInfo(session, geom, numCoord(session, geom) + 1); // start index + 1
         appendElemInfo(session, geom, r == 0 ? 1003 : 2003); // SDO_ETYPE ext ring or int ring
@@ -706,25 +748,13 @@ char *ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 
 const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char *data)
 {
-    unsigned r, i;
-    const unsigned dim = ewkbDimension(session, geom);
-    const unsigned numLines = *((unsigned *)data);
+    unsigned r, numLines;
+    ORA_ASSERT( *((unsigned *)data) == MULTILINETYPE );
     data += sizeof(unsigned);
-    for (r=0; r<numLines; r++)
-    {
-        const unsigned n= *((unsigned *)data) * dim;
-        data += sizeof(unsigned);
+    numLines = *((unsigned *)data);
+    data += sizeof(unsigned);
 
-        appendElemInfo(session, geom, numCoord(session, geom) + 1); // start index + 1
-        appendElemInfo(session, geom, 2); // SDO_ETYPE line
-        appendElemInfo(session, geom, 1); // SDO_INTERPRETATION straight line segments
-        
-        for (i=0; i<n; i++)
-        {
-            appendCoord(session, geom, *((double *)data));
-            data += sizeof(double);
-        }
-    }
+    for (r=0; r<numLines; r++) data = setLine(session, geom, data);
 
     return data;
 }
@@ -810,30 +840,14 @@ char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * de
 
 const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 {
-    unsigned p, r, i;
-    const unsigned dim = ewkbDimension(session, geom);
-    const unsigned numPolygons = *((unsigned *)data);
+    unsigned p, numPolygons;
 
-    for (p=0; p<numPolygons; p++)
-    {
-        const unsigned numRings = *((unsigned *)data);
-        data += sizeof(unsigned);
-        for (r=0; r<numRings; r++)
-        {
-            const unsigned n= *((unsigned *)data) * dim;
-            data += sizeof(unsigned);
+    ORA_ASSERT( *((unsigned *)data) == MULTIPOLYGONTYPE );
+    data += sizeof(unsigned);
+    numPolygons = *((unsigned *)data);
+    data += sizeof(unsigned);
 
-            appendElemInfo(session, geom, numCoord(session, geom) + 1); // start index + 1
-            appendElemInfo(session, geom, r == 0 ? 1003 : 2003); // SDO_ETYPE ext ring or int ring
-            appendElemInfo(session, geom, 1); // SDO_INTERPRETATION straight line segments
-            
-            for (i=0; i<n; i++)
-            {
-                appendCoord(session, geom, *((double *)data));
-                data += sizeof(double);
-            }
-        }
-    }
+    for (p=0; p<numPolygons; p++) data = setPolygon(session, geom, data);
 
     return data;
 }
