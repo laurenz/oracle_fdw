@@ -75,7 +75,6 @@ static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
 static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value);
-static OCIType *getGeometryType(oracleSession *session);
 
 /*
  * oracleGetSession
@@ -579,6 +578,9 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 	/* free handles */
 	while (connp->handlelist != NULL)
 		freeHandle(connp->handlelist->handlep, connp);
+
+	/* free objects in cache (might be left behind in case of errors) */
+	(void)OCICacheFree(envp->envhp, envp->errhp, NULL);
 
 	/* commit or rollback */
 	if (is_commit)
@@ -1670,7 +1672,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 
 					/* define the result for the named type */
 					if (checkerr(
-						OCIDefineObject(defnhp, session->envp->errhp, getGeometryType(session),
+						OCIDefineObject(defnhp, session->envp->errhp, oracleGetGeometryType(session),
 							(void **)&geom->geometry, 0, (void **)&geom->indicator, 0),
 							session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
@@ -1898,6 +1900,11 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					value_len = sizeof(OCILobLocator *);
 					value_type = SQLT_CLOB;
 					break;
+				case BIND_GEOMETRY:
+					value = param->value;
+					value_len = 0;
+					value_type = SQLT_NTY;
+					break;
 				case BIND_OUTPUT:
 					value = NULL;
 					value_len = oraTable->cols[param->colnum]->val_size;
@@ -1922,6 +1929,23 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIBindByName failed to bind parameter",
 				oraMessage);
+		}
+
+		/* for SDO_GEOMETRY parameters, bind the actual objects */
+		if (param->bindType == BIND_GEOMETRY)
+		{
+			ora_geometry *geom = (ora_geometry *)value;
+
+/* XXX the length cannot be NULLs */
+			if (checkerr(
+				OCIBindObject((OCIBind *)param->bindh, session->envp->errhp,
+					oracleGetGeometryType(session), (void **)&geom->geometry, NULL, (void **)&geom->indicator, NULL),
+				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+			{
+				oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+					"error executing query: OCIBindObject failed to bind geometry parameter",
+					oraMessage);
+			}
 		}
 
 		/* for output parameters, define callbacks that provide storage space */
@@ -1991,14 +2015,19 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 
 	if (rowcount > 0)
 	{
-		/*
-		 * For LOB columns in DML statements we have added an empty LOB above.
-		 * Now we have to write the actual contents.
-		 */
 		for (param=paramList; param; param=param->next)
+		{
+			/*
+			 * For LOB columns in DML statements we have added an empty LOB above.
+			 * Now we have to write the actual contents.
+			 */
 			if ((param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
 					&& oraTable->cols[param->colnum]->val_null != -1)
 				oracleWriteLob(session, *((OCILobLocator **)oraTable->cols[param->colnum]->val), param->value);
+			/* free geometry objects */
+			if (param->bindType == BIND_GEOMETRY)
+				oracleGeometryFree(session, (ora_geometry *)param->value);
+		}
 	}
 
 	return rowcount;
@@ -2176,22 +2205,28 @@ oracleServerVersion(oracleSession *session, int *major, int *minor, int *update,
 }
 
 /*
- * oracleGeometryFree
- * 		Free the memory allocated with a geometry object.
+ * oracleGetGeometryType
+ * 		Get the MDSYS.DSO_GEOMETRY type.
+ * 		The result is cached in the session' connEntry.
  */
-void
-oracleGeometryFree(oracleSession *session, ora_geometry *geom)
+void *oracleGetGeometryType(oracleSession *session)
 {
-	if (geom->geometry == NULL)
+	if (session->connp->geomtype == NULL)
 	{
-		if (geom->indicator != NULL)
-			(void)OCIObjectFree(session->envp->envhp, session->envp->errhp, geom->indicator, 0);
+		/* type is not cached, get it */
+		if (checkerr(
+			OCITypeByName(session->envp->envhp, session->envp->errhp, session->connp->svchp,
+				(const oratext *)"MDSYS", 5, (const oratext *)"SDO_GEOMETRY", 12, NULL, 0,
+				OCI_DURATION_SESSION, OCI_TYPEGET_HEADER,
+				&session->connp->geomtype), (dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"Error getting type MDSYS.SDO_GEOMETRY",
+				oraMessage);
+		}
 	}
-	else
-		(void)OCIObjectFree(session->envp->envhp, session->envp->errhp, geom->geometry, 0);
 
-	geom->geometry = NULL;
-	geom->indicator = NULL;
+	return session->connp->geomtype;
 }
 
 /*
@@ -2677,29 +2712,4 @@ oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
 			"error writing data: OCILobClose failed to close LOB",
 			oraMessage);
 	}
-}
-
-/*
- * getGeometryType
- * 		Get the MDSYS.DSO_GEOMETRY type.
- * 		The result is cached in the session' connEntry.
- */
-OCIType *getGeometryType(oracleSession *session)
-{
-	if (session->connp->geomtype == NULL)
-	{
-		/* type is not cached, get it */
-		if (checkerr(
-			OCITypeByName(session->envp->envhp, session->envp->errhp, session->connp->svchp,
-				(const oratext *)"MDSYS", 5, (const oratext *)"SDO_GEOMETRY", 12, NULL, 0,
-				OCI_DURATION_SESSION, OCI_TYPEGET_HEADER,
-				&session->connp->geomtype), (dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"Error getting type MDSYS.SDO_GEOMETRY",
-				oraMessage);
-		}
-	}
-
-	return session->connp->geomtype;
 }

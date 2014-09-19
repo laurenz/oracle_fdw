@@ -133,6 +133,7 @@ typedef enum {
 	BIND_CLOB,
 	BIND_LONG,
 	BIND_LONGRAW,
+	BIND_GEOMETRY,
 	BIND_OUTPUT
 } oraBindType;
 
@@ -186,7 +187,7 @@ extern int oracleFetchNext(oracleSession *session);
 extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
 extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
-extern void oracleGeometryFree(oracleSession *session, ora_geometry *geom);
+extern void *oracleGetGeometryType(oracleSession *session);
 
 /*
  * functions defined in oracle_fdw.c
@@ -207,6 +208,7 @@ extern void oracleDebug2(const char *message);
  * functions defined in oracle_gis.c
  */
 
-extern ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data);
+extern ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data);
 extern unsigned int oracleGetEWKBLen(oracleSession *session, ora_geometry *geom);
 extern char *oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest);
+extern void oracleGeometryFree(oracleSession *session, ora_geometry *geom);

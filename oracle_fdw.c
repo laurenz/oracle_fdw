@@ -240,7 +240,7 @@ static bool optionIsTrue(const char *value);
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
 static void addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
-static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable);
+static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable, oracleSession *session);
 #endif  /* WRITE_API */
 static void transactionCallback(XactEvent event, void *arg);
 static void exitHook(int code, Datum arg);
@@ -1600,7 +1600,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
 
 	/* extract the values from the slot and store them in the parameters */
-	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable);
+	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable, fdw_state->session);
 
 	/* execute the INSERT statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
@@ -1644,7 +1644,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
 
 	/* extract the values from the slot and store them in the parameters */
-	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable);
+	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable, fdw_state->session);
 
 	/* execute the UPDATE statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
@@ -1689,7 +1689,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
 
 	/* extract the values from the slot and store them in the parameters */
-	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable);
+	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable, fdw_state->session);
 
 	/* execute the DELETE statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
@@ -4009,6 +4009,9 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
 					errmsg("cannot update or insert BFILE column in Oracle foreign table")));
+		case ORA_TYPE_GEOMETRY:
+			param->bindType = BIND_GEOMETRY;
+			break;
 		default:
 			param->bindType = BIND_STRING;
 	}
@@ -4026,7 +4029,7 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
  * 		"newslot" contains the new values, "oldslot" the old ones.
  */
 void
-setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable)
+setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable, oracleSession *session)
 {
 	struct paramDesc *param;
 	Datum datum;
@@ -4150,6 +4153,21 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 				param->value = palloc(value_len + 4);
 				memcpy(param->value, (const char *)&value_len, 4);
 				memcpy(param->value + 4, VARDATA(datum), value_len);
+				break;
+			case BIND_GEOMETRY:
+				if (isnull)
+				{
+					param->value = (char *)oracleEWKBToGeom(session, 0, NULL);
+				}
+				else
+				{
+					/* detoast it if necessary */
+					datum = (Datum)PG_DETOAST_DATUM(datum);
+
+					/* will allocate objects in the Oracle object cache */
+					param->value = (char *)oracleEWKBToGeom(session, VARSIZE(datum) - VARHDRSZ, VARDATA(datum));
+				}
+				value_len = 0;  /* not used */
 				break;
 			case BIND_OUTPUT:
 				/* unreachable */
@@ -4392,7 +4410,6 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			{
 				result = (bytea *)palloc(value_len + VARHDRSZ);
 				oracleFillEWKB(fdw_state->session, geom, VARDATA(result));
-                                
 				SET_VARSIZE(result, value_len + VARHDRSZ);
 			}
 

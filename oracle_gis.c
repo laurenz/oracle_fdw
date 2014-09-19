@@ -119,9 +119,9 @@ static const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, c
 static void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
 static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
 static int assertionFailed(const char * msg);
-char *doubleFill(double x, char * dest);
-char *unsignedFill(unsigned i, char * dest);
-void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom);
+static char *doubleFill(double x, char * dest);
+static char *unsignedFill(unsigned i, char * dest);
+static void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom);
 
 
 char *doubleFill(double x, char * dest)
@@ -166,7 +166,7 @@ void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom)
 				  tdo,
 				  (dvoid *)NULL,
 				  OCI_DURATION_TRANS,
-				  FALSE,
+				  TRUE,
 				  (dvoid **)geom->geometry->sdo_ordinates);
 
 	OCITypeByName(session->envp->envhp,
@@ -188,7 +188,7 @@ void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom)
 				  tdo,
 				  (dvoid *)NULL,
 				  OCI_DURATION_TRANS,
-				  FALSE,
+				  TRUE,
 				  (dvoid **)geom->geometry->sdo_elem_info);
 
 	geom->indicator->sdo_ordinates = OCI_IND_NOTNULL;
@@ -196,20 +196,42 @@ void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom)
 }
 
 /*
- * ewkbToGeom
+ * oracleEWKBToGeom
  * 		Creates an Oracle SDO_GEOMETRY from a PostGIS EWKB.
  * 		The result is a partially palloc'ed structure.
  */
-ora_geometry *ewkbToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data)
+ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data)
 {
 	const char *data = ewkb_data;
 	unsigned type;
 
 	ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
+	/* allocate a SDO_GEOMETRY object */
+	OCIObjectNew(session->envp->envhp,
+				 session->envp->errhp,
+				 session->connp->svchp,
+				 OCI_TYPECODE_OBJECT,
+				 oracleGetGeometryType(session),
+				 (dvoid *)NULL,
+				 OCI_DURATION_TRANS,
+				 TRUE,
+				 (dvoid **)&geom->geometry);
+	/* get the NULL indicator */
+	OCIObjectGetInd(session->envp->envhp,
+					session->envp->errhp,
+					geom->geometry,
+					(void **)&geom->indicator);
 	geom->geometry->sdo_ordinates = NULL;
 	geom->geometry->sdo_elem_info = NULL;
 	geom->indicator->sdo_ordinates = OCI_IND_NULL;
 	geom->indicator->sdo_elem_info = OCI_IND_NULL;
+
+	/* for NULL data, return an object that is atomically NULL */
+	if (data == NULL)
+	{
+		geom->indicator->_atomic = OCI_IND_NULL;
+		return geom;
+	}
 
 	data = setSridAndFlags(session, geom, data);
 
@@ -326,6 +348,25 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest)
 	ORA_ASSERT( dest - orig == oracleGetEWKBLen(session, geom) );
 
 	return dest;
+}
+
+/*
+ * oracleGeometryFree
+ * 		Free the memory allocated with a geometry object.
+ */
+void
+oracleGeometryFree(oracleSession *session, ora_geometry *geom)
+{
+	if (geom->geometry == NULL)
+	{
+		if (geom->indicator != NULL)
+			(void)OCIObjectFree(session->envp->envhp, session->envp->errhp, geom->indicator, 0);
+	}
+	else
+		(void)OCIObjectFree(session->envp->envhp, session->envp->errhp, geom->geometry, 0);
+
+	geom->geometry = NULL;
+	geom->indicator = NULL;
 }
 
 void appendElemInfo(oracleSession *session, ora_geometry *geom, int info )
@@ -593,6 +634,8 @@ const char *setPoint(oracleSession *session, ora_geometry *geom, const char *dat
 	data += sizeof(unsigned);
 	ORA_ASSERT( *( (unsigned *)data ) == 1 );
 	data += sizeof(unsigned);
+
+	geom->indicator->sdo_point._atomic = OCI_IND_NOTNULL;
 
 	geom->indicator->sdo_point.x = OCI_IND_NOTNULL;
 	OCINumberFromReal( session->envp->errhp,
