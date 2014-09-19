@@ -839,13 +839,25 @@ char *ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest
 
 const char *setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
 {
-	unsigned i;
-	const unsigned n = *((unsigned *)data) * ewkbDimension(session, geom);
+	unsigned i, j, numPoints;
+    const unsigned dimension = ewkbDimension(session, geom);
+
+	ORA_ASSERT( *((unsigned *)data) == MULTIPOINTTYPE );
 	data += sizeof(unsigned);
-	for (i=0; i<n; i++)
+    numPoints = *((unsigned *)data);
+	data += sizeof(unsigned);
+
+	for (i=0; i<numPoints; i++)
 	{
-		appendCoord(session, geom, *((double *)data));
-		data += sizeof(double);
+        ORA_ASSERT( *((unsigned *)data) == POINTTYPE );
+        data += sizeof(unsigned);
+        ORA_ASSERT( *((unsigned *)data) == 1 );
+        data += sizeof(unsigned);
+        for (j=0; j<dimension; j++)
+        {
+            appendCoord(session, geom, *((double *)data));
+            data += sizeof(double);
+        }
 	}
 	appendElemInfo(session, geom, 1); /* start index + 1 */
 	appendElemInfo(session, geom, 1); /* SDO_ETYPE point */
