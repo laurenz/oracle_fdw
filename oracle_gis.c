@@ -831,7 +831,7 @@ char *ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest
 		dest = unsignedFill(POINTTYPE, dest);
 		dest = unsignedFill(1, dest);
 		oracleDebug2("point in multi");
-		for (j=0; j<dim; j++) dest = doubleFill(coord(session, geom, i*3+j), dest);
+		for (j=0; j<dim; j++) dest = doubleFill(coord(session, geom, i*dim+j), dest);
 	}
 
 	return dest;
@@ -1025,10 +1025,16 @@ double coord(oracleSession *session, ora_geometry *geom, unsigned i)
 				   &exists,
 				   (dvoid **)  &oci_number,
 				   (dvoid **)  0);
+    ORA_ASSERT(exists);
 	/* convert the element to double */
 	OCINumberToReal(session->envp->errhp, oci_number,
 					(uword)sizeof(double),
 					(dvoid *)&coord);
+    {
+        char msg[1000];
+        sprintf(msg, "coord from geom %d %f", i, coord);
+        oracleDebug2(msg);
+    }
 	return coord;
 }
 
@@ -1053,6 +1059,7 @@ unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 				   &exists,
 				   (dvoid **)  &oci_number,
 				   (dvoid **)  0);
+    ORA_ASSERT(exists);
 	OCINumberToInt(session->envp->errhp, oci_number,
 				   (uword)sizeof(int),
 				   OCI_NUMBER_UNSIGNED,
