@@ -5,6 +5,6 @@ while read line; do
     n=$(($n+1))
     oraTab="geom_test_"$n
     echo "DROP FOREIGN TABLE IF EXISTS geom_test_$n CASCADE;"
-    echo "CREATE FOREIGN TABLE geom_test_$n (geom GEOMETRY) SERVER orcl OPTIONS (schema 'OSLANDIA', table '${oraTab^^}');"
+    echo "CREATE FOREIGN TABLE geom_test_$n (geom GEOMETRY, gid int OPTIONS (key 'true') NOT NULL) SERVER oradb OPTIONS (schema 'C##OSLANDIA', table '${oraTab^^}');"
     echo "SELECT 'result $n '||ST_AsText(geom) FROM geom_test_$n;"
 done < test_geometries.wkt

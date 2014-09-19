@@ -438,7 +438,14 @@ unsigned ewkbType(oracleSession *session, ora_geometry *geom)
 const char *setType(oracleSession *session, ora_geometry *geom, const char * data)
 {
 	const unsigned wkbType =  *((unsigned *)data);
-	unsigned gtype = ewkbType(session, geom);
+	unsigned gtype;
+
+        OCINumberToInt (
+                session->envp->errhp,
+                &(geom->geometry->sdo_gtype),
+                (uword) sizeof (int),
+                OCI_NUMBER_SIGNED,
+                (dvoid *) &gtype);
 
 	data += sizeof(unsigned);
 
