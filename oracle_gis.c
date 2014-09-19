@@ -440,12 +440,12 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
 	const unsigned wkbType =  *((unsigned *)data);
 	unsigned gtype;
 
-        OCINumberToInt (
-                session->envp->errhp,
-                &(geom->geometry->sdo_gtype),
-                (uword) sizeof (int),
-                OCI_NUMBER_SIGNED,
-                (dvoid *) &gtype);
+	OCINumberToInt (
+			session->envp->errhp,
+			&(geom->geometry->sdo_gtype),
+			(uword) sizeof (int),
+			OCI_NUMBER_SIGNED,
+			(dvoid *) &gtype);
 
 	data += sizeof(unsigned);
 
@@ -473,7 +473,12 @@ const char *setType(oracleSession *session, ora_geometry *geom, const char * dat
 		gtype += 7;
 		break;
 	default:
-		ORA_ASSERT(0);
+		{
+			char msg[1000];
+			sprintf(msg, "unknown postgis geometry type %u", wkbType);
+			oracleDebug2(msg);
+		}
+		ORA_ASSERT(0 && "unknown posgis geometry type");
 	}
 
 	geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
@@ -579,8 +584,17 @@ const char *setSridAndFlags(oracleSession *session, ora_geometry *geom, const ch
 
 	gtype = (((uint8_t)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
 	ORA_ASSERT(! (((uint8_t)data[0]) & 0x02 )); /* M not supported */
+	ORA_ASSERT(! (((uint8_t)data[0]) & 0x08 )); /* geodetic not supported */
 
-	data += 1;
+    if (((uint8_t)data[0]) & 0x04) /* has bbox, offsets */ 
+    {
+        oracleDebug2("geometry has bounding box");
+		data += 1 + 2*(((uint8_t)data[0]) & 0x01 ? 3 : 2)*sizeof(float);
+    }
+    else
+    {
+        data += 1;
+    }
 
 	geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
 
