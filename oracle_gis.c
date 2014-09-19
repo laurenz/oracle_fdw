@@ -226,10 +226,6 @@ ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length,
 					session->envp->errhp,
 					geom->geometry,
 					(void **)&geom->indicator);
-	geom->geometry->sdo_ordinates = NULL;
-	geom->geometry->sdo_elem_info = NULL;
-	geom->indicator->sdo_ordinates = OCI_IND_NULL;
-	geom->indicator->sdo_elem_info = OCI_IND_NULL;
 
 	/* for NULL data, return an object that is atomically NULL */
 	if (data == NULL)
@@ -248,8 +244,8 @@ ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length,
 
 	type = ewkbType(session, geom);
 
-	/* we allocate array except for points */
-	if ( type != POINTTYPE ) oracleAllocOrdinatesAndElemInfo(session, geom);
+	geom->indicator->sdo_ordinates = (type == POINTTYPE) ? OCI_IND_NULL : OCI_IND_NOTNULL;
+	geom->indicator->sdo_elem_info = (type == POINTTYPE) ? OCI_IND_NULL : OCI_IND_NOTNULL;
 
 	switch ( type )
 	{
@@ -757,15 +753,20 @@ const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *d
 	ORA_ASSERT( *((unsigned *)data) == POLYGONTYPE );
 	data += sizeof(unsigned);
 
-	ringSizeData = data;
 	numRings = *((unsigned *)data);
-	data += (numRings+1+numRings%2)*sizeof(unsigned);
+    data += sizeof(unsigned);
+	ringSizeData = data;
+	data += (numRings+numRings%2)*sizeof(unsigned);
 	for (r=0; r<numRings; r++)
 	{
 		const unsigned n= *((unsigned *)ringSizeData) * dimension;
 		ringSizeData += sizeof(unsigned);
+        {
+            char msg[1000];
+            sprintf(msg, "output ring with %d points",*((unsigned *)(ringSizeData-sizeof(unsigned)))); 
+            oracleDebug2(msg);
+        }
 
-        oracleDebug2("output ring");
 
 		appendElemInfo(session, geom, numCoord(session, geom) + 1); /* start index + 1 */
 		appendElemInfo(session, geom, r == 0 ? 1003 : 2003); /* SDO_ETYPE ext ring or int ring */
