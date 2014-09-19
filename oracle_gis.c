@@ -168,6 +168,12 @@ void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom)
 				  OCI_DURATION_TRANS,
 				  TRUE,
 				  (dvoid **)geom->geometry->sdo_ordinates);
+	geom->indicator->sdo_ordinates = OCI_IND_NOTNULL;
+    {
+        char msg[1000];
+        sprintf(msg, "numCoord after array creation: %d", numCoord(session, geom));
+        oracleDebug2(msg);
+    }
 
 	OCITypeByName(session->envp->envhp,
 				  session->envp->errhp,
@@ -191,7 +197,6 @@ void oracleAllocOrdinatesAndElemInfo(oracleSession *session, ora_geometry *geom)
 				  TRUE,
 				  (dvoid **)geom->geometry->sdo_elem_info);
 
-	geom->indicator->sdo_ordinates = OCI_IND_NOTNULL;
 	geom->indicator->sdo_elem_info = OCI_IND_NOTNULL;
 }
 
@@ -271,6 +276,12 @@ ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length,
 	}
 
 	/* check that we reached the end of input data */
+	{
+		char msg[1000];
+		sprintf( msg, " data - ewkb_data = %lu, ewkb_length = %u ",
+			data - ewkb_data, ewkb_length);
+		oracleDebug2(msg);
+	}
 	ORA_ASSERT( data - ewkb_data == ewkb_length );
 
 	return geom;
@@ -378,6 +389,11 @@ void appendElemInfo(oracleSession *session, ora_geometry *geom, int info )
 		(uword) sizeof(int),
 		OCI_NUMBER_SIGNED,
 		&n);
+    {
+        char msg[1000];
+        sprintf(msg, "elem info %d", info);
+        oracleDebug2(msg);
+    }
 
 	OCICollAppend( session->envp->envhp,
 				   session->envp->errhp,
@@ -394,7 +410,11 @@ void appendCoord(oracleSession *session, ora_geometry *geom, double coord )
 		(const dvoid*)&coord,
 		(uword) sizeof(double),
 		&n);
-
+    {
+        char msg[1000];
+        sprintf(msg, "coord %f", coord);
+        oracleDebug2(msg);
+    }
 	OCICollAppend( session->envp->envhp,
 				   session->envp->errhp,
 				   (CONST dvoid*) &n,
@@ -744,6 +764,8 @@ const char *setPolygon(oracleSession *session, ora_geometry *geom, const char *d
 	{
 		const unsigned n= *((unsigned *)ringSizeData) * dimension;
 		ringSizeData += sizeof(unsigned);
+
+        oracleDebug2("output ring");
 
 		appendElemInfo(session, geom, numCoord(session, geom) + 1); /* start index + 1 */
 		appendElemInfo(session, geom, r == 0 ? 1003 : 2003); /* SDO_ETYPE ext ring or int ring */
