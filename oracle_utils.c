@@ -1932,11 +1932,17 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		}
 
 		/* for SDO_GEOMETRY parameters, bind the actual objects */
-		if (param->bindType == BIND_GEOMETRY)
+		if (oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY)
 		{
 			ora_geometry *geom = (ora_geometry *)value;
 
-/* XXX the length cannot be NULLs */
+			/* pre-allocate memory for output parameters */
+			if (param->bindType == BIND_OUTPUT)
+			{
+				geom = (ora_geometry *)oraTable->cols[param->colnum]->val;
+				oracleGeometryAlloc(session, geom);
+			}
+
 			if (checkerr(
 				OCIBindObject((OCIBind *)param->bindh, session->envp->errhp,
 					oracleGetGeometryType(session), (void **)&geom->geometry, NULL, (void **)&geom->indicator, NULL),
@@ -2632,15 +2638,22 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 	{
 		/* for LOBs, data should be written to the LOB locator */
 		*bufpp = *((OCILobLocator **)column->val);
+		*indp = &(column->val_null);
+	}
+	else if (column->oratype == ORA_TYPE_GEOMETRY)
+	{
+		ora_geometry *geom = (ora_geometry *)column->val;
+		*bufpp = geom->geometry;
+		*indp = geom->indicator;
 	}
 	else
 	{
 		/* for other types, data should be written directly to the buffer */
 		*bufpp = column->val;
+		*indp = &(column->val_null);
 	}
 	column->val_len4 = (unsigned int)column->val_size;
 	*alenp = &(column->val_len4);
-	*indp = &(column->val_null);
 	*rcodep = NULL;
 
 	if (*piecep == OCI_ONE_PIECE)
@@ -2661,8 +2674,18 @@ bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp,
 	struct oraColumn *column = (struct oraColumn *)ictxp;
 
 	*piecep = OCI_ONE_PIECE;
-	column->val_null = -1;
-	*indpp = &(column->val_null);
+
+	if (column->oratype == ORA_TYPE_GEOMETRY)
+	{
+		ora_geometry *geom = (ora_geometry *)column->val;
+		*bufpp = geom->geometry;
+		*indpp = geom->indicator;  /* already marked as NULL */
+	}
+	else
+	{
+		column->val_null = -1;
+		*indpp = &(column->val_null);
+	}
 
 	return OCI_CONTINUE;
 }

@@ -211,28 +211,13 @@ ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length,
 	unsigned type;
 
 	ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
-	/* allocate a SDO_GEOMETRY object */
-	OCIObjectNew(session->envp->envhp,
-				 session->envp->errhp,
-				 session->connp->svchp,
-				 OCI_TYPECODE_OBJECT,
-				 oracleGetGeometryType(session),
-				 (dvoid *)NULL,
-				 OCI_DURATION_TRANS,
-				 TRUE,
-				 (dvoid **)&geom->geometry);
-	/* get the NULL indicator */
-	OCIObjectGetInd(session->envp->envhp,
-					session->envp->errhp,
-					geom->geometry,
-					(void **)&geom->indicator);
+	oracleGeometryAlloc(session, geom);
 
 	/* for NULL data, return an object that is atomically NULL */
 	if (data == NULL)
-	{
-		geom->indicator->_atomic = OCI_IND_NULL;
 		return geom;
-	}
+	else
+		geom->indicator->_atomic = OCI_IND_NOTNULL;
 
 	data = setSridAndFlags(session, geom, data);
 
@@ -291,6 +276,11 @@ unsigned int
 oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 {
 	oracleDebug2("oracle_fdw: oracleGetEWKBLen");
+
+	/* return zero length for atomically NULL objects */
+	if (geom->indicator->_atomic == OCI_IND_NULL)
+		return 0;
+
 	switch (ewkbType(session, geom))
 	{
 	case POINTTYPE:
@@ -374,6 +364,34 @@ oracleGeometryFree(oracleSession *session, ora_geometry *geom)
 
 	geom->geometry = NULL;
 	geom->indicator = NULL;
+}
+
+/*
+ * oracleGeometryAlloc
+ * 		Allocate memory for a geometry object in the Oracle object cache.
+ * 		The indicator is set to atomic NULL.
+ */
+void
+oracleGeometryAlloc(oracleSession *session, ora_geometry *geom)
+{
+	/* allocate a SDO_GEOMETRY object */
+	OCIObjectNew(session->envp->envhp,
+				 session->envp->errhp,
+				 session->connp->svchp,
+				 OCI_TYPECODE_OBJECT,
+				 oracleGetGeometryType(session),
+				 (dvoid *)NULL,
+				 OCI_DURATION_TRANS,
+				 TRUE,
+				 (dvoid **)&geom->geometry);
+	/* get the NULL indicator */
+	OCIObjectGetInd(session->envp->envhp,
+					session->envp->errhp,
+					geom->geometry,
+					(void **)&geom->indicator);
+
+	/* initialize as atomic NULL */
+	geom->indicator->_atomic = OCI_IND_NULL;
 }
 
 void appendElemInfo(oracleSession *session, ora_geometry *geom, int info )

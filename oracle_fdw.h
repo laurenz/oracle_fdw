@@ -212,3 +212,4 @@ extern ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_
 extern unsigned int oracleGetEWKBLen(oracleSession *session, ora_geometry *geom);
 extern char *oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest);
 extern void oracleGeometryFree(oracleSession *session, ora_geometry *geom);
+extern void oracleGeometryAlloc(oracleSession *session, ora_geometry *geom);
