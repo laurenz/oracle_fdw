@@ -210,6 +210,6 @@ extern void oracleDebug2(const char *message);
 
 extern ora_geometry *oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data);
 extern unsigned int oracleGetEWKBLen(oracleSession *session, ora_geometry *geom);
-extern char *oracleFillEWKB(oracleSession *session, ora_geometry *geom, char *dest);
+extern char *oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned int size, char *dest);
 extern void oracleGeometryFree(oracleSession *session, ora_geometry *geom);
 extern void oracleGeometryAlloc(oracleSession *session, ora_geometry *geom);

@@ -32,7 +32,7 @@
 static int silent = 0;
 
 /* contains Oracle error messages, set by checkerr() */
-#define ERRBUFSIZE 1000
+#define ERRBUFSIZE 500
 static char oraMessage[ERRBUFSIZE];
 static sb4 err_code;
 

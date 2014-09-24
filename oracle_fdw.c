@@ -4409,7 +4409,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			else
 			{
 				result = (bytea *)palloc(value_len + VARHDRSZ);
-				oracleFillEWKB(fdw_state->session, geom, VARDATA(result));
+				oracleFillEWKB(fdw_state->session, geom, value_len, VARDATA(result));
 				SET_VARSIZE(result, value_len + VARHDRSZ);
 			}
 
