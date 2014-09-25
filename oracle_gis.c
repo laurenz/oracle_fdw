@@ -611,24 +611,25 @@ ewkbPointLen(oracleSession *session, ora_geometry *geom)
 char *
 ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 {
-	const unsigned numPoints =
-		(geom->indicator->sdo_point.x == OCI_IND_NULL
-		 && geom->indicator->sdo_point.y == OCI_IND_NULL
-		 && geom->indicator->sdo_point.z == OCI_IND_NULL) ? 0 : 1;
+
+	if (geom->indicator->sdo_point.x == OCI_IND_NULL
+		|| geom->indicator->sdo_point.y == OCI_IND_NULL 
+		|| (ewkbDimension(session, geom) == 3 
+			&& geom->indicator->sdo_point.z == OCI_IND_NULL) ) 
+	{
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: null point coordinates not supported");
+	}
 
 	dest = unsignedFill(POINTTYPE, dest);
-	dest = unsignedFill(numPoints, dest);
+	dest = unsignedFill(1, dest);
 
-	if (geom->indicator->sdo_point.x == OCI_IND_NOTNULL)
-		numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.x), dest);
+	numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.x), dest);
 	dest += sizeof(double);
-	if (geom->indicator->sdo_point.y == OCI_IND_NOTNULL)
-		numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.y), dest);
+	numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.y), dest);
 	dest += sizeof(double);
 	if (3 == ewkbDimension(session, geom))
 	{
-		if (geom->indicator->sdo_point.z == OCI_IND_NOTNULL)
-			numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.z), dest);
+		numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.z), dest);
 		dest += sizeof(double);
 	}
 
