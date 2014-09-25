@@ -144,6 +144,7 @@ static void appendCoord(oracleSession *session,  ora_geometry *geom, double coor
 static char *doubleFill(double x, char * dest);
 static char *unsignedFill(unsigned i, char * dest);
 static sword checkerr(sword status, OCIError *handle);
+unsigned epsgFromOracle( unsigned srid );
 
 char *
 doubleFill(double x, char * dest)
@@ -160,6 +161,22 @@ unsignedFill(unsigned i, char * dest)
 	dest += sizeof(unsigned);
 	return dest;
 }
+
+unsigned epsgFromOracle( unsigned srid )
+{
+    /* Oracle SRID, EPSG GCS/PCS Code */
+    switch (srid)
+    {
+    case 8192: return 4326; // WGS84
+    case 8306: return 4322; // WGS72
+    case 8267: return 4269; // NAD83
+    case 8274: return 4277; // OSGB 36
+    case 81989: return 27700; // UK National Grid
+    }
+    return srid;
+
+};
+
 
 /*
  * oracleEWKBToGeom
@@ -535,8 +552,7 @@ ewkbSrid(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
 		numberToInt(session->envp->errhp, &(geom->geometry->sdo_srid), OCI_NUMBER_SIGNED, &srid);
 
-	/* TODO convert oracle->postgis SRID when needed*/
-	return srid;
+	return epsgFromOracle(srid);
 }
 
 const char *
