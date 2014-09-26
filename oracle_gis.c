@@ -456,6 +456,10 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 			return MULTILINETYPE;
 		case 7:
 			return MULTIPOLYGONTYPE;
+                case 8:
+                        oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle SOLID not supported");
+                case 9:
+                        oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle MULTISOLID not supported");
 		default:
 			return UNKNOWNTYPE;
 	}
