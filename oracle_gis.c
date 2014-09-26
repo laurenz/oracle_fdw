@@ -36,16 +36,16 @@
 #define WKBZOFFSET  0x80000000
 #define WKBMOFFSET  0x40000000
 
-#define intToNumber(errhp, intp, flag, numberp) { \
+#define uintToNumber(errhp, intp, numberp) { \
 	if (checkerr( \
-			OCINumberFromInt((errhp), (dvoid *)(intp), sizeof(int), (flag), (numberp)), \
+			OCINumberFromInt((errhp), (dvoid *)(intp), sizeof(unsigned), OCI_NUMBER_UNSIGNED, (numberp)), \
 			(errhp)) != OCI_SUCCESS) \
 		oracleError_i(FDW_ERROR, "OCINumberFromInt failed to convert integer %d to NUMBER", *(intp)); \
 }
 
-#define numberToInt(errhp, numberp, flag, intp) { \
+#define numberToUint(errhp, numberp, intp) { \
 	if (checkerr( \
-			OCINumberToInt((errhp), (numberp), sizeof (int), (flag), (dvoid *)(intp)), \
+			OCINumberToInt((errhp), (numberp), sizeof(unsigned), OCI_NUMBER_UNSIGNED, (dvoid *)(intp)), \
 			(errhp)) != OCI_SUCCESS) \
 		oracleError(FDW_ERROR, "OCINumberToInt failed to convert NUMBER to integer"); \
 }
@@ -139,7 +139,7 @@ static const char *setPolygon(oracleSession *session, ora_geometry *geom, const 
 static const char *setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data);
-static void appendElemInfo(oracleSession *session, ora_geometry *geom, int info );
+static void appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info );
 static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
 static char *doubleFill(double x, char * dest);
 static char *unsignedFill(unsigned i, char * dest);
@@ -185,7 +185,7 @@ unsigned epsgFromOracle( unsigned srid )
  * 		Zero length or a NULL pointer for ewkb_data yield an atomically NULL object.
  */
 ora_geometry *
-oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_data)
+oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 {
 	const char *data = ewkb_data;
 	unsigned type;
@@ -256,10 +256,10 @@ oracleEWKBToGeom(oracleSession *session, unsigned int ewkb_length, char *ewkb_da
  * oracleGetEWKBLen
  * 		Returns the length in bytes needed to store an EWKB conversion of "geom".
  */
-unsigned int
+unsigned
 oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 {
-	unsigned int type;
+	unsigned type;
 
 	/* return zero length for atomically NULL objects */
 	if (geom->indicator->_atomic == OCI_IND_NULL)
@@ -290,10 +290,10 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
  * 		Converts "geom" to an EWKB and stores the result in "dest".
  */
 char *
-oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned int size, char *dest)
+oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned size, char *dest)
 {
 	const char *orig = dest;
-	unsigned int type;
+	unsigned type;
 
 	dest = ewkbHeaderFill(session, geom, dest);
 	switch ((type = ewkbType(session, geom)))
@@ -392,10 +392,10 @@ oracleGeometryAlloc(oracleSession *session, ora_geometry *geom)
 }
 
 void
-appendElemInfo(oracleSession *session, ora_geometry *geom, int info)
+appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info)
 {
 	OCINumber n;
-	intToNumber(session->envp->errhp, &info, OCI_NUMBER_SIGNED, &n);
+	uintToNumber(session->envp->errhp, &info, &n);
 	{
 		char msg[1000];
 		sprintf(msg, "elem info %d", info);
@@ -433,12 +433,12 @@ appendCoord(oracleSession *session, ora_geometry *geom, double coord)
 		oracleError(FDW_ERROR, "cannot append to ordinate collection");
 }
 
-unsigned int
+unsigned
 ewkbType(oracleSession *session, ora_geometry *geom)
 {
-	int gtype = 0;
+	unsigned gtype = 0;
 	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
-		numberToInt(session->envp->errhp, &(geom->geometry->sdo_gtype), OCI_NUMBER_SIGNED, &gtype);
+		numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
 	switch (gtype%1000)
 	{
@@ -471,7 +471,7 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
 	const unsigned wkbType =  *((unsigned *)data);
 	unsigned gtype;
 
-	numberToInt(session->envp->errhp, &(geom->geometry->sdo_gtype), OCI_NUMBER_SIGNED, &gtype);
+	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
 	data += sizeof(unsigned);
 
@@ -503,7 +503,7 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
 	}
 
 	geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
-	intToNumber(session->envp->errhp, &gtype, OCI_NUMBER_UNSIGNED, &(geom->geometry->sdo_gtype));
+	uintToNumber(session->envp->errhp, &gtype, &(geom->geometry->sdo_gtype));
 
 	return data;
 }
@@ -515,7 +515,7 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
  * - srid : 3 bytes
  * - flags : 1 byte
  */
-unsigned int
+unsigned
 ewkbHeaderLen(oracleSession *session, ora_geometry *geom)
 {
 	return 4;
@@ -524,7 +524,7 @@ ewkbHeaderLen(oracleSession *session, ora_geometry *geom)
 char *
 ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-	const unsigned int srid = ewkbSrid(session, geom);
+	const unsigned srid = ewkbSrid(session, geom);
 	const uint8_t flags = ((3 == ewkbDimension(session, geom)) ? 0x01 : 0x00 );
 	uint8_t s[3];
 
@@ -540,21 +540,21 @@ ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 }
 
 
-unsigned int
+unsigned
 ewkbDimension(oracleSession *session, ora_geometry *geom)
 {
-	int gtype = 0;
+	unsigned gtype = 0;
 	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
-		numberToInt(session->envp->errhp, &(geom->geometry->sdo_gtype), OCI_NUMBER_SIGNED, &gtype);
+		numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 	return gtype / 1000;
 }
 
-unsigned int
+unsigned
 ewkbSrid(oracleSession *session, ora_geometry *geom)
 {
-	int srid = 0;
+	unsigned srid = 0;
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
-		numberToInt(session->envp->errhp, &(geom->geometry->sdo_srid), OCI_NUMBER_SIGNED, &srid);
+		numberToUint(session->envp->errhp, &(geom->geometry->sdo_srid), &srid);
 
 	return epsgFromOracle(srid);
 }
@@ -562,8 +562,8 @@ ewkbSrid(oracleSession *session, ora_geometry *geom)
 const char *
 setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 {
-	unsigned int srid = 0;
-	unsigned int gtype = 0;
+	unsigned srid = 0;
+	unsigned gtype = 0;
 
 	srid |= ((uint8_t)data[0]) << 16;
 	srid |= ((uint8_t)data[1]) << 8;
@@ -581,7 +581,7 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 	geom->indicator->sdo_srid = (srid == 0) ? OCI_IND_NULL : OCI_IND_NOTNULL;
 
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
-		intToNumber(session->envp->errhp, &srid, OCI_NUMBER_UNSIGNED, &(geom->geometry->sdo_srid));
+		uintToNumber(session->envp->errhp, &srid, &(geom->geometry->sdo_srid));
 
 	gtype = (((uint8_t)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
 	if (data[0] & 0x02)
@@ -601,12 +601,12 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 
 	geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
 
-	intToNumber(session->envp->errhp, &gtype, OCI_NUMBER_UNSIGNED, &(geom->geometry->sdo_gtype));
+	uintToNumber(session->envp->errhp, &gtype, &(geom->geometry->sdo_gtype));
 
 	return data;
 }
 
-unsigned int
+unsigned
 ewkbPointLen(oracleSession *session, ora_geometry *geom)
 {
 	return 2*sizeof(unsigned) + sizeof(double)*ewkbDimension(session, geom);
@@ -643,10 +643,10 @@ ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 const char *
 setPoint(oracleSession *session, ora_geometry *geom, const char *data)
 {
-	if (*((unsigned int *)data) != POINTTYPE)
-		oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: expected point, got type %u", *((unsigned int *)data));
+	if (*((unsigned *)data) != POINTTYPE)
+		oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: expected point, got type %u", *((unsigned *)data));
 	data += sizeof(unsigned);
-	if (*((unsigned int *)data ) != 1)
+	if (*((unsigned *)data ) != 1)
 		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty point is not supported");
 	data += sizeof(unsigned);
 
@@ -667,7 +667,7 @@ setPoint(oracleSession *session, ora_geometry *geom, const char *data)
 	return data;
 }
 
-unsigned int
+unsigned
 ewkbLineLen(oracleSession *session, ora_geometry *geom)
 {
 	return 2*sizeof(unsigned) + sizeof(double)*numCoord(session, geom);
@@ -708,7 +708,7 @@ setLine(oracleSession *session, ora_geometry *geom, const char *data)
 	return data;
 }
 
-unsigned int
+unsigned
 ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 {
 	const unsigned numRings = numElemInfo(session, geom)/3;
@@ -788,7 +788,7 @@ ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 	return dest;
 }
 
-unsigned int
+unsigned
 ewkbMultiPointLen(oracleSession *session, ora_geometry *geom)
 {
 	const unsigned numC = numCoord(session, geom);
@@ -832,7 +832,7 @@ setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
 		if (*((unsigned *)data) != POINTTYPE)
 			oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: expected point in multipoint, got type %u", *((unsigned *)data));
 		data += sizeof(unsigned);
-		if (*((unsigned int *)data ) != 1)
+		if (*((unsigned *)data ) != 1)
 			oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty point in multipoint is not supported");
 		data += sizeof(unsigned);
 		for (j=0; j<dimension; j++)
@@ -847,7 +847,7 @@ setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
 	return data;
 }
 
-unsigned int
+unsigned
 ewkbMultiLineLen(oracleSession *session, ora_geometry *geom)
 {
 	const unsigned numLines = numElemInfo(session, geom)/3;
@@ -894,7 +894,7 @@ setMultiLine(oracleSession *session, ora_geometry *geom, const char *data)
 	return data;
 }
 
-unsigned int
+unsigned
 ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 {
 	/* polygons are padded, so the size detremination is a bit trickier */
@@ -995,7 +995,7 @@ setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 	return data;
 }
 
-unsigned int
+unsigned
 numCoord(oracleSession *session, ora_geometry *geom)
 {
 	int n;
@@ -1038,7 +1038,7 @@ coord(oracleSession *session, ora_geometry *geom, unsigned i)
 	return coord;
 }
 
-unsigned int
+unsigned
 numElemInfo(oracleSession *session, ora_geometry *geom)
 {
 	int n;
@@ -1052,7 +1052,7 @@ numElemInfo(oracleSession *session, ora_geometry *geom)
 	return n;
 }
 
-unsigned int
+unsigned
 elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 {
 	unsigned info;
@@ -1069,7 +1069,7 @@ elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 		oracleError_i(FDW_ERROR, "cannot get element %u from element info collection", i);
 	if (! exists)
 		oracleError_i(FDW_ERROR, "element %u of element info collection does not exist", i);
-	numberToInt(session->envp->errhp, oci_number, OCI_NUMBER_UNSIGNED, &info);
+	numberToUint(session->envp->errhp, oci_number, &info);
 	return info;
 }
 
@@ -1080,7 +1080,7 @@ elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 sword
 checkerr(sword status, OCIError *handle)
 {
-	int length;
+	unsigned length;
 	oraMessage[0] = '\0';
 
 	if (status == OCI_SUCCESS_WITH_INFO || status == OCI_ERROR)
