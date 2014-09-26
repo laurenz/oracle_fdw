@@ -6,6 +6,10 @@
  *-------------------------------------------------------------------------
  */
 
+/* The code relies heavilly on postgis internal data stucture that is explaned 
+ * in g_serialized.txt in the postgis source code and implemented in liblwgeom.h
+ */
+
 /* Oracle header */
 #include <oci.h>
 
