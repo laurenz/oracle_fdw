@@ -518,7 +518,7 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
 unsigned int
 ewkbHeaderLen(oracleSession *session, ora_geometry *geom)
 {
-	return sizeof(unsigned);
+	return 4;
 }
 
 char *
