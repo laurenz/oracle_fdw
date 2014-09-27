@@ -462,17 +462,17 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 		case 3:
 			return POLYGONTYPE;
 		case 4:
-			return COLLECTIONTYPE;
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle COLLECTION not supported");
 		case 5:
 			return MULTIPOINTTYPE;
 		case 6:
 			return MULTILINETYPE;
 		case 7:
 			return MULTIPOLYGONTYPE;
-                case 8:
-                        oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle SOLID not supported");
-                case 9:
-                        oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle MULTISOLID not supported");
+		case 8:
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle SOLID not supported");
+		case 9:
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle MULTISOLID not supported");
 		default:
 			return UNKNOWNTYPE;
 	}
@@ -499,18 +499,23 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
 		case POLYGONTYPE:
 			gtype += 3;
 			break;
-		case COLLECTIONTYPE:
-			gtype += 4;
-			break;
 		case MULTIPOINTTYPE:
 			gtype += 5;
 			break;
 		case MULTILINETYPE:
 			gtype += 6;
 			break;
-		case MULTIPOLYGONTYPE:
-			gtype += 7;
-			break;
+#define UNSUPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: "#T" not supported");
+		UNSUPORTED_TYPE(COLLECTION)
+		UNSUPORTED_TYPE(CIRCSTRING)
+		UNSUPORTED_TYPE(COMPOUND)
+		UNSUPORTED_TYPE(CURVEPOLY)
+		UNSUPORTED_TYPE(MULTICURVE)
+		UNSUPORTED_TYPE(MULTISURFACE)
+		UNSUPORTED_TYPE(POLYHEDRALSURFACE)
+		UNSUPORTED_TYPE(TRIANGLE)
+		UNSUPORTED_TYPE(TIN)
+#undef UNSUPORTED_TYPE
 		default:
 			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown geometry type %u", wkbType);
 	}
