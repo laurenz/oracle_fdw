@@ -119,7 +119,8 @@ static double coord(oracleSession *session, ora_geometry *geom, unsigned i);
 static unsigned numElemInfo(oracleSession *session, ora_geometry *geom);
 static unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i);
 
-/* All ...Fill() functions return a pointer to the end of the written zone */
+/* All ...Fill() functions return a pointer to the end of the written zone
+ */
 static unsigned ewkbHeaderLen(oracleSession *session, ora_geometry *geom);
 static char *ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest);
 static unsigned ewkbPointLen(oracleSession *session, ora_geometry *geom);
@@ -135,6 +136,12 @@ static char *ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char 
 static unsigned ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom);
 static char *ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest);
 
+/*
+ * All the set...() functions return a pointer that points to a position in the
+ * input buffer right after the added data.
+ * That way we can call several of them in a row and even nest them,
+ * like in the case of a multipolygon composed of several polygons.
+ */
 static const char *setType(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setPoint(oracleSession *session, ora_geometry *geom, const char *data);
@@ -206,9 +213,11 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 	data = setSridAndFlags(session, geom, data);
 
 	/*
-	 * We don't move the data pointer, so we can check it in
-	 * set functions and reuse the same function
-	 * for collections (i.e. multi*)
+	 * We don't move the data pointer after this call because 
+	 * it will be moved after the following setTYPE functions
+	 * and those functions expect the data pointer to be on the
+	 * type and not after (see comment above about g_serialized.txt 
+	 * and set... functions)
 	 */
 	setType(session, geom, data);
 
