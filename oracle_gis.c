@@ -278,7 +278,30 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->_atomic == OCI_IND_NULL)
 		return 0;
 
-	switch ((type = ewkbType(session, geom)))
+	/* a first check for supported types is done in ewkbType 
+	 */    
+	type = ewkbType(session, geom);
+
+	/* if sdo_elem_info is not null, we go through and check that the
+	 * type and interpretation are actually supported
+	 */
+	if (geom->indicator->sdo_elem_info)
+	{
+		const unsigned n = numElemInfo(session, geom);
+		unsigned i;
+		for (i=0; i<n; i+=3){
+			const unsigned etype = elemInfo(session, geom, i+1);
+			const unsigned interpretation = elemInfo(session, geom, i+2);
+			if (!((1 == etype && 1 == interpretation)
+				||(2 == etype && 1 == interpretation)
+				||(1003 == etype && 1 == interpretation)
+				||(2003 == etype && 1 == interpretation)
+				))
+				oracleError_ii(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unsupported etype %u with interpretation %u in elem_info", etype, interpretation);
+		}
+	}
+
+	switch (type)
 	{
 		case POINTTYPE:
 			return ewkbHeaderLen(session, geom) + ewkbPointLen(session, geom);

@@ -4608,6 +4608,18 @@ oracleError_ssdh(oraError sqlstate, const char *message, const char *arg1, const
 }
 
 /*
+ * oracleError_ii
+ * 		Report a PostgreSQL error with 2 integer arguments.
+ */
+void
+oracleError_ii(oraError sqlstate, const char *message, int arg1, int arg2)
+{
+	ereport(ERROR,
+			(errcode(to_sqlstate(sqlstate)),
+			errmsg(message, arg1, arg2)));
+}
+
+/*
  * oracleError_i
  * 		Report a PostgreSQL error with integer argument.
  */
