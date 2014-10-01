@@ -6,8 +6,9 @@
  *-------------------------------------------------------------------------
  */
 
-/* The code relies heavilly on postgis internal data stucture that is explaned 
- * in g_serialized.txt in the postgis source code and implemented in liblwgeom.h
+/*
+ * The code relies heavilly on the PostGIS internal data stucture that is explained 
+ * in g_serialized.txt in the PostGIS source code and implemented in liblwgeom.h.
  */
 
 /* Oracle header */
@@ -19,7 +20,6 @@
 
 #include "oracle_fdw.h"
 
-#define UNKNOWNTYPE			   0
 #define POINTTYPE			   1
 #define LINETYPE			   2
 #define POLYGONTYPE			   3
@@ -118,6 +118,13 @@ static unsigned numCoord(oracleSession *session, ora_geometry *geom);
 static double coord(oracleSession *session, ora_geometry *geom, unsigned i);
 static unsigned numElemInfo(oracleSession *session, ora_geometry *geom);
 static unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i);
+static void appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info );
+static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
+static char *doubleFill(double x, char * dest);
+static char *unsignedFill(unsigned i, char * dest);
+static sword checkerr(sword status, OCIError *handle);
+static unsigned epsgFromOracle(unsigned srid);
+static unsigned epsgToOracle(unsigned srid);
 
 /* All ...Fill() functions return a pointer to the end of the written zone
  */
@@ -150,12 +157,6 @@ static const char *setPolygon(oracleSession *session, ora_geometry *geom, const 
 static const char *setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setMultiLine(oracleSession *session, ora_geometry *geom, const char *data);
 static const char *setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data);
-static void appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info );
-static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
-static char *doubleFill(double x, char * dest);
-static char *unsignedFill(unsigned i, char * dest);
-static sword checkerr(sword status, OCIError *handle);
-unsigned epsgFromOracle( unsigned srid );
 
 char *
 doubleFill(double x, char * dest)
@@ -173,21 +174,35 @@ unsignedFill(unsigned i, char * dest)
 	return dest;
 }
 
-unsigned epsgFromOracle( unsigned srid )
+unsigned
+epsgFromOracle(unsigned srid)
 {
     /* Oracle SRID, EPSG GCS/PCS Code */
     switch (srid)
     {
-    case 8192: return 4326; // WGS84
-    case 8306: return 4322; // WGS72
-    case 8267: return 4269; // NAD83
-    case 8274: return 4277; // OSGB 36
-    case 81989: return 27700; // UK National Grid
+    	case 8192:  return 4326;  /* WGS84 */
+    	case 8306:  return 4322;  /* WGS72 */
+    	case 8267:  return 4269;  /* NAD83 */
+    	case 8274:  return 4277;  /* OSGB 36 */
+    	case 81989: return 27700; /* UK National Grid */
+		default: return srid;
     }
-    return srid;
+}
 
-};
-
+unsigned
+epsgToOracle(unsigned srid)
+{
+    /* Oracle SRID, EPSG GCS/PCS Code */
+    switch (srid)
+    {
+    	case 4326:  return 8192;  /* WGS84 */
+    	case 4322:  return 8306;  /* WGS72 */
+    	case 4269:  return 8267;  /* NAD83 */
+    	case 4277:  return 8274;  /* OSGB 36 */
+    	case 27700: return 81989; /* UK National Grid */
+		default: return srid;
+    }
+}
 
 /*
  * oracleEWKBToGeom
@@ -217,7 +232,7 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 	 * it will be moved after the following setTYPE functions
 	 * and those functions expect the data pointer to be on the
 	 * type and not after (see comment above about g_serialized.txt 
-	 * and set... functions)
+	 * and set... functions).
 	 */
 	setType(session, geom, data);
 
@@ -248,7 +263,7 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 			data = setMultiPolygon(session, geom, data);
 			break;
 		default:
-			oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: unknown geometry type");
+			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unexpected geometry type %u", type);
 	}
 
 	/* check that we reached the end of input data */
@@ -278,14 +293,14 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->_atomic == OCI_IND_NULL)
 		return 0;
 
-	/* a first check for supported types is done in ewkbType 
-	 */    
+	/* a first check for supported types is done in ewkbType */    
 	type = ewkbType(session, geom);
 
-	/* if sdo_elem_info is not null, we go through and check that the
-	 * type and interpretation are actually supported
+	/*
+	 * If sdo_elem_info is NOT NULL, we go through and check that the
+	 * type and interpretation are actually supported.
 	 */
-	if (geom->indicator->sdo_elem_info)
+	if (geom->indicator->sdo_elem_info == OCI_IND_NOTNULL)
 	{
 		const unsigned n = numElemInfo(session, geom);
 		unsigned i;
@@ -316,7 +331,7 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 		case MULTIPOLYGONTYPE:
 			return ewkbHeaderLen(session, geom) + ewkbMultiPolygonLen(session, geom);
 		default:
-			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown type %u", type);
+			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unexpected geometry type %u", type);
 			return 0;  /* unreachable, but keeps compiler happy */
 	}
 }
@@ -353,7 +368,7 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned size, char *
 			dest = ewkbMultiPolygonFill(session, geom, dest);
 			break;
 		default:
-			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown type %u", type);
+			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unexpected geometry type %u", type);
 	}
 
 	{
@@ -474,7 +489,9 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 {
 	unsigned gtype = 0;
 	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
-		numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type cannot be NULL");
+
+	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
 	switch (gtype%1000)
 	{
@@ -485,7 +502,7 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 		case 3:
 			return POLYGONTYPE;
 		case 4:
-			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle COLLECTION not supported");
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type COLLECTION not supported");
 		case 5:
 			return MULTIPOINTTYPE;
 		case 6:
@@ -493,23 +510,24 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 		case 7:
 			return MULTIPOLYGONTYPE;
 		case 8:
-			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle SOLID not supported");
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type SOLID not supported");
 		case 9:
-			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: oracle MULTISOLID not supported");
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type MULTISOLID not supported");
 		default:
-			return UNKNOWNTYPE;
+			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown geometry type %u", gtype);
 	}
+	return 0;  /* unreachable, but keeps compiler happy */
 }
 
 const char *
-setType(oracleSession *session, ora_geometry *geom, const char * data)
+setType(oracleSession *session, ora_geometry *geom, const char *data)
 {
-	const unsigned wkbType =  *((unsigned *)data);
+	const uint32_t wkbType =  *((uint32_t *)data);
 	unsigned gtype;
 
 	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
-	data += sizeof(unsigned);
+	data += sizeof(uint32_t);
 
 	switch (wkbType)
 	{
@@ -528,17 +546,17 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
 		case MULTILINETYPE:
 			gtype += 6;
 			break;
-#define UNSUPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: "#T" not supported");
-		UNSUPORTED_TYPE(COLLECTION)
-		UNSUPORTED_TYPE(CIRCSTRING)
-		UNSUPORTED_TYPE(COMPOUND)
-		UNSUPORTED_TYPE(CURVEPOLY)
-		UNSUPORTED_TYPE(MULTICURVE)
-		UNSUPORTED_TYPE(MULTISURFACE)
-		UNSUPORTED_TYPE(POLYHEDRALSURFACE)
-		UNSUPORTED_TYPE(TRIANGLE)
-		UNSUPORTED_TYPE(TIN)
-#undef UNSUPORTED_TYPE
+#define UNSUPPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type "#T" not supported");
+		UNSUPPORTED_TYPE(COLLECTION)
+		UNSUPPORTED_TYPE(CIRCSTRING)
+		UNSUPPORTED_TYPE(COMPOUND)
+		UNSUPPORTED_TYPE(CURVEPOLY)
+		UNSUPPORTED_TYPE(MULTICURVE)
+		UNSUPPORTED_TYPE(MULTISURFACE)
+		UNSUPPORTED_TYPE(POLYHEDRALSURFACE)
+		UNSUPPORTED_TYPE(TRIANGLE)
+		UNSUPPORTED_TYPE(TIN)
+#undef UNSUPPORTED_TYPE
 		default:
 			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown geometry type %u", wkbType);
 	}
@@ -548,8 +566,6 @@ setType(oracleSession *session, ora_geometry *geom, const char * data)
 
 	return data;
 }
-
-
 
 /*
  * Header contains:
@@ -597,6 +613,7 @@ ewkbSrid(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
 		numberToUint(session->envp->errhp, &(geom->geometry->sdo_srid), &srid);
 
+	/* convert PostGIS->Oracle SRID when needed */
 	return epsgFromOracle(srid);
 }
 
@@ -617,7 +634,8 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 
 	data += 3;
 
-	/* TODO convert oracle->postgis SRID when needed */
+	/* convert Oracle->PostGIS SRID when needed */
+	srid = epsgToOracle(srid);
 
 	geom->indicator->sdo_srid = (srid == 0) ? OCI_IND_NULL : OCI_IND_NOTNULL;
 
