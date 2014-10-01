@@ -3503,10 +3503,9 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			|| oratype == ORA_TYPE_INTERVALD2S)
 			&& pgtype == INTERVALOID)
 		return;
-	/* SDO_GEOMETRY can be converted to geometry or bytea */
+	/* SDO_GEOMETRY can be converted to geometry */
 	if (oratype == ORA_TYPE_GEOMETRY
-			&& (pgtype == GEOMETRYOID
-			|| pgtype == BYTEAOID))
+			&& pgtype == GEOMETRYOID)
 		return;
 
 	/* otherwise, report an error */
