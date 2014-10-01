@@ -488,7 +488,7 @@ unsigned
 ewkbType(oracleSession *session, ora_geometry *geom)
 {
 	unsigned gtype = 0;
-	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
+	if (geom->indicator->sdo_gtype == OCI_IND_NULL)
 		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type cannot be NULL");
 
 	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
