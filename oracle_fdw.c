@@ -4374,7 +4374,17 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			if (geom->geometry == NULL)
 				value_len = 0;  /* NULL value */
 			else
+			{
+				/* install error context callback */
+				errcb.previous = error_context_stack;
+				error_context_stack = &errcb;
+				fdw_state->columnindex = index;
+
 				value_len = oracleGetEWKBLen(fdw_state->session, geom);
+
+				/* uninstall error context callback */
+				error_context_stack = errcb.previous;
+			}
 
 			value = NULL;  /* we will fetch that later to avoid unnecessary copying */
 		}
@@ -4399,7 +4409,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
 		{
 			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
-			bytea *result = NULL;
+			struct varlena *result = NULL;
 
 			if (value_len == 0)
 			{
@@ -4407,9 +4417,17 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			}
 			else
 			{
+				/* install error context callback */
+				errcb.previous = error_context_stack;
+				error_context_stack = &errcb;
+				fdw_state->columnindex = index;
+
 				result = (bytea *)palloc(value_len + VARHDRSZ);
 				oracleFillEWKB(fdw_state->session, geom, value_len, VARDATA(result));
 				SET_VARSIZE(result, value_len + VARHDRSZ);
+
+				/* uninstall error context callback */
+				error_context_stack = errcb.previous;
 			}
 
 			values[j] = PointerGetDatum(result);

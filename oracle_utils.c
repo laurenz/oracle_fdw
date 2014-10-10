@@ -59,6 +59,11 @@ struct handleEntry
 static struct envEntry *envlist = NULL;
 
 /*
+ * NULL value used for "in" callback in RETURNING clauses.
+ */
+static ora_geometry null_geometry = { NULL, NULL };
+
+/*
  * Helper functions
  */
 static void oracleSetSavepoint(oracleSession *session, int nest_level);
@@ -75,6 +80,7 @@ static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
 static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value);
+static void setNullGeometry(oracleSession *session, ora_geometry *geom);
 
 /*
  * oracleGetSession
@@ -581,6 +587,10 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 
 	/* free objects in cache (might be left behind in case of errors) */
 	(void)OCICacheFree(envp->envhp, envp->errhp, NULL);
+
+	/* null_geometry has been freed */
+	null_geometry.geometry = NULL;
+	null_geometry.indicator = NULL;
 
 	/* commit or rollback */
 	if (is_commit)
@@ -1919,6 +1929,34 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			}
 		}
 
+		/*
+		 * Since this is a bit convoluted, here is a description of how different
+		 * parameters are bound:
+		 * - Input parameters of normal data types require just a simple OCIBindByName.
+		 * - For LOB input parameters, bind a new empty LOB with OCIBindByName (stored in
+		 *   the lob_locators array), retrieve the LOB column as an output parameter
+		 *   (see below) and fill in the actual data.
+		 * - For named data type input parameters, a new object and its indicator structure
+		 *   are allocated and filled, and in addition to OCIBindByName there is a call
+		 *   to OCIBindObject that specifies the data type.
+		 * - For all output parameters, OCIBindDynamic allocates two callback functions.
+		 *   The "in" callback should just return a NULL values, and the "out" callback
+		 *   returns a place where to store the retrieved data:
+		 *   - For normal data types, a pointer to the column's "val" in the oraTable
+		 *     is returned by the callback.
+		 *   - For LOBs, the callback also returns the column's "val", which points to
+		 *     a LOB locator allocated in oraclePrepareQuery.
+		 *   - For named data types, the callback returns the adress of a pointer initialized
+		 *     to NULL, and Oracle will allocate space for the object.  The indicator value
+		 *     has to be retrieved with OCIObjectGetInd.
+		 */
+
+		/* bind geometry output parameters only the first time */
+		if (oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY
+				&& param->bindType == BIND_OUTPUT
+				&& param->bindh != NULL)
+			continue;
+
 		/* bind the value to the parameter */
 		if (checkerr(
 			OCIBindByName(session->stmthp, (OCIBind **)&param->bindh, session->envp->errhp, (text *)param->name,
@@ -1936,11 +1974,11 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		{
 			ora_geometry *geom = (ora_geometry *)value;
 
-			/* pre-allocate memory for output parameters */
+			/* for output parameters, set the column to a NULL value */
 			if (param->bindType == BIND_OUTPUT)
 			{
 				geom = (ora_geometry *)oraTable->cols[param->colnum]->val;
-				oracleGeometryAlloc(session, geom);
+				setNullGeometry(session, geom);
 			}
 
 			if (checkerr(
@@ -2017,6 +2055,26 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			 * since LONG and LONG RAW don't work with RETURNING anyway.
 			 */
 			oraTable->cols[param->colnum]->val_len = (unsigned short)oraTable->cols[param->colnum]->val_len4;
+
+			/* for geometry columns, we have to get the indicator */
+			if (oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY)
+			{
+				ora_geometry *geom = (ora_geometry *)oraTable->cols[param->colnum]->val;
+
+				/* atomic NULL values will just be NULL */
+				if (geom->geometry != NULL)
+				{
+					if (checkerr(
+						OCIObjectGetInd(session->envp->envhp, session->envp->errhp,
+							geom->geometry, (void **)&geom->indicator),
+						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+					{
+						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+							"error executing query: OCIObjectGetInd failed to get indicator of returned geometry",
+							oraMessage);
+					}
+				}
+			}
 		}
 
 	if (rowcount > 0)
@@ -2643,8 +2701,13 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 	else if (column->oratype == ORA_TYPE_GEOMETRY)
 	{
 		ora_geometry *geom = (ora_geometry *)column->val;
-		*bufpp = geom->geometry;
-		*indp = geom->indicator;
+
+		/* initialize pointers to NULL, memory will be allocated */
+		geom->geometry = NULL;
+		geom->indicator = NULL;
+		*bufpp = &(geom->geometry);
+		/* the indicator will be got from the object */
+		*indp = NULL;
 	}
 	else
 	{
@@ -2678,8 +2741,9 @@ bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp,
 	if (column->oratype == ORA_TYPE_GEOMETRY)
 	{
 		ora_geometry *geom = (ora_geometry *)column->val;
+		/* the column already contains a NULL value */
 		*bufpp = geom->geometry;
-		*indpp = geom->indicator;  /* already marked as NULL */
+		*indpp = geom->indicator;
 	}
 	else
 	{
@@ -2735,4 +2799,19 @@ oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
 			"error writing data: OCILobClose failed to close LOB",
 			oraMessage);
 	}
+}
+
+/*
+ * setNullGeometry
+ * 		Initialize the ora_geometry argument with a NULL value.
+ */
+void
+setNullGeometry(oracleSession *session, ora_geometry *geom)
+{
+	/* allocate the cached NULL value if it is not set yet */
+	if (null_geometry.geometry == NULL)
+		oracleGeometryAlloc(session, &null_geometry);
+
+	geom->geometry = null_geometry.geometry;
+	geom->indicator = null_geometry.indicator;
 }
