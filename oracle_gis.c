@@ -15,7 +15,6 @@
 #include <oci.h>
 
 #include <string.h>
-#include <stdint.h>
 #include <stdio.h>
 
 #include "oracle_fdw.h"
@@ -44,28 +43,28 @@
 	if (checkerr( \
 			OCINumberFromInt((errhp), (dvoid *)(intp), sizeof(unsigned), OCI_NUMBER_UNSIGNED, (numberp)), \
 			(errhp)) != OCI_SUCCESS) \
-		oracleError_i(FDW_ERROR, "OCINumberFromInt failed to convert integer %d to NUMBER", *(intp)); \
+		oracleError_d(FDW_ERROR, "OCINumberFromInt failed to convert integer to NUMBER", oraMessage); \
 }
 
 #define numberToUint(errhp, numberp, intp) { \
 	if (checkerr( \
 			OCINumberToInt((errhp), (numberp), sizeof(unsigned), OCI_NUMBER_UNSIGNED, (dvoid *)(intp)), \
 			(errhp)) != OCI_SUCCESS) \
-		oracleError(FDW_ERROR, "OCINumberToInt failed to convert NUMBER to integer"); \
+		oracleError_d(FDW_ERROR, "OCINumberToInt failed to convert NUMBER to integer", oraMessage); \
 }
 
 #define doubleToNumber(errhp, doublep, numberp) { \
 	if (checkerr( \
 			OCINumberFromReal((errhp), (const dvoid *)(doublep), sizeof(double), (numberp)), \
 			(errhp)) != OCI_SUCCESS) \
-		oracleError(FDW_ERROR, "OCINumberFromReal failed to convert floating point number to NUMBER"); \
+		oracleError_d(FDW_ERROR, "OCINumberFromReal failed to convert floating point number to NUMBER", oraMessage); \
 }
 
 #define numberToDouble(errhp, numberp, doublep) { \
 	if (checkerr( \
 			OCINumberToReal((errhp), (numberp), sizeof(double), (dvoid *)(doublep)), \
 			(errhp)) != OCI_SUCCESS) \
-		oracleError(FDW_ERROR, "OCINumberToReal failed to convert NUMBER to floating point number"); \
+		oracleError_d(FDW_ERROR, "OCINumberToReal failed to convert NUMBER to floating point number", oraMessage); \
 }
 
 /* contains Oracle error messages, set by checkerr() */
@@ -267,15 +266,8 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 	}
 
 	/* check that we reached the end of input data */
-	{
-		char msg[1000];
-		sprintf( msg, " data - ewkb_data = %lu, ewkb_length = %u ",
-			data - ewkb_data, ewkb_length);
-		oracleDebug2(msg);
-	}
-
 	if (data - ewkb_data != ewkb_length)
-		oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: number of bytes read is different from length %u", ewkb_length);
+		oracleError_ii(FDW_ERROR, "oracle_fdw internal error: number of bytes read %u is different from length %u", data - ewkb_data, ewkb_length);
 
 	return geom;
 }
@@ -371,15 +363,9 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned size, char *
 			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unexpected geometry type %u", type);
 	}
 
-	{
-		char msg[1000];
-		sprintf( msg, " dest - orig = %lu, len = %u ",
-			dest - orig, size );
-		oracleDebug2(msg);
-	}
-
+	/* check that we have reached the end of the input buffer */
 	if (dest - orig != size)
-		oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: number of bytes written is different from size %u", size);
+		oracleError_ii(FDW_ERROR, "oracle_fdw internal error: number of bytes written %u is different from size %u", dest - orig, size);
 
 	return dest;
 }
@@ -427,7 +413,7 @@ oracleGeometryAlloc(oracleSession *session, ora_geometry *geom)
 				 		TRUE,
 				 		(dvoid **)&geom->geometry),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError(FDW_ERROR, "cannot allocate SDO_GEOMETRY object");
+		oracleError_d(FDW_ERROR, "cannot allocate SDO_GEOMETRY object", oraMessage);
 
 	/* get the NULL indicator */
 	if (checkerr(
@@ -436,7 +422,7 @@ oracleGeometryAlloc(oracleSession *session, ora_geometry *geom)
 							geom->geometry,
 							(void **)&geom->indicator),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError(FDW_ERROR, "cannot get indicator for new SDO_GEOMETRY object");
+		oracleError_d(FDW_ERROR, "cannot get indicator for new SDO_GEOMETRY object", oraMessage);
 		
 	/* initialize as atomic NULL */
 	geom->indicator->_atomic = OCI_IND_NULL;
@@ -446,12 +432,6 @@ void
 appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info)
 {
 	OCINumber n;
-	uintToNumber(session->envp->errhp, &info, &n);
-	{
-		char msg[1000];
-		sprintf(msg, "elem info %d", info);
-		oracleDebug2(msg);
-	}
 
 	if (checkerr(
 			OCICollAppend(session->envp->envhp,
@@ -460,7 +440,7 @@ appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info)
 				   		NULL,
 				   		geom->geometry->sdo_elem_info),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError(FDW_ERROR, "cannot append to element info collection");
+		oracleError_d(FDW_ERROR, "cannot append to element info collection", oraMessage);
 }
 
 void
@@ -469,11 +449,6 @@ appendCoord(oracleSession *session, ora_geometry *geom, double coord)
 	OCINumber n;
 
 	doubleToNumber(session->envp->errhp, &coord, &n);
-	{
-		char msg[1000];
-		sprintf(msg, "coord %f", coord);
-		oracleDebug2(msg);
-	}
 	if (checkerr(
 			OCICollAppend(session->envp->envhp,
 				   		session->envp->errhp,
@@ -481,7 +456,7 @@ appendCoord(oracleSession *session, ora_geometry *geom, double coord)
 				   		NULL,
 				   		geom->geometry->sdo_ordinates),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError(FDW_ERROR, "cannot append to ordinate collection");
+		oracleError_d(FDW_ERROR, "cannot append to ordinate collection", oraMessage);
 }
 
 unsigned
@@ -522,12 +497,12 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 const char *
 setType(oracleSession *session, ora_geometry *geom, const char *data)
 {
-	const uint32_t wkbType =  *((uint32_t *)data);
+	const ub4 wkbType =  *((ub4 *)data);
 	unsigned gtype;
 
 	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
-	data += sizeof(uint32_t);
+	data += sizeof(ub4);
 
 	switch (wkbType)
 	{
@@ -546,7 +521,10 @@ setType(oracleSession *session, ora_geometry *geom, const char *data)
 		case MULTILINETYPE:
 			gtype += 6;
 			break;
-#define UNSUPPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type "#T" not supported");
+/*		case MULTIPOLYGONTYPE:
+			gtype += 7;
+			break; */
+#define UNSUPPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geometry type "#T" not supported");
 		UNSUPPORTED_TYPE(COLLECTION)
 		UNSUPPORTED_TYPE(CIRCSTRING)
 		UNSUPPORTED_TYPE(COMPOUND)
@@ -558,7 +536,7 @@ setType(oracleSession *session, ora_geometry *geom, const char *data)
 		UNSUPPORTED_TYPE(TIN)
 #undef UNSUPPORTED_TYPE
 		default:
-			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown geometry type %u", wkbType);
+			oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: unknown geometry type %u", wkbType);
 	}
 
 	geom->indicator->sdo_gtype = OCI_IND_NOTNULL;
@@ -582,8 +560,8 @@ char *
 ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	const unsigned srid = ewkbSrid(session, geom);
-	const uint8_t flags = ((3 == ewkbDimension(session, geom)) ? 0x01 : 0x00 );
-	uint8_t s[3];
+	const ub1 flags = ((3 == ewkbDimension(session, geom)) ? 0x01 : 0x00 );
+	ub1 s[3];
 
 	s[0] = (srid & 0x001F0000) >> 16;
 	s[1] = (srid & 0x0000FF00) >> 8;
@@ -623,9 +601,9 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 	unsigned srid = 0;
 	unsigned gtype = 0;
 
-	srid |= ((uint8_t)data[0]) << 16;
-	srid |= ((uint8_t)data[1]) << 8;
-	srid |= ((uint8_t)data[2]);
+	srid |= ((ub1)data[0]) << 16;
+	srid |= ((ub1)data[1]) << 8;
+	srid |= ((ub1)data[2]);
 	/*
 	 * Only the first 21 bits are set. Slide up and back to pull
 	 * the negative bits down, if we need them.
@@ -642,16 +620,20 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
 		uintToNumber(session->envp->errhp, &srid, &(geom->geometry->sdo_srid));
 
-	gtype = (((uint8_t)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
+	gtype = (((ub1)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
+{
+	char data[1000];
+	sprintf(data, "data[0] = %u, gtype = %u", (ub1)data[0], gtype);
+	oracleDebug2(data);
+}
 	if (data[0] & 0x02)
 		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: measure dimension not supported");
 	if (data[0] & 0x08)
 		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geodetic not supported");
 
-	if (((uint8_t)data[0]) & 0x04) /* has bbox, offsets */
+	if (((ub1)data[0]) & 0x04) /* has bbox, offsets */
 	{
-		oracleDebug2("geometry has bounding box");
-		data += 1 + 2*(((uint8_t)data[0]) & 0x01 ? 3 : 2)*sizeof(float);
+		data += 1 + 2*(((ub1)data[0]) & 0x01 ? 3 : 2)*sizeof(float);
 	}
 	else
 	{
@@ -797,12 +779,6 @@ setPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 	{
 		const unsigned n= *((unsigned *)ringSizeData) * dimension;
 		ringSizeData += sizeof(unsigned);
-		{
-			char msg[1000];
-			sprintf(msg, "output ring with %d points",*((unsigned *)(ringSizeData-sizeof(unsigned))));
-			oracleDebug2(msg);
-		}
-
 
 		appendElemInfo(session, geom, numCoord(session, geom) + 1); /* start index + 1 */
 		appendElemInfo(session, geom, r == 0 ? 1003 : 2003); /* SDO_ETYPE ext ring or int ring */
@@ -1065,7 +1041,7 @@ numCoord(oracleSession *session, ora_geometry *geom)
 						(OCIColl *)(geom->geometry->sdo_ordinates),
 						&n),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError(FDW_ERROR, "cannot get size of ordinate collection");
+		oracleError_d(FDW_ERROR, "cannot get size of ordinate collection", oraMessage);
 	return n;
 }
 
@@ -1075,6 +1051,7 @@ coord(oracleSession *session, ora_geometry *geom, unsigned i)
 	double coord;
 	boolean exists;
 	OCINumber *oci_number;
+	OCIInd *indicator;
 
 	if (checkerr(
 			OCICollGetElem(session->envp->envhp, session->envp->errhp,
@@ -1082,18 +1059,16 @@ coord(oracleSession *session, ora_geometry *geom, unsigned i)
 				   		(sb4)i,
 				   		&exists,
 				   		(dvoid **)&oci_number,
-				   		(dvoid **)0),
+				   		(dvoid **)&indicator),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError_i(FDW_ERROR, "cannot get element %u from ordinate collection", i);
+		oracleError_d(FDW_ERROR, "error fetching element from ordinate collection", oraMessage);
 	if (! exists)
 		oracleError_i(FDW_ERROR, "element %u of ordinate collection does not exist", i);
+	if (*indicator == OCI_IND_NULL)
+		oracleError_i(FDW_ERROR, "element %u of ordinate collection is NULL", i);
 	/* convert the element to double */
 	numberToDouble(session->envp->errhp, oci_number, &coord);
-	{
-		char msg[1000];
-		sprintf(msg, "coord from geom %d %f", i, coord);
-		oracleDebug2(msg);
-	}
+
 	return coord;
 }
 
@@ -1107,7 +1082,7 @@ numElemInfo(oracleSession *session, ora_geometry *geom)
 				 		(OCIColl *)(geom->geometry->sdo_elem_info),
 				 		&n),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError(FDW_ERROR, "cannot get size of element info collection");
+		oracleError_d(FDW_ERROR, "cannot get size of element info collection", oraMessage);
 	return n;
 }
 
@@ -1117,17 +1092,21 @@ elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 	unsigned info;
 	boolean exists;
 	OCINumber *oci_number;
+	OCIInd *indicator;
+
 	if (checkerr(
 			OCICollGetElem(session->envp->envhp, session->envp->errhp,
 				   		(OCIColl *)(geom->geometry->sdo_elem_info),
 				   		(sb4)i,
 				   		&exists,
 				   		(dvoid **)&oci_number,
-				   		(dvoid **)0),
+				   		(dvoid **)&indicator),
 			session->envp->errhp) != OCI_SUCCESS)
-		oracleError_i(FDW_ERROR, "cannot get element %u from element info collection", i);
+		oracleError_d(FDW_ERROR, "error fetching element from element info collection", oraMessage);
 	if (! exists)
 		oracleError_i(FDW_ERROR, "element %u of element info collection does not exist", i);
+	if (*indicator == OCI_IND_NULL)
+		oracleError_i(FDW_ERROR, "element %u of element info collection is NULL", i);
 	numberToUint(session->envp->errhp, oci_number, &info);
 	return info;
 }
