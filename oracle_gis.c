@@ -621,11 +621,6 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 		uintToNumber(session->envp->errhp, &srid, &(geom->geometry->sdo_srid));
 
 	gtype = (((ub1)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
-{
-	char data[1000];
-	sprintf(data, "data[0] = %u, gtype = %u", (ub1)data[0], gtype);
-	oracleDebug2(data);
-}
 	if (data[0] & 0x02)
 		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: measure dimension not supported");
 	if (data[0] & 0x08)
