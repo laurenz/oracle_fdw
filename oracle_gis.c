@@ -433,6 +433,8 @@ appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info)
 {
 	OCINumber n;
 
+	uintToNumber(session->envp->errhp, &info, &n);
+
 	if (checkerr(
 			OCICollAppend(session->envp->envhp,
 				   		session->envp->errhp,
