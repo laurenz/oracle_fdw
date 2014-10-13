@@ -523,9 +523,9 @@ setType(oracleSession *session, ora_geometry *geom, const char *data)
 		case MULTILINETYPE:
 			gtype += 6;
 			break;
-/*		case MULTIPOLYGONTYPE:
+		case MULTIPOLYGONTYPE:
 			gtype += 7;
-			break; */
+			break;
 #define UNSUPPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geometry type "#T" not supported");
 		UNSUPPORTED_TYPE(COLLECTION)
 		UNSUPPORTED_TYPE(CIRCSTRING)
