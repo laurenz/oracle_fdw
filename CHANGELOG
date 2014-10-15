@@ -4,10 +4,15 @@ Version 1.1.0
     PostGIS geometry.  Supported geometry types are POINT, LINE, POLYGON,
     MULTIPOINT, MULTILINE and MULTIPOLYGON.
     Courtesy of Oslandia, implemented by Vincent Mora.
+  - Add regression tests for improved quality.
 
   Bugfixes:´
   - Fix a bug introduced in 1.0.0 that leads to crashes when LOB columns
     are modified.
+  - Fix several crashes when the foreign table has fewer or more columns
+    than the Oracle table.
+  - Fix a bug that caused "RETURNING <expression>" to return NULL for
+    complex expressions.
 
 Version 1.0.0, released 2014-04-08
   Enhancements:

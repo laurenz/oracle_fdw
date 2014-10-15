@@ -41,6 +41,7 @@
 #include "optimizer/pathnode.h"
 #include "optimizer/planmain.h"
 #include "optimizer/restrictinfo.h"
+#include "optimizer/var.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "port.h"
@@ -1268,17 +1269,25 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	}
 	else
 	{
+		Bitmapset *attrs_used = NULL;
+
 		/* extract the relevant RETURNING list if any */
 		if (plan->returningLists)
 			returningList = (List *) list_nth(plan->returningLists, subplan_index);
 
-		/* mark the corresponding columns as used */
-		foreach(cell, returningList)
+		if (returningList != NIL)
 		{
-			attnum = ((TargetEntry *)lfirst(cell))->resorigcol;
+			/* get all the attributes mentioned there */
+			pull_varattnos((Node *) returningList, resultRelation, &attrs_used);
 
+			/* mark the corresponding columns as used */
 			for (i=0; i<fdwState->oraTable->ncols; ++i)
-				if (fdwState->oraTable->cols[i]->pgattnum == attnum)
+			{
+				/* ignore columns that are not in the PostgreSQL table */
+				if (fdwState->oraTable->cols[i]->pgname == NULL)
+					continue;
+
+				if (bms_is_member(fdwState->oraTable->cols[i]->pgattnum - FirstLowInvalidHeapAttributeNumber, attrs_used))
 				{
 					/* throw an error if it is a LONG or LONG RAW column */
 					if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
@@ -1292,8 +1301,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 									fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG ? "" : " RAW")));
 
 					fdwState->oraTable->cols[i]->used = 1;
-					break;
 				}
+			}
 		}
 	}
 
@@ -1306,6 +1315,10 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 			firstcol = true;
 			for (i = 0; i < fdwState->oraTable->ncols; ++i)
 			{
+				/* don't add columns beyond the end of the PostgreSQL table */
+				if (fdwState->oraTable->cols[i]->pgname == NULL)
+					continue;
+
 				if (firstcol)
 					firstcol = false;
 				else
@@ -1318,8 +1331,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 			firstcol = true;
 			for (i = 0; i < fdwState->oraTable->ncols; ++i)
 			{
-				/* ignore columns that don't occur in the foreign table */
-				if (fdwState->oraTable->cols[i]->pgtype == 0)
+				/* don't add columns beyond the end of the PostgreSQL table */
+				if (fdwState->oraTable->cols[i]->pgname == NULL)
 					continue;
 
 				/* check that the data types can be converted */
@@ -3926,7 +3939,10 @@ struct OracleFdwState
 		copy->oraTable->cols[i]->name = pstrdup(orig->oraTable->cols[i]->name);
 		copy->oraTable->cols[i]->oratype = orig->oraTable->cols[i]->oratype;
 		copy->oraTable->cols[i]->scale = orig->oraTable->cols[i]->scale;
-		copy->oraTable->cols[i]->pgname = pstrdup(orig->oraTable->cols[i]->pgname);
+		if (orig->oraTable->cols[i]->pgname == NULL)
+			copy->oraTable->cols[i]->pgname = NULL;
+		else
+			copy->oraTable->cols[i]->pgname = pstrdup(orig->oraTable->cols[i]->pgname);
 		copy->oraTable->cols[i]->pgattnum = orig->oraTable->cols[i]->pgattnum;
 		copy->oraTable->cols[i]->pgtype = orig->oraTable->cols[i]->pgtype;
 		copy->oraTable->cols[i]->pgtypmod = orig->oraTable->cols[i]->pgtypmod;
@@ -4332,7 +4348,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 	for (j=0; j<fdw_state->oraTable->npgcols; ++j)
 	{
 		/* for dropped columns, insert a NULL */
-		if (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1)
+		if ((index + 1 < fdw_state->oraTable->ncols)
+				&& (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1))
 		{
 			nulls[j] = true;
 			values[j] = PointerGetDatum(NULL);

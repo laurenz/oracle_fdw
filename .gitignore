@@ -14,3 +14,6 @@
 
 # Executables
 *.exe
+
+# Regression test results
+results
