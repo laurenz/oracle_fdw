@@ -1,3 +1,14 @@
+Version 1.1.0
+  Enhancements:
+  - Add efficient support for translating between Oracle SDO_GEOMETRY and
+    PostGIS geometry.  Supported geometry types are POINT, LINE, POLYGON,
+    MULTIPOINT, MULTILINE and MULTIPOLYGON.
+    Courtesy of Oslandia, implemented by Vincent Mora.
+
+  Bugfixes:´
+  - Fix a bug introduced in 1.0.0 that leads to crashes when LOB columns
+    are modified.
+
 Version 1.0.0, released 2014-04-08
   Enhancements:
   - Add function oracle_diag(name) for diagnostic purposes.
