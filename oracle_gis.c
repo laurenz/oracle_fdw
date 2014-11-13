@@ -734,6 +734,9 @@ setLine(oracleSession *session, ora_geometry *geom, const char *data)
 	n = *((unsigned *)data) * ewkbDimension(session, geom);
 	data += sizeof(unsigned);
 
+	if (!n)
+		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty line is not supported");
+
 	appendElemInfo(session, geom, numCoord(session, geom) + 1); /* start index + 1 */
 	appendElemInfo(session, geom, 2); /* SDO_ETYPE linestring */
 	appendElemInfo(session, geom, 1); /* SDO_INTERPRETATION straight line segments */
@@ -770,6 +773,10 @@ setPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 
 	numRings = *((unsigned *)data);
 	data += sizeof(unsigned);
+
+	if (!numRings)
+		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty polygon is not supported");
+
 	ringSizeData = data;
 	data += (numRings+numRings%2)*sizeof(unsigned);
 	for (r=0; r<numRings; r++)
@@ -859,6 +866,9 @@ setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
 	numPoints = *((unsigned *)data);
 	data += sizeof(unsigned);
 
+	if (!numPoints)
+		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty multipoint is not supported");
+
 	for (i=0; i<numPoints; i++)
 	{
 		if (*((unsigned *)data) != POINTTYPE)
@@ -920,6 +930,9 @@ setMultiLine(oracleSession *session, ora_geometry *geom, const char *data)
 	data += sizeof(unsigned);
 	numLines = *((unsigned *)data);
 	data += sizeof(unsigned);
+
+	if (!numLines)
+		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty multiline is not supported");
 
 	for (r=0; r<numLines; r++) data = setLine(session, geom, data);
 
@@ -1021,6 +1034,9 @@ setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 	data += sizeof(unsigned);
 	numPolygons = *((unsigned *)data);
 	data += sizeof(unsigned);
+
+	if (!numPolygons)
+		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: empty multipolygon is not supported");
 
 	for (p=0; p<numPolygons; p++) data = setPolygon(session, geom, data);
 
