@@ -509,7 +509,8 @@ The Oracle database must be prepared as follows:
   SELECT privileges on V$SQL and V$SQL_PLAN.
 - Two tables must be created as follows:
   CREATE TABLE scott.typetest1 (
-     id  NUMBER(5) PRIMARY KEY,
+     id  NUMBER(5)
+        CONSTRAINT typetest1_pkey PRIMARY KEY,
      c   CHAR(10 CHAR),
      nc  NCHAR(10),
      vc  VARCHAR2(10 CHAR),

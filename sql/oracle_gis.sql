@@ -30,6 +30,13 @@ INSERT INTO gis (id, g) VALUES
    (8, 'SRID=8307;MULTIPOLYGON(((40 40,20 45,45 30,40 40)),((20 35,10 30,10 10,30 5,45 20,20 35),(30 20,20 15,20 25,30 20)))');
 
 /*
+ * Test empty geometries.
+ */
+
+UPDATE gis SET g = 'POINT Z EMPTY' WHERE id = 1;
+UPDATE gis SET g = 'MULTIPOLYGON(((10 10,20 10,20 20,10 20,10 10)),EMPTY)' WHERE id = 8;
+
+/*
  * Test SELECT and UPDATE ... RETURNING.
  */
 

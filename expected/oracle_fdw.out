@@ -117,7 +117,7 @@ SAVEPOINT one;
 -- will cause an error
 INSERT INTO shorty (id, c) VALUES (1, 'c');
 ERROR:  error executing query: OCIStmtExecute failed to execute remote query
-DETAIL:  ORA-00001: unique constraint (LAURENZ.TYPETEST1_PKEY) violated
+DETAIL:  ORA-00001: unique constraint (SCOTT.TYPETEST1_PKEY) violated
 ROLLBACK TO one;
 INSERT INTO shorty (id, c) VALUES (3, 'c');
 ROLLBACK TO one;
