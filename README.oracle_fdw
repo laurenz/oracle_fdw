@@ -306,6 +306,8 @@ it to the client encoding.
 The data type "geometry" is only available when PostGIS is installed.
 The only supported geometry types are POINT, LINE, POLYGON, MULTIPOINT,
 MULTILINE and MULTIPOLYGON in two and three dimensions.
+Empty PostGIS geometries are not supported because they have no equivalent
+in Oracle Spatial.
 NULL values for Oracle SRID will be converted to 0 and vice versa.
 
 If you need conversions exceeding the above, define an appropriate view in
