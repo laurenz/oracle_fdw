@@ -5,8 +5,11 @@ Version 1.1.0
     MULTIPOINT, MULTILINE and MULTIPOLYGON.
     Courtesy of Oslandia, implemented by Vincent Mora.
   - Add regression tests for improved quality.
+  - Bind LOB data instead of LOB locators for INSERT and UPDATE.
+    This simplifies the code and makes Oracle triggers on LOB columns
+    behave as expected.
 
-  Bugfixes:´
+  Bugfixes:
   - Fix a bug introduced in 1.0.0 that leads to crashes when LOB columns
     are modified.
   - Fix several crashes when the foreign table has fewer or more columns

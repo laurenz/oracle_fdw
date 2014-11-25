@@ -79,7 +79,6 @@ static void freeHandle(dvoid *handlep, struct connEntry *connp);
 static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
-static void oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value);
 static void setNullGeometry(oracleSession *session, ora_geometry *geom);
 
 /*
@@ -1765,16 +1764,11 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 	sb2 *indicators;
 	struct paramDesc *param;
 	sword result;
-	ub4 rowcount, lob_empty = 0;
-	OCILobLocator **lob_locators;  /* for input parameters that are LOBs */
-	int i, param_count = 0;
+	ub4 rowcount;
+	int param_count = 0;
 
 	for (param=paramList; param; param=param->next)
 		++param_count;
-
-	/* allocate a temporary array to hold the LOB locators */
-	lob_locators = oracleAlloc(param_count * sizeof(OCILobLocator *));
-	memset(lob_locators, 0, param_count * sizeof(OCILobLocator *));
 
 	/* allocate a temporary array of indicators */
 	indicators = oracleAlloc(param_count * sizeof(sb2 *));
@@ -1795,31 +1789,6 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		indicators[param_count] = (sb2)((param->value == NULL) ? -1 : 0);
 
 		if (param->value != NULL)
-		{
-			/*
-			 * For non-NULL LOB input parameters we insert empty LOBs in a first step.
-			 * Such columns have also been added to the RETURNING clause so that the
-			 * actual LOB contents can be written immediately after the DML statement.
-			 */
-			if (param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
-			{
-				/* allocate LOB locator for LOB columns */
-				allocHandle((void **)&lob_locators[param_count], OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
-					FDW_UNABLE_TO_CREATE_EXECUTION,
-					"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
-
-				/* empty the LOB */
-				if (checkerr(
-					OCIAttrSet(lob_locators[param_count], OCI_DTYPE_LOB, &lob_empty, 0,
-						OCI_ATTR_LOBEMPTY, session->envp->errhp),
-					(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-				{
-					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-						"error executing query: OCIAttrSet failed to set LOB empty",
-						oraMessage);
-				}
-			}
-
 			switch (param->bindType) {
 				case BIND_NUMBER:
 					/* allocate a new NUMBER */
@@ -1891,24 +1860,16 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					value_type = SQLT_STR;
 					break;
 				case BIND_LONGRAW:
+ 				case BIND_BLOB:
 					value = param->value;
 					value_len = *((sb4 *)param->value) + 4;
 					value_type = SQLT_LVB;
 					break;
 				case BIND_LONG:
+ 				case BIND_CLOB:
 					value = param->value;
 					value_len = *((sb4 *)param->value) + 4;
 					value_type = SQLT_LVC;
-					break;
- 				case BIND_BLOB:
-					value = &lob_locators[param_count];
-					value_len = sizeof(OCILobLocator *);
-					value_type = SQLT_BLOB;
-					break;
- 				case BIND_CLOB:
-					value = &lob_locators[param_count];
-					value_len = sizeof(OCILobLocator *);
-					value_type = SQLT_CLOB;
 					break;
 				case BIND_GEOMETRY:
 					value = param->value;
@@ -1927,15 +1888,11 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					oci_mode = OCI_DATA_AT_EXEC;
 					break;
 			}
-		}
 
 		/*
 		 * Since this is a bit convoluted, here is a description of how different
 		 * parameters are bound:
 		 * - Input parameters of normal data types require just a simple OCIBindByName.
-		 * - For LOB input parameters, bind a new empty LOB with OCIBindByName (stored in
-		 *   the lob_locators array), retrieve the LOB column as an output parameter
-		 *   (see below) and fill in the actual data.
 		 * - For named data type input parameters, a new object and its indicator structure
 		 *   are allocated and filled, and in addition to OCIBindByName there is a call
 		 *   to OCIBindObject that specifies the data type.
@@ -2022,12 +1979,6 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			oraMessage);
 	}
 
-	/* free all LOB locators */
-	for (i=0; i<=param_count; ++i)
-		if (lob_locators[i] != NULL)
-			freeHandle((dvoid *)lob_locators[i], session->connp);
-	oracleFree(lob_locators);
-
 	/* free indicators */
 	oracleFree(indicators);
 
@@ -2076,23 +2027,6 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 				}
 			}
 		}
-
-	if (rowcount > 0)
-	{
-		for (param=paramList; param; param=param->next)
-		{
-			/*
-			 * For LOB columns in DML statements we have added an empty LOB above.
-			 * Now we have to write the actual contents.
-			 */
-			if ((param->bindType == BIND_BLOB || param->bindType == BIND_CLOB)
-					&& oraTable->cols[param->colnum]->val_null != -1)
-				oracleWriteLob(session, *((OCILobLocator **)oraTable->cols[param->colnum]->val), param->value);
-			/* free geometry objects */
-			if (param->bindType == BIND_GEOMETRY)
-				oracleGeometryFree(session, (ora_geometry *)param->value);
-		}
-	}
 
 	return rowcount;
 }
@@ -2752,53 +2686,6 @@ bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp,
 	}
 
 	return OCI_CONTINUE;
-}
-
-/*
- * oracleWriteLob
- * 		Write the value in "value" to the LOB Locator in "locptr".
- * 		"value" is supposed to be in LVB/LVC format (first 4 bytes are the length).
- */
-
-void
-oracleWriteLob(oracleSession *session, OCILobLocator *locptr, char *value)
-{
-	oraub8 byte_count = *((sb4 *)value), char_count = 0;
-
-	/* empty LOB */
-	if (byte_count == 0)
-		return;
-
-	/* open the LOB */
-	if (checkerr(
-		OCILobOpen(session->connp->svchp, session->envp->errhp, locptr, OCI_LOB_READWRITE),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error writing data: OCILobOpen failed to open LOB",
-			oraMessage);
-	}
-
-	/* write the whole LOB in one piece */
-	if (checkerr(
-		OCILobWrite2(session->connp->svchp, session->envp->errhp, locptr, &byte_count, &char_count,
-			(oraub8)1, value + 4, byte_count, OCI_ONE_PIECE, NULL, NULL, (ub2)0, (ub1)0),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error writing data: OCILobWrite2 failed to write LOB",
-			oraMessage);
-	}
-
-	/* close the LOB */
-	if (checkerr(
-		OCILobClose(session->connp->svchp, session->envp->errhp, locptr),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error writing data: OCILobClose failed to close LOB",
-			oraMessage);
-	}
 }
 
 /*

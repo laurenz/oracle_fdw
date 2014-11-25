@@ -16,21 +16,3 @@ Since Oracle names default to upper case, it would be nice to have some
 support for case folding.  I envision an option "lowercase" with possible
 values "off" (leave names as they are), "on" (always fold to lower case)
 and "smart" (the default, only fold names that consist of capitals only).
-
-Don't use LOB locators for INSERT, UPDATE and DELETE
-----------------------------------------------------
-
-http://docs.oracle.com/cd/E11882_01/appdev.112/e10646/oci05bnd.htm#LNOCI16368
-
-Currently, DML for LOB columns is performed by binding an empty LOB locator,
-the LOB column is retrieved again in the RETURNING clause and the data are
-written into it.
-
-In hindsight, this seems unnecessarily complicated since the whole LOB data
-are available and written with a single OCILobWrite2().
-It would be better to bind the values as SQLT_LVB or SQLT_LVC and treat them
-like all other columns.
-
-Changing this would simplify the code, reduce the number of PostgreSQL-Oracle
-round trips and make triggers on the LOB columns work as expected (I have had
-a complaint about this from the field).

@@ -138,7 +138,7 @@ EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RET
                                                                             QUERY PLAN                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1
-   Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p7 WHERE "ID" = :k1 RETURNING "ID", "LC" INTO :r1, :r7
+   Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p7 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
    ->  Foreign Scan on typetest1
          Oracle query: SELECT /*d2468eee30dbe5fc5125064273dfeca0*/ "ID", "C", "NC", "VC", "NVC", "R", "U", "LB", "LR" FROM "TYPETEST1" WHERE ("ID" < 4) FOR UPDATE
 (4 rows)

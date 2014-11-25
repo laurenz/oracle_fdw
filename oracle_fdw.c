@@ -1344,24 +1344,6 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 					fdwState->oraTable->cols[i]->pgname
 				);
 
-				/*
-				 * To insert a LOB into an Oracle table, we have to use a two-step
-				 * approach:  first, NULL or an empty LOB is inserted, and immediately
-				 * after the statement we can write the actual contents into the LOB.
-				 * This requires that such a column is returned in the RETURNING clause
-				 * even if that was not originally requested.
-				 * We distinguish that case from a normal RETURNING column by setting (used & 2).
-				 * Currently this is not used, but we could optimize a little by keeping
-				 * such columns to be returned to PostgreSQL.
-				 * The UPDATE case is handled similarly.
-				 */
-				if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
-						|| fdwState->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
-				{
-					/* we need these in the RETURNING clause */
-					fdwState->oraTable->cols[i]->used += 2;
-				}
-
 				/* add a parameter description for the column */
 				snprintf(paramName, 9, ":p%d", fdwState->oraTable->cols[i]->pgattnum);
 				addParam(&fdwState->paramList, paramName, fdwState->oraTable->cols[i]->pgtype,
@@ -1402,17 +1384,6 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 					fdwState->oraTable->pgname,
 					fdwState->oraTable->cols[i]->pgname
 				);
-
-				/*
-				 * Updated LOB columns are handled like in the INSERT case,
-				 * see the comment there.
-				 */
-				if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
-						|| fdwState->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
-				{
-					/* we need these in the RETURNING clause */
-					fdwState->oraTable->cols[i]->used += 2;
-				}
 
 				/* add a parameter description for the column */
 				snprintf(paramName, 9, ":p%d", lfirst_int(cell));
