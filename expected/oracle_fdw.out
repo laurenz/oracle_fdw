@@ -152,22 +152,22 @@ WARNING:  column number 19 of foreign table "longy" does not exist in foreign Or
 
 -- transactions
 BEGIN;
-DELETE FROM shorty WHERE id = 3;
+DELETE FROM shorty WHERE id = 2;
 SAVEPOINT one;
 -- will cause an error
 INSERT INTO shorty (id, c) VALUES (1, 'c');
 ERROR:  error executing query: OCIStmtExecute failed to execute remote query
 DETAIL:  ORA-00001: unique constraint (SCOTT.TYPETEST1_PKEY) violated
 ROLLBACK TO one;
-INSERT INTO shorty (id, c) VALUES (3, 'c');
+INSERT INTO shorty (id, c) VALUES (2, 'c');
 ROLLBACK TO one;
 COMMIT;
 -- see if the correct data are in the table
 SELECT id, c FROM typetest1 ORDER BY id;
- id |     c      
-----+------------
+ id |          c           
+----+----------------------
   1 | fixed chau
-  2 | 
+  3 | a\x1B\x07\r\x7Fb    
   4 | short     
 (3 rows)
 

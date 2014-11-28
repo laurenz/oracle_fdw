@@ -151,12 +151,12 @@ WITH upd (id, c, lb) AS
 SELECT * FROM upd ORDER BY id;
 -- transactions
 BEGIN;
-DELETE FROM shorty WHERE id = 3;
+DELETE FROM shorty WHERE id = 2;
 SAVEPOINT one;
 -- will cause an error
 INSERT INTO shorty (id, c) VALUES (1, 'c');
 ROLLBACK TO one;
-INSERT INTO shorty (id, c) VALUES (3, 'c');
+INSERT INTO shorty (id, c) VALUES (2, 'c');
 ROLLBACK TO one;
 COMMIT;
 -- see if the correct data are in the table
