@@ -16,6 +16,9 @@ Version 1.1.0
     than the Oracle table.
   - Fix a bug that caused "RETURNING <expression>" to return NULL for
     complex expressions.
+  - Writing date or timestamp columns failed when DateStyle was not ISO.
+  - Reading or writing negative INTERVAL DAY TO SECOND resulted in bad
+    values because the string formats in PostgreSQL and Oracle differ.
 
 Version 1.0.0, released 2014-04-08
   Enhancements:

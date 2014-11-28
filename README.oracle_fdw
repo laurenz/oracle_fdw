@@ -519,7 +519,15 @@ The Oracle database must be prepared as follows:
      r   RAW(10),
      u   RAW(16),
      lb  BLOB,
-     lr  LONG RAW
+     lr  LONG RAW,
+     b   NUMBER(1),
+     num NUMBER(7,5),
+     fl  BINARY_FLOAT,
+     db  BINARY_DOUBLE,
+     d   DATE,
+     ts  TIMESTAMP WITH TIME ZONE,
+     ids INTERVAL DAY TO SECOND,
+     iym INTERVAL YEAR TO MONTH
   ) SEGMENT CREATION IMMEDIATE;
 
   CREATE TABLE scott.gis (

@@ -49,6 +49,7 @@
 #include "storage/lock.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/date.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
@@ -56,6 +57,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/resowner.h"
+#include "utils/timestamp.h"
 #include "utils/tqual.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -706,9 +708,9 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	}
 
 	/*
-  	* Core code already has some lock on each rel being planned, so we can
-  	* use NoLock here.
-  	*/
+	 * Core code already has some lock on each rel being planned, so we can
+	 * use NoLock here.
+	 */
 	rel = heap_open(foreigntableid, NoLock);
 
 	/* is there an AFTER trigger FOR EACH ROW? */
@@ -1188,13 +1190,13 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	initStringInfo(&sql);
 
 	/*
-  	* Core code already has some lock on each rel being planned, so we can
-  	* use NoLock here.
-  	*/
+	 * Core code already has some lock on each rel being planned, so we can
+	 * use NoLock here.
+	 */
 	rel = heap_open(rte->relid, NoLock);
 
 	/* figure out which attributes are affected and if there is a trigger */
-    switch (operation)
+	switch (operation)
 	{
 		case CMD_INSERT:
 			/*
@@ -3106,7 +3108,8 @@ static char
 	ReleaseSysCache(tuple);
 
 	/* render the constant in Oracle SQL */
-	switch (type) {
+	switch (type)
+	{
 		case TEXTOID:
 		case CHAROID:
 		case BPCHAROID:
@@ -3185,7 +3188,7 @@ static char
 				str = "";
 
 			initStringInfo(&result);
-			appendStringInfo(&result, "INTERVAL '%s%d %d:%d:%d.%d' DAY(9) TO SECOND(9)", str, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
+			appendStringInfo(&result, "INTERVAL '%s%d %02d:%02d:%02d.%06d' DAY(9) TO SECOND(6)", str, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
 
 			break;
 		default:
@@ -4020,10 +4023,10 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 	struct paramDesc *param;
 	Datum datum;
 	bool isnull;
-	int32 value_len;
+	int32 value_len, tzoffset;
 	char *p, *q;
-	struct pg_tm interval_tm;
-	fsec_t interval_fsec;
+	struct pg_tm datetime_tm;
+	fsec_t datetime_fsec;
 	StringInfoData s;
 
 	for (param=paramList; param != NULL; param=param->next)
@@ -4047,7 +4050,6 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 		{
 			case BIND_STRING:
 			case BIND_NUMBER:
-			case BIND_TIMESTAMP:
 				if (isnull)
 				{
 					param->value = NULL;
@@ -4057,32 +4059,63 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 				/* special treatment for intervals */
 				if (oraTable->cols[param->colnum]->pgtype == INTERVALOID)
 				{
+					char sign = '+';
+
 					/* get the parts */
-					(void)interval2tm(*DatumGetIntervalP(datum), &interval_tm, &interval_fsec);
+					(void)interval2tm(*DatumGetIntervalP(datum), &datetime_tm, &datetime_fsec);
 
 					switch (oraTable->cols[param->colnum]->oratype)
 					{
 						case ORA_TYPE_INTERVALY2M:
-							if (interval_tm.tm_mday != 0 || interval_tm.tm_hour != 0
-									|| interval_tm.tm_min != 0 || interval_tm.tm_sec != 0 || interval_fsec != 0)
+							if (datetime_tm.tm_mday != 0 || datetime_tm.tm_hour != 0
+									|| datetime_tm.tm_min != 0 || datetime_tm.tm_sec != 0 || datetime_fsec != 0)
 								ereport(ERROR,
 										(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 										errmsg("invalid value for Oracle INTERVAL YEAR TO MONTH"),
 										errdetail("Only year and month can be non-zero for such an interval.")));
+							if (datetime_tm.tm_year < 0 || datetime_tm.tm_mon < 0)
+							{
+								if (datetime_tm.tm_year > 0 || datetime_tm.tm_mon > 0)
+									ereport(ERROR,
+											(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+											errmsg("invalid value for Oracle INTERVAL YEAR TO MONTH"),
+											errdetail("Year and month must be either both positive or both negative.")));
+								sign = '-';
+								datetime_tm.tm_year = -datetime_tm.tm_year;
+								datetime_tm.tm_mon = -datetime_tm.tm_mon;
+							}
 
 							initStringInfo(&s);
-							appendStringInfo(&s, "%d-%d", interval_tm.tm_year, interval_tm.tm_mon);
+							appendStringInfo(&s, "%c%d-%d", sign, datetime_tm.tm_year, datetime_tm.tm_mon);
 							param->value = s.data;
 							break;
 						case ORA_TYPE_INTERVALD2S:
-							if (interval_tm.tm_year != 0 || interval_tm.tm_mon != 0)
+							if (datetime_tm.tm_year != 0 || datetime_tm.tm_mon != 0)
 								ereport(ERROR,
 										(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 										errmsg("invalid value for Oracle INTERVAL DAY TO SECOND"),
 										errdetail("Year and month must be zero for such an interval.")));
+							if (datetime_tm.tm_mday < 0 || datetime_tm.tm_hour < 0 || datetime_tm.tm_min < 0
+								|| datetime_tm.tm_sec < 0 || datetime_fsec < 0)
+							{
+								if (datetime_tm.tm_mday > 0 || datetime_tm.tm_hour > 0 || datetime_tm.tm_min > 0
+									|| datetime_tm.tm_sec > 0 || datetime_fsec > 0)
+									ereport(ERROR,
+											(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+											errmsg("invalid value for Oracle INTERVAL DAY TO SECOND"),
+											errdetail("Interval elements must be either all positive or all negative.")));
+								sign = '-';
+								datetime_tm.tm_mday = -datetime_tm.tm_mday;
+								datetime_tm.tm_hour = -datetime_tm.tm_hour;
+								datetime_tm.tm_min = -datetime_tm.tm_min;
+								datetime_tm.tm_sec = -datetime_tm.tm_sec;
+								datetime_fsec = -datetime_fsec;
+							}
 
 							initStringInfo(&s);
-							appendStringInfo(&s, "%d %d:%d:%d.%d", interval_tm.tm_mday, interval_tm.tm_hour, interval_tm.tm_min, interval_tm.tm_sec, (int32)interval_fsec);
+							appendStringInfo(&s, "%c%d %02d:%02d:%02d.%06d",
+									sign, datetime_tm.tm_mday, datetime_tm.tm_hour, datetime_tm.tm_min,
+									datetime_tm.tm_sec, (int32)datetime_fsec);
 							param->value = s.data;
 							break;
 						default:
@@ -4119,6 +4152,67 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 						/* nothing to be done */
 						break;
 				}
+				break;
+			case BIND_TIMESTAMP:
+				if (isnull)
+				{
+					param->value = NULL;
+					break;
+				}
+
+				/*
+				 * We have to handle datetime types specially, because
+				 * their string representation depends on DateStyle.
+				 */
+				switch(oraTable->cols[param->colnum]->pgtype)
+				{
+					case DATEOID:
+						if (DATE_NOT_FINITE(DatumGetDateADT(datum)))
+							ereport(ERROR,
+									(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+									errmsg("infinite date value cannot be stored in Oracle")));
+
+						/* get the parts */
+						(void)j2date(DatumGetDateADT(datum) + POSTGRES_EPOCH_JDATE,
+								&(datetime_tm.tm_year),
+								&(datetime_tm.tm_mon),
+								&(datetime_tm.tm_mday));
+
+						initStringInfo(&s);
+						appendStringInfo(&s, "%04d-%02d-%02d", datetime_tm.tm_year, datetime_tm.tm_mon, datetime_tm.tm_mday);
+						param->value = s.data;
+
+						break;
+					case TIMESTAMPOID:
+					case TIMESTAMPTZOID:
+						/* this is sloppy, but DatumGetTimestampTz and DatumGetTimestamp are the same */
+						if (TIMESTAMP_NOT_FINITE(DatumGetTimestampTz(datum)))
+							ereport(ERROR,
+									(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+									errmsg("infinite timestamp value cannot be stored in Oracle")));
+
+						/* get the parts */
+						(void)timestamp2tm(DatumGetTimestampTz(datum),
+									(oraTable->cols[param->colnum]->pgtype == TIMESTAMPOID) ? NULL : &tzoffset,
+									&datetime_tm,
+									&datetime_fsec,
+									NULL,
+									NULL);
+
+						initStringInfo(&s);
+						appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d",
+								datetime_tm.tm_year, datetime_tm.tm_mon, datetime_tm.tm_mday,
+								datetime_tm.tm_hour, datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec);
+						if (oraTable->cols[param->colnum]->pgtype == TIMESTAMPTZOID)
+							appendStringInfo(&s, "%+03d:%02d", -tzoffset / 3600,
+									(tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600);
+						param->value = s.data;
+
+						break;
+					default:
+						elog(ERROR, "impossible datetime type for binding as timestamp");
+				}
+
 				break;
 			case BIND_LONG:
 			case BIND_LONGRAW:
@@ -4330,18 +4424,23 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			++index;
 
 		/*
-	 	* Columns exceeding the length of the Oracle table will be NULL,
-	 	* as well as columns that are not used in the query.
-	 	*/
+		 * Columns exceeding the length of the Oracle table will be NULL,
+		 * as well as columns that are not used in the query.
+		 * Geometry columns are NULL if the value is NULL,
+		 * for all other types use the NULL indicator.
+		 */
 		if (index >= fdw_state->oraTable->ncols
-				|| fdw_state->oraTable->cols[index]->used == 0
-				|| fdw_state->oraTable->cols[index]->val_null == -1)
+			|| fdw_state->oraTable->cols[index]->used == 0
+			|| (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY
+				&& ((ora_geometry *)fdw_state->oraTable->cols[index]->val)->geometry == NULL)
+			|| fdw_state->oraTable->cols[index]->val_null == -1)
 		{
 			nulls[j] = true;
 			values[j] = PointerGetDatum(NULL);
 			continue;
 		}
 
+		/* from here on, we can assume columns to be NOT NULL */
 		nulls[j] = false;
 		pgtype = fdw_state->oraTable->cols[index]->pgtype;
 
@@ -4359,20 +4458,15 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		{
 			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
 
-			if (geom->geometry == NULL)
-				value_len = 0;  /* NULL value */
-			else
-			{
-				/* install error context callback */
-				errcb.previous = error_context_stack;
-				error_context_stack = &errcb;
-				fdw_state->columnindex = index;
+			/* install error context callback */
+			errcb.previous = error_context_stack;
+			error_context_stack = &errcb;
+			fdw_state->columnindex = index;
 
-				value_len = oracleGetEWKBLen(fdw_state->session, geom);
+			value_len = oracleGetEWKBLen(fdw_state->session, geom);
 
-				/* uninstall error context callback */
-				error_context_stack = errcb.previous;
-			}
+			/* uninstall error context callback */
+			error_context_stack = errcb.previous;
 
 			value = NULL;  /* we will fetch that later to avoid unnecessary copying */
 		}
@@ -4399,24 +4493,17 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
 			struct varlena *result = NULL;
 
-			if (value_len == 0)
-			{
-				nulls[j] = true;
-			}
-			else
-			{
-				/* install error context callback */
-				errcb.previous = error_context_stack;
-				error_context_stack = &errcb;
-				fdw_state->columnindex = index;
+			/* install error context callback */
+			errcb.previous = error_context_stack;
+			error_context_stack = &errcb;
+			fdw_state->columnindex = index;
 
-				result = (bytea *)palloc(value_len + VARHDRSZ);
-				oracleFillEWKB(fdw_state->session, geom, value_len, VARDATA(result));
-				SET_VARSIZE(result, value_len + VARHDRSZ);
+			result = (bytea *)palloc(value_len + VARHDRSZ);
+			oracleFillEWKB(fdw_state->session, geom, value_len, VARDATA(result));
+			SET_VARSIZE(result, value_len + VARHDRSZ);
 
-				/* uninstall error context callback */
-				error_context_stack = errcb.previous;
-			}
+			/* uninstall error context callback */
+			error_context_stack = errcb.previous;
 
 			values[j] = PointerGetDatum(result);
 
@@ -4438,6 +4525,27 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			HeapTuple tuple;
 			Datum dat;
 
+			/*
+			 * Negative INTERVAL DAY TO SECOND need some preprocessing:
+			 * In Oracle they are rendered like this: "-01 12:00:00.000000"
+			 * They have to be changed to "-01 -12:00:00.000000" for PostgreSQL.
+			 */
+			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_INTERVALD2S
+				&& value[0] == '-')
+			{
+				char *newval = palloc(strlen(value) + 2);
+				char *pos = strchr(value, ' ');
+
+				if (pos == NULL)
+					elog(ERROR, "no space in INTERVAL DAY TO SECOND");
+				strncpy(newval, value, pos - value + 1);
+				newval[pos - value + 1] = '\0';
+				strcat(newval, "-");
+				strcat(newval, pos + 1);
+
+				value = newval;
+			}
+
 			/* find the appropriate conversion function */
 			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(pgtype));
 			if (!HeapTupleIsValid(tuple))
@@ -4447,7 +4555,6 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			typinput = ((Form_pg_type)GETSTRUCT(tuple))->typinput;
 			ReleaseSysCache(tuple);
 
-			/* and call it */
 			dat = CStringGetDatum(value);
 
 			/* install error context callback */

@@ -24,7 +24,15 @@ CREATE FOREIGN TABLE typetest1 (
    r   bytea,
    u   uuid,
    lb  bytea,
-   lr  bytea
+   lr  bytea,
+   b   boolean,
+   num numeric(7,5),
+   fl  float,
+   db  double precision,
+   d   date,
+   ts  timestamp with time zone,
+   ids interval,
+   iym interval
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
 ALTER FOREIGN TABLE typetest1 DROP q;
 
@@ -46,6 +54,14 @@ CREATE FOREIGN TABLE longy (
    u   uuid,
    lb  bytea,
    lr  bytea,
+   b   boolean,
+   num numeric(7,5),
+   fl  float,
+   db  double precision,
+   d   date,
+   ts  timestamp with time zone,
+   ids interval,
+   iym interval,
    x   integer
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
 
@@ -55,7 +71,7 @@ CREATE FOREIGN TABLE longy (
 
 DELETE FROM typetest1;
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    1,
    'fixed char',
    'nat''l char',
@@ -65,12 +81,20 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
    bytea('\xDEADBEEF'),
    uuid('055e26fa-f1d8-771f-e053-1645990add93'),
    bytea('\xDEADBEEF'),
-   bytea('\xDEADBEEF')
+   bytea('\xDEADBEEF'),
+   TRUE,
+   3.14159,
+   3.14159,
+   3.14159,
+   '1968-10-20',
+   '2009-01-26 22:30:00 PST',
+   '1 day 2 hours 30 seconds 1 microsecond',
+   '-6 months'
 );
 
 INSERT INTO shorty (id, c) VALUES (2, NULL);
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    3,
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
@@ -80,10 +104,18 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
    bytea('\xDEADF00D'),
    uuid('055f3b32-a02c-4532-e053-1645990a6db2'),
    bytea('\xDEADF00DDEADF00DDEADF00D'),
-   bytea('\xDEADF00DDEADF00DDEADF00D')
+   bytea('\xDEADF00DDEADF00DDEADF00D'),
+   FALSE,
+   -2.71828,
+   -2.71828,
+   -2.71828,
+   '2014-11-25',
+   '2014-11-25 15:02:54.893532 PST',
+   '-2 days -12 hours -30 minutes',
+   '-2 years -6 months'
 );
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    4,
    'short',
    'short',
@@ -93,7 +125,15 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
    bytea('\xDEADF00D'),
    uuid('0560ee34-2ef9-1137-e053-1645990ac874'),
    bytea('\xDEADF00D'),
-   bytea('\xDEADF00D')
+   bytea('\xDEADF00D'),
+   NULL,
+   0,
+   0,
+   0,
+   NULL,
+   NULL,
+   '23:59:59.999999',
+   '3 years'
 );
 
 /*
@@ -101,7 +141,7 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr) VALUES (
  */
 
 -- simple SELECT
-SELECT id, c, nc, vc, nvc, length(lc), r, u, length(lb), length(lr), x FROM longy ORDER BY id;
+SELECT id, c, nc, vc, nvc, length(lc), r, u, length(lb), length(lr), b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
 -- mass UPDATE
 WITH upd (id, c, lb) AS
    (UPDATE longy SET c = substr(c, 1, 9) || 'u',
