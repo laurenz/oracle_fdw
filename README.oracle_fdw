@@ -539,7 +539,7 @@ Set the environment for the PostgreSQL server so that it can establish an
 Oracle connection without connect string:
 If the Oracle server is on the same machine, set the environment variables
 ORACLE_SID and ORACLE_HOME appropriately, for a remote server set the
-environment variable TWO_TASK to the connect string.
+environment variable TWO_TASK (or LOCAL on Windows) to the connect string.
 
 The regression tests are run as follows:
 
