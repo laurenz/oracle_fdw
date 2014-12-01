@@ -496,11 +496,11 @@ Unless you are developing oracle_fdw or want to test its functionality
 on an exotic platform, you don't have to do that.
 
 For the regression tests to work, you must have a PostgreSQL cluster
-and an Oracle server (with Locator or Spatial) running, and the oracle_fdw
-binaries must be installed.  The regression tests will create a database
-called "contrib_regression" and run a number of tests.
-For the PostGIS regression tests to succeed, the PostGIS binaries must be
-installed.
+(9.3 or better) and an Oracle server (10.1 or better with Locator or Spatial)
+running, and the oracle_fdw binaries must be installed.
+The regression tests will create a database called "contrib_regression" and
+run a number of tests.  For the PostGIS regression tests to succeed,
+the PostGIS binaries must be installed.
 
 The Oracle database must be prepared as follows:
 - A user "scott" with password "tiger" must exist (unless you want to edit
