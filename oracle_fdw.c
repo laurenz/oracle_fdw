@@ -50,6 +50,7 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
+#include "utils/datetime.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
