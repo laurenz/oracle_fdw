@@ -2256,7 +2256,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 	int index;
 
 	if (expr == NULL)
-		return false;
+		return NULL;
 
 	switch(expr->type)
 	{
@@ -2271,14 +2271,14 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					appendStringInfo(&result, "NULL");
 				}
 				else
-					return false;
+					return NULL;
 			}
 			else
 			{
 				/* get a string representation of the value */
 				char *c = datumToString(constant->constvalue, constant->consttype);
 				if (c == NULL)
-					return false;
+					return NULL;
 				else
 				{
 					initStringInfo(&result);
@@ -2290,11 +2290,11 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			param = (Param *)expr;
 #ifdef OLD_FDW_API
 			/* don't try to push down parameters with 9.1 */
-			return false;
+			return NULL;
 #else
 			/* don't try to handle interval parameters */
 			if (! canHandleType(param->paramtype) || param->paramtype == INTERVALOID)
-				return false;
+				return NULL;
 
 			/* find the index in the parameter list */
 			index = 0;
@@ -2326,14 +2326,14 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 				/* we cannot handle system columns */
 				if (variable->varattno < 1)
-					return false;
+					return NULL;
 	
 				/*
 				 * Allow boolean columns here.
 				 * They will be rendered as ("COL" <> 0).
 				 */
 				if (! (canHandleType(variable->vartype) || variable->vartype == BOOLOID))
-					return false;
+					return NULL;
 	
 				/* get oraTable column index corresponding to this column (-1 if none) */
 				index = oraTable->ncols - 1;
@@ -2362,7 +2362,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 						&& oratype != ORA_TYPE_NVARCHAR2
 						&& oratype != ORA_TYPE_NCHAR
 						&& oratype != ORA_TYPE_CLOB)
-					return false;
+					return NULL;
 	
 				initStringInfo(&result);
 	
@@ -2385,11 +2385,11 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				/* treat it like a parameter */
 #ifdef OLD_FDW_API
 				/* don't try to push down parameters with 9.1 */
-				return false;
+				return NULL;
 #else
 				/* don't try to handle type interval */
 				if (! canHandleType(variable->vartype) || variable->vartype == INTERVALOID)
-					return false;
+					return NULL;
 	
 				/* find the index in the parameter list */
 				index = 0;
@@ -2431,17 +2431,17 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* ignore operators in other than the pg_catalog schema */
 			if (schema != PG_CATALOG_NAMESPACE)
-				return false;
+				return NULL;
 
 			if (! canHandleType(rightargtype))
-				return false;
+				return NULL;
 
 			/*
 			 * Don't translate operations on two intervals.
 			 * INTERVAL YEAR TO MONTH and INTERVAL DAY TO SECOND don't mix well.
 			 */
 			if (leftargtype == INTERVALOID && rightargtype == INTERVALOID)
-				return false;
+				return NULL;
 
 			/* the operators that we can translate */
 			if (strcmp(opername, "=") == 0
@@ -2474,7 +2474,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (left == NULL)
 				{
 					pfree(opername);
-					return false;
+					return NULL;
 				}
 
 				if (oprkind == 'b')
@@ -2485,7 +2485,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					{
 						pfree(left);
 						pfree(opername);
-						return false;
+						return NULL;
 					}
 
 					initStringInfo(&result);
@@ -2549,7 +2549,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			{
 				/* cannot translate this operator */
 				pfree(opername);
-				return false;
+				return NULL;
 			}
 
 			pfree(opername);
@@ -2579,23 +2579,23 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* ignore operators in other than the pg_catalog schema */
 			if (schema != PG_CATALOG_NAMESPACE)
-				return false;
+				return NULL;
 
 			/* don't try to push down anything but IN and NOT IN expressions */
 			if ((strcmp(opername, "=") != 0 || ! arrayoper->useOr)
 					&& (strcmp(opername, "<>") != 0 || arrayoper->useOr))
-				return false;
+				return NULL;
 
 			if (! canHandleType(leftargtype))
-				return false;
+				return NULL;
 
 			left = getOracleWhereClause(session, foreignrel, linitial(arrayoper->args), oraTable, params);
 			if (left == NULL)
-				return false;
+				return NULL;
 
 			/* only push down IN expressions with constant second (=last) argument */
 			if (((Expr *)llast(arrayoper->args))->type != T_Const)
-				return false;
+				return NULL;
 
 			/* begin to compose result */
 			initStringInfo(&result);
@@ -2619,7 +2619,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					if (c == NULL)
 					{
 						array_free_iterator(iterator);
-						return false;
+						return NULL;
 					}
 				}
 
@@ -2631,7 +2631,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* don't allow empty arrays */
 			if (first_arg)
-				return false;
+				return NULL;
 
 			/* two parentheses close the expression */
 			appendStringInfo(&result, "))");
@@ -2648,18 +2648,18 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			ReleaseSysCache(tuple);
 
 			if (! canHandleType(rightargtype))
-				return false;
+				return NULL;
 
 			left = getOracleWhereClause(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params);
 			if (left == NULL)
 			{
-				return false;
+				return NULL;
 			}
 			right = getOracleWhereClause(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
 			if (right == NULL)
 			{
 				pfree(left);
-				return false;
+				return NULL;
 			}
 
 			initStringInfo(&result);
@@ -2677,18 +2677,18 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			ReleaseSysCache(tuple);
 
 			if (! canHandleType(rightargtype))
-				return false;
+				return NULL;
 
 			left = getOracleWhereClause(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params);
 			if (left == NULL)
 			{
-				return false;
+				return NULL;
 			}
 			right = getOracleWhereClause(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
 			if (right == NULL)
 			{
 				pfree(left);
-				return false;
+				return NULL;
 			}
 
 			initStringInfo(&result);
@@ -2700,7 +2700,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			arg = getOracleWhereClause(session, foreignrel, linitial(boolexpr->args), oraTable, params);
 			if (arg == NULL)
-				return false;
+				return NULL;
 
 			initStringInfo(&result);
 			appendStringInfo(&result, "(%s%s",
@@ -2713,7 +2713,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (arg == NULL)
 				{
 					pfree(result.data);
-					return false;
+					return NULL;
 				}
 
 				appendStringInfo(&result, " %s %s",
@@ -2733,7 +2733,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			caseexpr = (CaseExpr *)expr;
 
 			if (! canHandleType(caseexpr->casetype))
-				return false;
+				return NULL;
 
 			initStringInfo(&result);
 			appendStringInfo(&result, "CASE");
@@ -2745,7 +2745,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (arg == NULL)
 				{
 					pfree(result.data);
-					return false;
+					return NULL;
 				}
 				else
 				{
@@ -2773,7 +2773,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (arg == NULL)
 				{
 					pfree(result.data);
-					return false;
+					return NULL;
 				}
 				else
 				{
@@ -2786,7 +2786,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (arg == NULL)
 				{
 					pfree(result.data);
-					return false;
+					return NULL;
 				}
 				else
 				{
@@ -2802,7 +2802,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (arg == NULL)
 				{
 					pfree(result.data);
-					return false;
+					return NULL;
 				}
 				else
 				{
@@ -2818,7 +2818,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			coalesceexpr = (CoalesceExpr *)expr;
 
 			if (! canHandleType(coalesceexpr->coalescetype))
-				return false;
+				return NULL;
 
 			initStringInfo(&result);
 			appendStringInfo(&result, "COALESCE(");
@@ -2830,7 +2830,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (arg == NULL)
 				{
 					pfree(result.data);
-					return false;
+					return NULL;
 				}
 
 				if (first_arg)
@@ -2851,7 +2851,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 		case T_NullTest:
 			arg = getOracleWhereClause(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params);
 			if (arg == NULL)
-				return false;
+				return NULL;
 
 			initStringInfo(&result);
 			appendStringInfo(&result, "(%s IS %sNULL)",
@@ -2862,7 +2862,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			func = (FuncExpr *)expr;
 
 			if (! canHandleType(func->funcresulttype))
-				return false;
+				return NULL;
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
@@ -2880,7 +2880,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* ignore functions in other than the pg_catalog schema */
 			if (schema != PG_CATALOG_NAMESPACE)
-				return false;
+				return NULL;
 
 			/* the "normal" functions that we can translate */
 			if (strcmp(opername, "abs") == 0
@@ -2951,7 +2951,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					{
 						pfree(result.data);
 						pfree(opername);
-						return false;
+						return NULL;
 					}
 
 					if (first_arg)
@@ -2975,7 +2975,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (left == NULL)
 				{
 					pfree(opername);
-					return false;
+					return NULL;
 				}
 
 				/* can only handle these fields in Oracle */
@@ -2996,7 +2996,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					{
 						pfree(opername);
 						pfree(left);
-						return false;
+						return NULL;
 					}
 
 					initStringInfo(&result);
@@ -3006,7 +3006,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				{
 					pfree(opername);
 					pfree(left);
-					return false;
+					return NULL;
 				}
 
 				pfree(left);
@@ -3022,7 +3022,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			{
 				/* function that we cannot render for Oracle */
 				pfree(opername);
-				return false;
+				return NULL;
 			}
 
 			pfree(opername);
@@ -3037,16 +3037,16 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (coerce->resulttype != DATEOID
 					&& coerce->resulttype != TIMESTAMPOID
 					&& coerce->resulttype != TIMESTAMPTZOID)
-				return false;
+				return NULL;
 
 			/* the argument must be a Const */
 			if (coerce->arg->type != T_Const)
-				return false;
+				return NULL;
 
 			/* the argument must be a not-NULL text constant */
 			constant = (Const *)coerce->arg;
 			if (constant->constisnull || (constant->consttype != CSTRINGOID && constant->consttype != TEXTOID))
-				return false;
+				return NULL;
 
 			/* get the type's output function */
 			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(constant->consttype));
@@ -3059,7 +3059,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* the value must be "now" */
 			if (strcmp(DatumGetCString(OidFunctionCall1(typoutput, constant->constvalue)), "now") != 0)
-				return false;
+				return NULL;
 
 			initStringInfo(&result);
 			switch (coerce->resulttype)
@@ -3077,7 +3077,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			break;
 		default:
 			/* we cannot translate this to Oracle */
-			return false;
+			return NULL;
 	}
 
 	return result.data;
