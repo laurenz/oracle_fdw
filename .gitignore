@@ -17,3 +17,7 @@
 
 # Regression test results
 results
+
+# other version control systems
+CVS
+.svn
