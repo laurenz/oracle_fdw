@@ -14,6 +14,8 @@
 #if defined _WIN32 || defined _WIN64
 /* for getpid */
 #include <process.h>
+/* Windows doesn't have snprintf */
+#define snprintf _snprintf
 #endif
 
 /* Oracle header */
