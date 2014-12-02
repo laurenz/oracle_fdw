@@ -15,7 +15,7 @@
 #include <sys/types.h>
 
 /* oracle_fdw version */
-#define ORACLE_FDW_VERSION "1.0.0"
+#define ORACLE_FDW_VERSION "1.1.0"
 
 #ifdef OCI_ORACLE
 /*
@@ -129,8 +129,6 @@ typedef enum {
 	BIND_STRING,
 	BIND_NUMBER,
 	BIND_TIMESTAMP,
-	BIND_BLOB,
-	BIND_CLOB,
 	BIND_LONG,
 	BIND_LONGRAW,
 	BIND_GEOMETRY,

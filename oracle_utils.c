@@ -1860,13 +1860,11 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					value_type = SQLT_STR;
 					break;
 				case BIND_LONGRAW:
- 				case BIND_BLOB:
 					value = param->value;
 					value_len = *((sb4 *)param->value) + 4;
 					value_type = SQLT_LVB;
 					break;
 				case BIND_LONG:
- 				case BIND_CLOB:
 					value = param->value;
 					value_len = *((sb4 *)param->value) + 4;
 					value_type = SQLT_LVC;

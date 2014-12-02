@@ -3978,6 +3978,7 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 			param->bindType = BIND_TIMESTAMP;
 			break;
 		case ORA_TYPE_LONG:
+		case ORA_TYPE_CLOB:
 			param->bindType = BIND_LONG;
 			break;
 		case ORA_TYPE_RAW:
@@ -3987,13 +3988,8 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 				param->bindType = BIND_LONGRAW;
 			break;
 		case ORA_TYPE_LONGRAW:
-			param->bindType = BIND_LONGRAW;
-			break;
 		case ORA_TYPE_BLOB:
-			param->bindType = BIND_BLOB;
-			break;
-		case ORA_TYPE_CLOB:
-			param->bindType = BIND_CLOB;
+			param->bindType = BIND_LONGRAW;
 			break;
 		case ORA_TYPE_BFILE:
 			ereport(ERROR,
@@ -4217,8 +4213,6 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 				break;
 			case BIND_LONG:
 			case BIND_LONGRAW:
-			case BIND_BLOB:
-			case BIND_CLOB:
 				if (isnull)
 				{
 					param->value = NULL;
