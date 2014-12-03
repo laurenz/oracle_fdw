@@ -1,4 +1,4 @@
-Version 1.1.0
+Version 1.1.0, released 2014-12-03
   Enhancements:
   - Add efficient support for translating between Oracle SDO_GEOMETRY and
     PostGIS geometry.  Supported geometry types are POINT, LINE, POLYGON,
