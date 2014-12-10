@@ -1734,7 +1734,8 @@ oracleExplainForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List
 	ExplainPropertyText("Oracle statement", fdw_state->query, es);
 }
 
-/* oracleIsForeignRelUpdatable
+/*
+ * oracleIsForeignRelUpdatable
  * 		Returns 0 if "readonly" is set, a value indicating that all DML is allowed.
  */
 int
@@ -4607,6 +4608,23 @@ errorContextCallback(void *arg)
 		quote_identifier(fdw_state->oraTable->cols[fdw_state->columnindex]->pgname),
 		quote_identifier(fdw_state->oraTable->pgname),
 		fdw_state->rowcount);
+}
+
+/*
+ * oracleGetShareFileName
+ * 		Returns the (palloc'ed) absolute path of a file in the "share" directory.
+ */
+char *
+oracleGetShareFileName(const char *relativename)
+{
+	char share_path[MAXPGPATH], *result;
+
+	get_share_path(my_exec_path, share_path);
+
+	result = palloc(MAXPGPATH);
+	snprintf(result, MAXPGPATH, "%s/%s", share_path, relativename);
+
+	return result;
 }
 
 /*

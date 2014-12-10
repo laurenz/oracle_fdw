@@ -296,19 +296,12 @@ TIMESTAMP WITH LOCAL TIME ZOME | date, timestamp, timestamptz, char,
                                |   varchar, text
 INTERVAL YEAR TO MONTH         | interval, char, varchar, text
 INTERVAL DAY TO SECOND         | interval, char, varchar, text
-MDSYS.SDO_GEOMETRY             | geometry
+MDSYS.SDO_GEOMETRY             | geometry (see "PostGIS support" below)
 
 If a NUMBER is converted to a boolean, "0" means "false", everything else "true".
 
 NCLOB is currently not supported because Oracle cannot automatically convert
 it to the client encoding.
-
-The data type "geometry" is only available when PostGIS is installed.
-The only supported geometry types are POINT, LINE, POLYGON, MULTIPOINT,
-MULTILINE and MULTIPOLYGON in two and three dimensions.
-Empty PostGIS geometries are not supported because they have no equivalent
-in Oracle Spatial.
-NULL values for Oracle SRID will be converted to 0 and vice versa.
 
 If you need conversions exceeding the above, define an appropriate view in
 Oracle or PostgreSQL.
@@ -399,6 +392,22 @@ result in good (and much faster) row count estimates even if the table option
 
 Keep in mind that analyzing an Oracle foreign table will result in a full
 sequential table scan.
+
+PostGIS support
+---------------
+
+The data type "geometry" is only available when PostGIS is installed.
+
+The only supported geometry types are POINT, LINE, POLYGON, MULTIPOINT,
+MULTILINE and MULTIPOLYGON in two and three dimensions.
+Empty PostGIS geometries are not supported because they have no equivalent
+in Oracle Spatial.
+
+NULL values for Oracle SRID will be converted to 0 and vice versa.
+For other conversions between Oracle SRID and PostGIS SRID, create a file
+"srid.map" in the PostgreSQL "share" directory.  Each line of this file
+shall contain an Oracle SRID and the corresponding PostGIS SRID, separated
+by whitespace.  Keep the file small for good performance.
 
 5. Installation Requirements
 ============================

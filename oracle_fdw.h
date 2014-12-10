@@ -190,6 +190,7 @@ extern void *oracleGetGeometryType(oracleSession *session);
 /*
  * functions defined in oracle_fdw.c
  */
+extern char *oracleGetShareFileName(const char *relativename);
 extern void oracleRegisterCallback(void *arg);
 extern void oracleUnregisterCallback(void *arg);
 extern void *oracleAlloc(size_t size);

@@ -16,6 +16,8 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
 
 #include "oracle_fdw.h"
 
@@ -66,6 +68,20 @@
 			(errhp)) != OCI_SUCCESS) \
 		oracleError_d(FDW_ERROR, "OCINumberToReal failed to convert NUMBER to floating point number", oraMessage); \
 }
+
+/* file for mapping SRIDs in the "share" directory */
+#define SRID_MAP_FILE "srid.map"
+
+typedef struct
+{
+	unsigned from; /* != 0 for valid ones */
+	unsigned to;
+} mapEntry;
+
+#define mapEntryValid(x) ((x)->from != 0)
+
+/* maps Oracle SRIDs to PostGIS SRIDs */
+static mapEntry *srid_map = NULL;
 
 /* contains Oracle error messages, set by checkerr() */
 #define ERRBUFSIZE 500
@@ -118,10 +134,11 @@ static double coord(oracleSession *session, ora_geometry *geom, unsigned i);
 static unsigned numElemInfo(oracleSession *session, ora_geometry *geom);
 static unsigned elemInfo(oracleSession *session, ora_geometry *geom, unsigned i);
 static void appendElemInfo(oracleSession *session, ora_geometry *geom, unsigned info );
-static void appendCoord(oracleSession *session,  ora_geometry *geom, double coord);
+static void appendCoord(oracleSession *session, ora_geometry *geom, double coord);
 static char *doubleFill(double x, char * dest);
 static char *unsignedFill(unsigned i, char * dest);
 static sword checkerr(sword status, OCIError *handle);
+static void initSRIDMap(void);
 static unsigned epsgFromOracle(unsigned srid);
 static unsigned epsgToOracle(unsigned srid);
 
@@ -173,34 +190,166 @@ unsignedFill(unsigned i, char * dest)
 	return dest;
 }
 
+/*
+ * initSRIDMap
+ * 		Allocates "srid_map" and reads the SRID map file into it.
+ */
+void
+initSRIDMap()
+{
+	char *mapFileName = NULL;
+	FILE *mapFile;
+	char line[20];
+	unsigned long from, to;
+	int count = 0, i, save_errno, c;
+
+	mapFileName = oracleGetShareFileName(SRID_MAP_FILE);
+
+	/* initialize "srid_map" with an invalid entry */
+	srid_map = (mapEntry *)malloc(sizeof(mapEntry));
+	if (srid_map == NULL)
+		oracleError_i(FDW_ERROR, "failed to allocate %d bytes of memory", sizeof(mapEntry));
+	srid_map[0].from = 0;
+
+	/* from here on we must make sure that srid_map is reset to NULL if an error occurs */
+
+	if ((mapFile = fopen(mapFileName, "r")) == NULL)
+	{
+		/* if the file does not exists, treat it as if it were empty */
+		if (errno == ENOENT)
+			return;
+
+		/* other errors are reported */
+		free(srid_map);
+		srid_map = NULL;
+		oracleError(FDW_ERROR, "cannot open file \"" SRID_MAP_FILE "\": %m");
+	}
+
+	/* from here on we must make sure that mapFile is closed if an error happens */
+	oracleFree(mapFileName);
+
+	do
+	{
+		/* read the next line into "line" */
+		i = 0;
+		do
+		{
+			c = fgetc(mapFile);
+
+			if (c == '\n' || c == EOF)
+			{
+				line[i] = '\0';
+			}
+			else
+			{
+				if (i >= 19)
+				{
+					(void)fclose(mapFile);
+					free(srid_map);
+					srid_map = NULL;
+					oracleError(FDW_ERROR,
+						"syntax error in file \"" SRID_MAP_FILE "\": line too long");
+				}
+				line[i++] = c;
+			}
+		} while (c != '\n' && c != EOF);
+
+		/* ignore empty lines */
+		if (*line == '\0')
+			continue;
+
+		/* read two unsigned integers */
+		i = sscanf(line, "%lu %lu", &from, &to);
+		if (i == EOF)
+		{
+			save_errno = errno;
+			(void)fclose(mapFile);
+			errno = save_errno;
+			free(srid_map);
+			srid_map = NULL;
+			oracleError(FDW_ERROR, "syntax error in file \"" SRID_MAP_FILE "\": %m");
+		}
+		if (i != 2)
+		{
+			(void)fclose(mapFile);
+			free(srid_map);
+			srid_map = NULL;
+			oracleError(FDW_ERROR,
+				"syntax error in file \"" SRID_MAP_FILE "\": line does not contain two numbers");
+		}
+		if (from == 0 || to == 0)
+		{
+			(void)fclose(mapFile);
+			free(srid_map);
+			srid_map = NULL;
+			oracleError(FDW_ERROR,
+				"syntax error in file \"" SRID_MAP_FILE "\": SRID cannot be zero");
+		}
+		if (from > 0xffffffff || to > 0xffffffff)
+		{
+			(void)fclose(mapFile);
+			free(srid_map);
+			srid_map = NULL;
+			oracleError(FDW_ERROR,
+				"syntax error in file \"" SRID_MAP_FILE "\": number too large");
+		}
+
+		/* add a new mapEntry to srid_map */
+		srid_map = (mapEntry *)realloc(srid_map, sizeof(mapEntry) * (++count + 1));
+		if (srid_map == NULL)
+		{
+			(void)fclose(mapFile);
+			free(srid_map);
+			srid_map = NULL;
+			oracleError_i(FDW_ERROR, "failed to allocate %d bytes of memory", sizeof(mapEntry) * (count + 1));
+		}
+
+		srid_map[count - 1].from = (unsigned)from;
+		srid_map[count - 1].to = (unsigned)to;
+		srid_map[count].from = 0;
+	} while (c != EOF);
+
+	/* check for errors */
+	save_errno = errno;
+	(void)fclose(mapFile);
+	errno = save_errno;
+
+	if (errno)
+	{
+		free(srid_map);
+		srid_map = NULL;
+		oracleError(FDW_ERROR, "error reading from file \"" SRID_MAP_FILE "\": %m");
+	}
+}
+
 unsigned
 epsgFromOracle(unsigned srid)
 {
-    /* Oracle SRID, EPSG GCS/PCS Code */
-    switch (srid)
-    {
-    	case 8192:  return 4326;  /* WGS84 */
-    	case 8306:  return 4322;  /* WGS72 */
-    	case 8267:  return 4269;  /* NAD83 */
-    	case 8274:  return 4277;  /* OSGB 36 */
-    	case 81989: return 27700; /* UK National Grid */
-		default: return srid;
-    }
+	mapEntry *entry;
+
+	if (srid_map == NULL)
+		initSRIDMap();
+
+	for (entry = srid_map; mapEntryValid(entry); ++entry)
+		if (entry->from == srid)
+			return entry->to;
+
+	return srid;
 }
 
 unsigned
 epsgToOracle(unsigned srid)
 {
-    /* Oracle SRID, EPSG GCS/PCS Code */
-    switch (srid)
-    {
-    	case 4326:  return 8192;  /* WGS84 */
-    	case 4322:  return 8306;  /* WGS72 */
-    	case 4269:  return 8267;  /* NAD83 */
-    	case 4277:  return 8274;  /* OSGB 36 */
-    	case 27700: return 81989; /* UK National Grid */
-		default: return srid;
-    }
+	mapEntry *entry;
+
+	if (srid_map == NULL)
+		initSRIDMap();
+
+	for (entry = srid_map; mapEntryValid(entry); ++entry)
+		if (entry->to == srid)
+			return entry->from;
+
+	return srid;
 }
 
 /*
@@ -285,7 +434,7 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->_atomic == OCI_IND_NULL)
 		return 0;
 
-	/* a first check for supported types is done in ewkbType */    
+	/* a first check for supported types is done in ewkbType */
 	type = ewkbType(session, geom);
 
 	/*
@@ -499,7 +648,7 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 const char *
 setType(oracleSession *session, ora_geometry *geom, const char *data)
 {
-	const ub4 wkbType =  *((ub4 *)data);
+	const ub4 wkbType = *((ub4 *)data);
 	unsigned gtype;
 
 	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
@@ -757,7 +906,7 @@ ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 	 * numRings%2 is there for padding
 	 */
 	return (numRings+2+numRings%2)*sizeof(unsigned)
-		   + sizeof(double)*numCoord(session, geom);
+			+ sizeof(double)*numCoord(session, geom);
 }
 
 const char *
@@ -839,7 +988,7 @@ char *
 ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
-	const unsigned dim =  ewkbDimension(session, geom);
+	const unsigned dim = ewkbDimension(session, geom);
 	const unsigned numPoints = numCoord(session, geom) / dim;
 	dest = unsignedFill(MULTIPOINTTYPE, dest);
 	dest = unsignedFill(numPoints, dest);
