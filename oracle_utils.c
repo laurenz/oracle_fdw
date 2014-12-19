@@ -1909,8 +1909,8 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		 */
 
 		/* bind geometry output parameters only the first time */
-		if (oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY
-				&& param->bindType == BIND_OUTPUT
+		if (param->bindType == BIND_OUTPUT
+				&& oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY
 				&& param->bindh != NULL)
 			continue;
 
@@ -1926,8 +1926,12 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 				oraMessage);
 		}
 
-		/* for SDO_GEOMETRY parameters, bind the actual objects */
-		if (oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY)
+		/*
+		 * for SDO_GEOMETRY parameters, bind the actual objects
+		 * Note: these can only be output parameters or parameters in DML statements.
+ 		 */
+		if (param->colnum > 0
+			&& oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY)
 		{
 			ora_geometry *geom = (ora_geometry *)value;
 

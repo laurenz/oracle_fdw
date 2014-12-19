@@ -168,3 +168,18 @@ SELECT id, c FROM typetest1 ORDER BY id;
 
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
+
+/*
+ * Test parameters.
+ */
+
+PREPARE stmt(integer) AS SELECT d FROM typetest1 WHERE id = $1;
+-- six executions to switch to generic plan
+EXECUTE stmt(1);
+EXECUTE stmt(1);
+EXECUTE stmt(1);
+EXECUTE stmt(1);
+EXECUTE stmt(1);
+EXPLAIN EXECUTE stmt(1);
+EXECUTE stmt(1);
+DEALLOCATE stmt;

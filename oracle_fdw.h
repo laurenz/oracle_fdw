@@ -142,7 +142,7 @@ struct paramDesc
 	oraBindType bindType;  /* which type to use for binding to Oracle statement */
 	char *value;           /* value rendered for Oracle */
 	void *node;            /* the executable expression */
-	int colnum;            /* corresponding column in oraTable for output parameters */
+	int colnum;            /* corresponding column in oraTable (-1 in SELECT queries unless output column) */
 	void *bindh;           /* bind handle */
 	struct paramDesc *next;
 };
