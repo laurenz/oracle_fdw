@@ -104,6 +104,7 @@ oracleSession
 	struct connEntry *connp;
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
+	int retry = 1;
 
 	/* it's easier to deal with empty strings */
 	if (!connectstring)
@@ -229,6 +230,7 @@ oracleSession
 		}
 	}
 
+	retry_connect:
 	if (srvp == NULL)
 	{
 		/*
@@ -460,9 +462,31 @@ oracleSession
 			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
-				"error connecting to Oracle: OCITransStart failed to start a transaction",
-				oraMessage);
+			/*
+			 * Certain Oracle errors mean that the session or the server connection
+			 * got terminated.  Retry once in that case.
+			 */
+			if (retry && (err_code == 1012 || err_code == 28 || err_code == 3113))
+			{
+				oracleDebug2("oracle_fdw: session has been terminated, try to reconnect");
+
+				silent = 1;
+				while (srvp->connlist != NULL)
+				{
+					closeSession(envhp, srvhp, srvp->connlist->userhp, 0);
+				}
+				disconnectServer(envhp, srvhp);
+				silent = 0;
+				srvp = NULL;
+				userhp = NULL;
+
+				retry = 0;
+				goto retry_connect;
+			}
+			else
+				oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+					"error connecting to Oracle: OCITransStart failed to start a transaction",
+					oraMessage);
 		}
 
 		connp->xact_level = 1;

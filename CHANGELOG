@@ -2,6 +2,9 @@ Version 1.2.0
   Enhancements:
   - Add support for a file "srid.map" to translate SRIDs between Oracle
     and PostGIS.
+  - If the Oracle session has been terminated outside of a transaction,
+    try to reconnect once.
+    Idea by AVEN.
 
   Bugfixes:
   - Prepared statements with parameters can crash.
