@@ -1,4 +1,4 @@
-Version 1.2.0
+Version 1.2.0, released 2015-01-03
   Enhancements:
   - Add support for a file "srid.map" to translate SRIDs between Oracle
     and PostGIS.
@@ -10,7 +10,7 @@ Version 1.2.0
   - Prepared statements with parameters can crash.
     Because of custom plans, this does not manifest until the query has been
     executed several times in PostgreSQL 9.2 and higher.
-    Per report from Krzysztof Gorczyński.
+    Per report from Krzysztof Gorczyński and others.
     This bug was introduced in 1.1.0.
 
 Version 1.1.0, released 2014-12-03
