@@ -2606,34 +2606,40 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* the second (=last) argument must be a Const of ArrayType */
 			constant = (Const *)llast(arrayoper->args);
 
-			/* loop through the array elements */
-			iterator = array_create_iterator(DatumGetArrayTypeP(constant->constvalue), 0);
-			first_arg = true;
-			while (array_iterate(iterator, &datum, &isNull))
+			/* using NULL in place of an array or value list is valid in Oracle and pg */
+			if (constant->constisnull)
+				appendStringInfo(&result, "NULL");
+			else
 			{
-				char *c;
-
-				if (isNull)
-					c = "NULL";
-				else
+				/* loop through the array elements */
+				iterator = array_create_iterator(DatumGetArrayTypeP(constant->constvalue), 0);
+				first_arg = true;
+				while (array_iterate(iterator, &datum, &isNull))
 				{
-					c = datumToString(datum, leftargtype);
-					if (c == NULL)
+					char *c;
+
+					if (isNull)
+						c = "NULL";
+					else
 					{
-						array_free_iterator(iterator);
-						return NULL;
+						c = datumToString(datum, leftargtype);
+						if (c == NULL)
+						{
+							array_free_iterator(iterator);
+							return NULL;
+						}
 					}
+
+					/* append the srgument */
+					appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", c);
+					first_arg = false;
 				}
+				array_free_iterator(iterator);
 
-				/* append the srgument */
-				appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", c);
-				first_arg = false;
+				/* use NULL for empty array, discarding the condition leads to weird behavior from postgre (ignored LIMIT clause, etc) */
+				if (first_arg)
+					appendStringInfo(&result, "NULL");
 			}
-			array_free_iterator(iterator);
-
-			/* don't allow empty arrays */
-			if (first_arg)
-				return NULL;
 
 			/* two parentheses close the expression */
 			appendStringInfo(&result, "))");
