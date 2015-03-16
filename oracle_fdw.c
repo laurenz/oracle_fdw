@@ -2606,7 +2606,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* the second (=last) argument must be a Const of ArrayType */
 			constant = (Const *)llast(arrayoper->args);
 
-			/* using NULL in place of an array or value list is valid in Oracle and pg */
+			/* using NULL in place of an array or value list is valid in Oracle and PostgreSQL */
 			if (constant->constisnull)
 				appendStringInfo(&result, "NULL");
 			else
@@ -2630,15 +2630,15 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 						}
 					}
 
-					/* append the srgument */
+					/* append the argument */
 					appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", c);
 					first_arg = false;
 				}
 				array_free_iterator(iterator);
 
-				/* use NULL for empty array, discarding the condition leads to weird behavior from postgre (ignored LIMIT clause, etc) */
+				/* don't push down empty arrays, since the semantics for NOT x = ANY(<empty array>) differ */
 				if (first_arg)
-					appendStringInfo(&result, "NULL");
+					return NULL;
 			}
 
 			/* two parentheses close the expression */
