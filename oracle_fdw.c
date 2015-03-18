@@ -86,6 +86,12 @@
 #undef WRITE_API
 #endif  /* PG_VERSION_NUM */
 
+#if PG_VERSION_NUM >= 90500
+#define JOIN_API
+#else
+#undef JOIN_API
+#endif  /* PG_VERSION_NUM */
+
 PG_MODULE_MAGIC;
 
 /*
@@ -170,6 +176,56 @@ struct OracleFdwState {
 	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
 	MemoryContext temp_cxt;        /* short-lived memory for data modification */
+
+#ifdef JOIN_API
+	/* Stuffs for join push-down */
+	Oid serverid;                  /* Oid of the server, InvalidOid if multiple servers */
+	Oid checkAsUser;               /* Oid of alternative user to check permission */
+#endif	/* JOIN_API */
+};
+
+/*
+ * Indexes of FDW-private information stored in fdw_private of ForeignPath.
+ * We use fdw_private of a ForeighPath when the path represents a join which
+ * can be pushed down to remote side.
+ *
+ * 1) Outer child path node
+ * 2) Inner child path node
+ * 3) Join type number(as an Integer node)
+ * 4) RestrictInfo list of join conditions
+ */
+enum FdwPathPrivateIndex
+{
+	FdwPathPrivateOuterPath,
+	FdwPathPrivateInnerPath,
+	FdwPathPrivateJoinType,
+	FdwPathPrivateJoinClauses,
+	FdwPathPrivateOtherClauses,
+};
+
+/*
+ * Indexes of FDW-private information stored in fdw_private of ForeignScan of
+ * a simple foreign table scan for a SELECT statement.
+ *
+ * We store various information in ForeignScan.fdw_private to pass it from
+ * planner to executor.  Currently we store:
+ *
+ * 1) Integer list of attribute numbers retrieved by the SELECT
+ * 2) Integer list of attribute numbers retrieved by the SELECT
+ * 3) Integer list of attribute numbers retrieved by the SELECT
+ *
+ * These items are indexed with the enum FdwScanPrivateIndex, so an item
+ * can be fetched with list_nth().  For example, to get the SELECT statement:
+ *		sql = strVal(list_nth(fdw_private, FdwScanPrivateSelectSql));
+ */
+enum FdwScanPrivateIndex
+{
+	/* Integer list of attribute numbers retrieved by the SELECT */
+	FdwScanPrivateRetrievedAttrs,
+	/* Integer value of server for the scan */
+	FdwScanPrivateServerOid,
+	/* Integer value of checkAsUser for the scan */
+	FdwScanPrivateCheckAsUser,
 };
 
 /*
@@ -217,18 +273,21 @@ static void oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo);
 static void oracleExplainForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, struct ExplainState *es);
 static int oracleIsForeignRelUpdatable(Relation rel);
 #endif  /* WRITE_API */
+#ifdef JOIN_API
+static void oracleGetForeignJoinPaths(PlannerInfo *root, RelOptInfo *joinrel, RelOptInfo *outerrel, RelOptInfo *innerrel, JoinType jointype, SpecialJoinInfo *sjinfo, SemiAntiJoinFactors *semifactors, List *restrictlist, Relids extra_lateral_rels);
+#endif	/* JOIN_API */
 
 /*
  * Helper functions
  */
 static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs);
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses);
+static char *createQuery(PlannerInfo *root, oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 #endif  /* OLD_FDW_API */
-static char *getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
+static char *getOracleWhereClause(PlannerInfo *root, oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, List *tlist_o, List *tlist_i);
 static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
@@ -251,6 +310,10 @@ static void exitHook(int code, Datum arg);
 static char *setSelectParameters(struct paramDesc *paramList, ExprContext *econtext);
 static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob);
 static void errorContextCallback(void *arg);
+#ifdef JOIN_API
+static struct OracleFdwState *mergeFdwState(struct OracleFdwState *fdwState_o, struct OracleFdwState *fdwState_i, RelOptInfo *joinrel, JoinType jointype);
+static void deparseJoinSql(StringInfo sql, PlannerInfo *root, RelOptInfo *baserel, Path *path_o, Path *path_i, List *tlist_o, List *tlist_i, List *retrieved_attrs_o, List *retrieved_attrs_i, const char *sql_o, const char *sql_i, JoinType jointype, List *joinclauses, List *otherclauses, List **fdw_ps_tlist);
+#endif	/* JOIN_API */
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -285,6 +348,10 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 	fdwroutine->ExplainForeignModify = oracleExplainForeignModify;
 	fdwroutine->IsForeignRelUpdatable = oracleIsForeignRelUpdatable;
 #endif  /* WRITE_API */
+
+#ifdef JOIN_API
+	fdwroutine->GetForeignJoinPaths = oracleGetForeignJoinPaths;
+#endif
 
 	PG_RETURN_POINTER(fdwroutine);
 }
@@ -621,7 +688,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	fdwState = getFdwState(foreigntableid, &plan_costs);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
+	fdwState->query = createQuery(root, fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -699,6 +766,18 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 
 	/* get connection options, connect and get the remote table description */
 	fdwState = getFdwState(foreigntableid, &plan_costs);
+#ifdef JOIN_API
+	{
+		int i;
+		RangeTblEntry *rte;
+
+		rte = planner_rt_fetch(baserel->relid, root);
+		fdwState->checkAsUser = rte->checkAsUser;
+
+		for (i=0; i<fdwState->oraTable->ncols; ++i)
+			fdwState->oraTable->cols[i]->varno = baserel->relid;
+	}
+#endif
 
 	if (need_keys)
 	{
@@ -730,7 +809,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	}
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, for_update, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
+	fdwState->query = createQuery(root, fdwState->session, baserel, for_update, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -813,6 +892,69 @@ ForeignScan
 	List *fdw_private, *keep_clauses = NIL;
 	ListCell *cell1, *cell2;
 	int i;
+	ForeignScan *scan;
+#ifdef JOIN_API
+	List *fdw_ps_tlist = NIL;
+#endif
+
+#ifdef JOIN_API
+	if (baserel->relid == 0)
+	{
+		/* Join case */
+		Path	   *path_o;
+		Path	   *path_i;
+		const char *sql_o;
+		const char *sql_i;
+		ForeignScan *plan_o;
+		ForeignScan *plan_i;
+		struct OracleFdwState *fdwState_o;
+		struct OracleFdwState *fdwState_i;
+		List	   *retrieved_attrs_o;
+		List	   *retrieved_attrs_i;
+		JoinType	jointype;
+		List	   *joinclauses;
+		List	   *otherclauses;
+		StringInfoData sql;
+
+		/*
+		 * Retrieve infomation from fdw_private.
+		 */
+		path_o = list_nth(best_path->fdw_private, FdwPathPrivateOuterPath);
+		path_i = list_nth(best_path->fdw_private, FdwPathPrivateInnerPath);
+		jointype = intVal(list_nth(best_path->fdw_private,
+								   FdwPathPrivateJoinType));
+		joinclauses = list_nth(best_path->fdw_private,
+							   FdwPathPrivateJoinClauses);
+		otherclauses = list_nth(best_path->fdw_private,
+							    FdwPathPrivateOtherClauses);
+
+		/*
+		 * Construct remote query from bottom to the top.  ForeignScan plan
+		 * node of underlying scans are node necessary for execute the plan
+		 * tree, but it is handy to construct remote query recursively.
+		 */
+		plan_o = (ForeignScan *) create_plan_recurse(root, path_o);
+		Assert(IsA(plan_o, ForeignScan));
+		fdwState_o = (struct OracleFdwState *) path_o->parent->fdw_private;
+		sql_o = fdwState_o->query;
+		retrieved_attrs_o = list_nth(plan_o->fdw_private, FdwScanPrivateRetrievedAttrs);
+
+		plan_i = (ForeignScan *) create_plan_recurse(root, path_i);
+		Assert(IsA(plan_i, ForeignScan));
+		fdwState_i = (struct OracleFdwState *) path_i->parent->fdw_private;
+		sql_i = fdwState_i->query;
+		retrieved_attrs_i = list_nth(plan_i->fdw_private, FdwScanPrivateRetrievedAttrs);
+
+		initStringInfo(&sql);
+		deparseJoinSql(&sql, root, baserel, path_o, path_i,
+					   plan_o->scan.plan.targetlist,
+					   plan_i->scan.plan.targetlist,
+					   retrieved_attrs_o, retrieved_attrs_i,
+					   sql_o, sql_i, jointype, joinclauses, otherclauses,
+					   &fdw_ps_tlist);
+		fdwState->query = sql.data;
+	}
+#endif
 
 	/* "serialize" all necessary information for the path private area */
 	fdw_private = serializePlanData(fdwState);
@@ -836,7 +978,11 @@ ForeignScan
 	keep_clauses = extract_actual_clauses(keep_clauses, false);
 
 	/* Create the ForeignScan node */
-	return make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private);
+	scan =  make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private);
+#ifdef JOIN_API
+	scan->fdw_ps_tlist = fdw_ps_tlist;
+#endif
+	return scan;
 }
 
 bool
@@ -862,7 +1008,10 @@ oracleExplainForeignScan(ForeignScanState *node, ExplainState *es)
 	char **plan;
 	int nrows, i;
 
-	elog(DEBUG1, "oracle_fdw: explain foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	if (node->ss.ss_currentRelation)
+		elog(DEBUG1, "oracle_fdw: explain foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	else
+		elog(DEBUG1, "oracle_fdw: explain foreign join");
 
 	/* show query */
 	ExplainPropertyText("Oracle query", fdw_state->query, es);
@@ -961,7 +1110,10 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		fdw_state->paramList = paramDesc;
 	}
 
-	elog(DEBUG1, "oracle_fdw: begin foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	if (node->ss.ss_currentRelation)
+		elog(DEBUG1, "oracle_fdw: begin foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	else
+		elog(DEBUG1, "oracle_fdw: begin foreign join");
 
 	/* connect to Oracle database */
 	fdw_state->session = oracleGetSession(
@@ -1001,7 +1153,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 
 	if (oracleIsStatementOpen(fdw_state->session))
 	{
-		elog(DEBUG3, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+		if (node->ss.ss_currentRelation)
+			elog(DEBUG3, "oracle_fdw: get next row in foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+		else
+			elog(DEBUG3, "oracle_fdw: get next row in foreign join");
 
 		/* fetch the next result row */
 		have_result = oracleFetchNext(fdw_state->session);
@@ -1012,7 +1167,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 		char *paramInfo = setSelectParameters(fdw_state->paramList, econtext);
 
 		/* execute the Oracle statement and fetch the first row */
-		elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
+		if (node->ss.ss_currentRelation)
+			elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
+		else
+			elog(DEBUG3, "oracle_fdw: execute query in foreign join");
 		oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable);
 		have_result = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 	}
@@ -1049,7 +1207,10 @@ oracleEndForeignScan(ForeignScanState *node)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 
-	elog(DEBUG1, "oracle_fdw: end foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	if (node->ss.ss_currentRelation)
+		elog(DEBUG1, "oracle_fdw: end foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	else
+		elog(DEBUG1, "oracle_fdw: end foreign join");
 
 	/* release the Oracle session */
 	oracleCloseStatement(fdw_state->session);
@@ -1067,7 +1228,10 @@ oracleReScanForeignScan(ForeignScanState *node)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 
-	elog(DEBUG1, "oracle_fdw: restart foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	if (node->ss.ss_currentRelation)
+		elog(DEBUG1, "oracle_fdw: restart foreign table scan on %d", RelationGetRelid(node->ss.ss_currentRelation));
+	else
+		elog(DEBUG1, "oracle_fdw: restart foreign join");
 
 	/* close open Oracle statement if there is one */
 	oracleCloseStatement(fdw_state->session);
@@ -1757,6 +1921,335 @@ oracleIsForeignRelUpdatable(Relation rel)
 }
 #endif  /* WRITE_API */
 
+#ifdef JOIN_API
+/*
+ * oracleGetForeignJoinPaths
+ * 		Create a ForeignPath node for given join relation if the join is safe
+ * 		to push down, and add it as only possible path.
+ */
+static void
+oracleGetForeignJoinPaths(PlannerInfo *root,
+						  RelOptInfo *joinrel,
+						  RelOptInfo *outerrel,
+						  RelOptInfo *innerrel,
+						  JoinType jointype,
+						  SpecialJoinInfo *sjinfo,
+						  SemiAntiJoinFactors *semifactors,
+						  List *restrictlist,
+						  Relids extra_lateral_rels)
+{
+	int				i;
+	bool			have_local_filter;
+	ForeignPath	   *joinpath;
+	ForeignPath	   *path_o = NULL;
+	ForeignPath	   *path_i = NULL;
+	struct OracleFdwState *fdwState_o = outerrel->fdw_private;
+	struct OracleFdwState *fdwState_i = innerrel->fdw_private;
+	struct OracleFdwState *fdwState;
+	double			rows;
+	Cost			startup_cost;
+	Cost			total_cost;
+	ListCell	   *lc;
+	List		   *fdw_private;
+	List		   *joinclauses;
+	List		   *otherclauses;
+
+	/*
+	 * Currently we don't push-down joins in query for UPDATE/DELETE.  This
+	 * restriction might be relaxed in a later release.
+	 */ 
+	if (root->parse->commandType != CMD_SELECT)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: command type is not SELECT")));
+		return;
+	}
+
+	/*
+	 * N-way join is not supported, due to the column definition infrastracture.
+	 * If we can track relid mapping of join relations, we can support N-way join.
+	 */
+	if (outerrel->reloptkind != RELOPT_BASEREL || innerrel->reloptkind != RELOPT_BASEREL)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: N-way join is not supported")));
+		return;
+	}
+
+	/*
+	 * Both outer and inner relation must have a ForeignPath at least.
+	 * Currently we choose the first ForeighPath which doesn't have param_info,
+	 * thus simplest ForeignPath, but we need to consider others when we
+	 * support multiple ForeignPaths for a RelOptInfo.
+	 */
+	foreach(lc, outerrel->pathlist)
+	{
+		Path *path = (Path *) lfirst(lc);
+		if (IsA(path, ForeignPath) && !path->param_info)
+		{
+			path_o = (ForeignPath *) path;
+			break;
+		}
+	}
+	foreach(lc, innerrel->pathlist)
+	{
+		Path *path = (Path *) lfirst(lc);
+		if (IsA(path, ForeignPath) && !path->param_info)
+		{
+			path_i = (ForeignPath *) path;
+			break;
+		}
+	}
+	if (path_o == NULL || path_i == NULL)
+	{
+		ereport(DEBUG3, (errmsg("outer or inner relation has no ForeighPath")));
+		return;
+	}
+
+	/*
+	 * Skip considering reversed combination of inner join.
+	 * Other kinds of join have different meaning when outer and inner are
+	 * reversed.
+	 */
+	if (jointype == JOIN_INNER && outerrel->relid < innerrel->relid)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: reversed combination of INNER JOIN")));
+		return;
+	}
+
+	/*
+	 * Both relations in the join must belong to same server.
+	 */
+	fdwState_o = path_o->path.parent->fdw_private;
+	fdwState_i = path_i->path.parent->fdw_private;
+	if (fdwState_o->serverid != fdwState_i->serverid)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: server unmatch")));
+		return;
+	}
+
+	/*
+	 * We support all outer joins in addition to inner join.
+	 */
+	if (jointype != JOIN_INNER && jointype != JOIN_LEFT &&
+		jointype != JOIN_RIGHT && jointype != JOIN_FULL)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: unsupported join type (SEMI, ANTI)")));
+		return;
+	}
+
+	/*
+	 * Separete restrictlist into two lists, join conditions and remote filters.
+	 */
+	joinclauses = restrictlist;
+	if (IS_OUTER_JOIN(jointype))
+	{
+		extract_actual_join_clauses(joinclauses, &joinclauses, &otherclauses);
+	}
+	else
+	{
+		joinclauses = extract_actual_clauses(joinclauses, false);
+		otherclauses = NIL;
+	}
+
+	/*
+	 * Note that CROSS JOIN (cartesian product) is transformed to JOIN_INNER
+	 * with empty joinclauses. Pushing down CROSS JOIN produces more result
+	 * than retrieving each tables separately, so we don't push down such joins.
+	 */
+	if (jointype == JOIN_INNER && joinclauses == NIL)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: unsupported join type (CROSS)")));
+		return;
+	}
+
+	/*
+	 * Neither source relation can have local conditions.  This can be relaxed
+	 * if the join is an inner join and local conditions don't contain volatile
+	 * function/operator, but as of now we leave it as future enhancement.
+	 */
+	have_local_filter = false;
+	for (i = 0; i < list_length(outerrel->baserestrictinfo); i++)
+	{
+		if (!fdwState_o->pushdown_clauses[i])
+			have_local_filter = true;
+			break;
+	}
+	for (i = 0; i < list_length(innerrel->baserestrictinfo); i++)
+	{
+		if (!fdwState_i->pushdown_clauses[i])
+			have_local_filter = true;
+			break;
+	}
+	if (have_local_filter)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: join with local filter is not supported")));
+		return;
+	}
+
+	/*
+	 * Join condition must be safe to push down.
+	 */
+	foreach(lc, joinclauses)
+	{
+		char *tmp;
+
+		tmp = getOracleWhereClause(root, NULL, joinrel, (Expr *) lfirst(lc),
+								   NULL, NULL, outerrel->reltargetlist, innerrel->reltargetlist); /* XXX need params? */
+		if (tmp == NULL)
+		{
+			ereport(DEBUG3, (errmsg("oracle_fdw: one of join conditions is not safe to push-down")));
+			return;
+		}
+	}
+
+	/*
+	 * Other condition evaluated on remote side must be safe to push down.
+	 */
+	foreach(lc, otherclauses)
+	{
+		char *tmp;
+
+		tmp = getOracleWhereClause(root, NULL, joinrel, ((RestrictInfo *)lfirst(lc))->clause,
+								   NULL, NULL, outerrel->reltargetlist, innerrel->reltargetlist);	/* XXX need params? */
+		if (tmp == NULL)
+		{
+			ereport(DEBUG3, (errmsg("oracle_fdw: one of filter conditions is not safe to push-down")));
+			return;
+		}
+	}
+
+	/*
+	 * checkAsUser of source pathes should match.
+	 */
+	if (fdwState_o->checkAsUser != fdwState_i->checkAsUser)
+	{
+		ereport(DEBUG3, (errmsg("oracle_fdw: unmatch checkAsUser")));
+		return;
+	}
+
+	/* Here we know that this join can be pushed-down to remote side. */
+
+	/* Construct fdwState for the join relation */
+	fdwState = mergeFdwState(fdwState_o, fdwState_i, joinrel, jointype);
+	joinrel->fdw_private = fdwState;
+
+	/* TODO determine cost and rows of the join. */
+	rows = joinrel->rows;
+	startup_cost = path_o->path.startup_cost + path_i->path.startup_cost;
+	total_cost = path_o->path.total_cost + path_i->path.total_cost;
+
+	fdw_private = list_make4(path_o,
+							 path_i,
+							 makeInteger(jointype),
+							 joinclauses);
+	fdw_private = lappend(fdw_private, otherclauses);
+
+	/*
+	 * Create a new join path and add it to the joinrel which represents a join
+	 * between foreign tables.
+	 */
+	joinpath = create_foreignscan_path(root,
+									   joinrel,
+									   rows,
+									   startup_cost,
+									   total_cost,
+									   NIL,		/* no pathkeys */
+									   NULL,	/* no required_outer */
+									   fdw_private);
+
+	/* Add generated path into joinrel by add_path(). */
+	add_path(joinrel, (Path *) joinpath);
+
+	/* TODO consider parameterized paths */
+}
+
+static struct OracleFdwState
+*mergeFdwState(struct OracleFdwState *fdwState_o, struct OracleFdwState *fdwState_i, RelOptInfo *joinrel, JoinType jointype)
+{
+	ListCell *lc;
+	struct oraTable *oraTable_o = fdwState_o->oraTable;
+	struct oraTable *oraTable_i = fdwState_i->oraTable;
+	struct OracleFdwState *fdwState = palloc(sizeof(struct OracleFdwState));
+
+	fdwState->dbserver = pstrdup(fdwState_o->dbserver);
+	fdwState->user = pstrdup(fdwState_o->user);
+	fdwState->password = pstrdup(fdwState_o->password);
+	fdwState->nls_lang = pstrdup(fdwState_o->nls_lang);
+	fdwState->session = NULL;
+	fdwState->query = NULL;
+	fdwState->params = NIL;
+	fdwState->paramList = NULL;
+
+	/* Construct oraTable for the result of join */
+	fdwState->oraTable = (struct oraTable *) palloc0(sizeof(struct oraTable));
+	fdwState->oraTable->name = pstrdup("");
+	fdwState->oraTable->pgname = pstrdup("");
+	fdwState->oraTable->ncols = 0;
+	fdwState->oraTable->npgcols = 0;
+	fdwState->oraTable->cols = (struct oraColumn **) palloc0(sizeof(struct oraColumn*) *
+												   (oraTable_o->ncols + oraTable_i->ncols));
+	/*
+	 * Search oraColumn from children's oraTable.
+	 * Here we assume that children are foreign table, not foreign join.
+	 * We need capability to track relid chain through join tree to support N-way join.
+	 */
+	foreach(lc, joinrel->reltargetlist)
+	{
+		int i;
+		Var *var = (Var *) lfirst(lc);
+		struct oraColumn *col = NULL;
+		struct oraColumn *newcol;
+
+		Assert(IsA(var, Var));
+		/* Find appropriate entry from children's oraTable. */
+		for (i=0; i<oraTable_o->ncols; ++i)
+		{
+			struct oraColumn *tmp = oraTable_o->cols[i];
+
+			if (tmp->varno == var->varno && tmp->pgattnum == var->varattno)
+			{
+				col = tmp;
+				break;
+			}
+		}
+		if (!col)
+		{
+			for (i=0; i<oraTable_i->ncols; ++i)
+			{
+				struct oraColumn *tmp = oraTable_i->cols[i];
+
+				if (tmp->varno == var->varno && tmp->pgattnum == var->varattno)
+				{
+					col = tmp;
+					break;
+				}
+			}
+		}
+		Assert(col);
+		newcol = (struct oraColumn*) palloc0(sizeof(struct oraColumn));
+		memcpy(newcol, col, sizeof(struct oraColumn));
+		newcol->used = true;
+		/* pgattnum should be the index in SELECT clause of join query. */
+		newcol->pgattnum = fdwState->oraTable->ncols + 1;
+		fdwState->oraTable->cols[fdwState->oraTable->ncols++] = newcol;
+	}
+	fdwState->oraTable->npgcols = fdwState->oraTable->ncols;
+
+	fdwState->startup_cost = fdwState_o->startup_cost + fdwState_i->startup_cost;
+	fdwState->total_cost = fdwState_o->total_cost + fdwState_i->total_cost;
+	fdwState->pushdown_clauses = NULL;
+	if (jointype == JOIN_INNER)
+		fdwState->rowcount = Min(fdwState_o->rowcount, fdwState_i->rowcount);
+	else
+		fdwState->rowcount = Max(fdwState_o->rowcount, fdwState_i->rowcount);
+	fdwState->columnindex = 0;
+	fdwState->temp_cxt = NULL;
+	fdwState->serverid = fdwState_i->serverid;
+	fdwState->checkAsUser = fdwState_o->checkAsUser;
+
+	return fdwState;
+}
+#endif	/* JOIN_API */
+
 /*
  * getFdwState
  * 		Construct an OracleFdwState from the options of the foreign table.
@@ -1845,6 +2338,11 @@ struct OracleFdwState
 
 	/* test if we should invoke Oracle's optimizer for cost planning */
 	*plan_costs = plancosts != NULL && optionIsTrue(plancosts);
+
+#ifdef JOIN_API
+	fdwState->serverid = GetForeignTable(foreigntableid)->serverid;
+	fdwState->checkAsUser = InvalidOid;		/* Shoul be set later */
+#endif
 
 	return fdwState;
 }
@@ -1955,11 +2453,11 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		As a side effect, we also mark the used columns in oraTable.
  */
 char
-*createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses)
+*createQuery(PlannerInfo *root, oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
-	int i, clause_count = -1, index;
+	int i, clause_count = -1, index, j;
 	char *where, *wherecopy, *p, md5[33], parname[10];
 	StringInfoData query, result;
 	List *columnlist = foreignrel->reltargetlist,
@@ -1981,24 +2479,23 @@ char
 
 	/* construct SELECT list */
 	initStringInfo(&query);
-	for (i=0; i<oraTable->ncols; ++i)
+	for (i=0, j=1; i<oraTable->ncols; ++i)
 	{
-		if (oraTable->cols[i]->used)
+		if (root->parse->commandType == CMD_SELECT || oraTable->cols[i]->used)
 		{
-			if (first_col)
-			{
-				first_col = false;
+			if (!first_col)
+				appendStringInfoString(&query, ", ");
+			if (oraTable->cols[i]->used)
 				appendStringInfo(&query, "%s", oraTable->cols[i]->name);
-			}
 			else
-			{
-				appendStringInfo(&query, ", %s", oraTable->cols[i]->name);
-			}
+				appendStringInfoString(&query, "NULL");
+			appendStringInfo(&query, " a_%d", j++);
+			first_col = false;
 		}
 	}
 	/* dummy column if there is no result column we need from Oracle */
 	if (first_col)
-		appendStringInfo(&query, "'1'");
+		appendStringInfo(&query, "NULL a_1");
 	appendStringInfo(&query, " FROM %s", oraTable->name);
 
 	/* allocate enough space for pushdown_clauses */
@@ -2012,7 +2509,7 @@ char
 	foreach(cell, conditions)
 	{
 		/* try to convert each condition to Oracle SQL */
-		where = getOracleWhereClause(session, foreignrel, ((RestrictInfo *)lfirst(cell))->clause, oraTable, params);
+		where = getOracleWhereClause(root, session, foreignrel, ((RestrictInfo *)lfirst(cell))->clause, oraTable, params, NIL, NIL);
 		if (where != NULL) {
 			/* append new WHERE clause to query string */
 			if (first_col)
@@ -2079,6 +2576,179 @@ char
 
 	return result.data;
 }
+
+#ifdef JOIN_API
+/*
+ * Deparse given Var into buf.
+ *
+ * Note that element type of outettlist and innertlist changes.
+ *     - Var when called from oracleGetForeignJoinPaths
+ *     - TargetEntry when called from oracleGetForeignPlan
+ * This is ugly workaround for checking whether an expression is safe to push
+ * down or not with getOracleWhereClause, so adding a function like
+ * is_foreign_expr of postgres_fdw would help to cleanup this code.
+ */
+static void
+deparseJoinVar(Var *node, StringInfo buf, List *outertlist, List *innertlist)
+{
+	const char *side = NULL;
+	ListCell   *lc;
+	int			j;
+	Expr	   *var;
+
+	j = 0;
+	foreach(lc, outertlist)
+	{
+		TargetEntry *childtle = (TargetEntry *) lfirst(lc);
+
+		if (IsA(childtle, TargetEntry))
+			var = childtle->expr;
+		else
+			var = (Expr *) childtle;
+
+		if (equal(var, node))
+		{
+			side = "l";
+			break;
+		}
+		j++;
+	}
+	if (side == NULL)
+	{
+		j = 0;
+		foreach(lc, innertlist)
+		{
+			TargetEntry *childtle = (TargetEntry *) lfirst(lc);
+
+			if (IsA(childtle, TargetEntry))
+				var = childtle->expr;
+			else
+				var = (Expr *) childtle;
+
+			if (equal(var, node))
+			{
+				side = "r";
+				break;
+			}
+			j++;
+		}
+	}
+	Assert(side);
+
+	if (node->varattno == 0)
+		appendStringInfo(buf, "%s", side);
+	else
+		appendStringInfo(buf, "%s.a_%d", side, j + 1);
+}
+
+/*
+ * Construct a SELECT statement which contains join clause.
+ *
+ * We also create an TargetEntry List of the columns being retrieved, which is
+ * returned to *fdw_ps_tlist.
+ *
+ * path_o, tl_o, sql_o are respectively path, targetlist, and remote query
+ * statement of the outer child relation.  postfix _i means those for the inner
+ * child relation.  jointype and joinclauses are information of join method.
+ * fdw_ps_tlist is output parameter to pass target list of the pseudo scan to
+ * caller.
+ */
+static void
+deparseJoinSql(StringInfo sql,
+			   PlannerInfo *root,
+			   RelOptInfo *baserel,
+			   Path *path_o,
+			   Path *path_i,
+			   List *tlist_o,
+			   List *tlist_i,
+			   List *retrieved_attrs_o,
+			   List *retrieved_attrs_i,
+			   const char *sql_o,
+			   const char *sql_i,
+			   JoinType jointype,
+			   List *joinclauses,
+			   List *otherclauses,
+			   List **fdw_ps_tlist)
+{
+	StringInfoData selbuf;		/* buffer for SELECT clause */
+	int			i;
+	ListCell   *lc;
+	const char *jointype_str;
+
+	jointype_str = jointype == JOIN_INNER ? "INNER" :
+				   jointype == JOIN_LEFT ? "LEFT" :
+				   jointype == JOIN_RIGHT ? "RIGHT" :
+				   jointype == JOIN_FULL ? "FULL" : "";
+
+	/* print SELECT clause of the join scan */
+	initStringInfo(&selbuf);
+	i = 0;
+	foreach(lc, baserel->reltargetlist)
+	{
+		Var		   *var = (Var *) lfirst(lc);
+		TargetEntry *tle;
+
+		if (i > 0)
+			appendStringInfoString(&selbuf, ", ");
+		deparseJoinVar(var, &selbuf, tlist_o, tlist_i);
+		appendStringInfo(&selbuf, " a_%d", i + 1);
+
+		tle = makeTargetEntry((Expr *) copyObject(var),
+							  i + 1, pstrdup(""), false);
+		if (fdw_ps_tlist)
+			*fdw_ps_tlist = lappend(*fdw_ps_tlist, copyObject(tle));
+
+		i++;
+	}
+	if (i == 0)
+		appendStringInfo(&selbuf, "NULL a_1");
+
+	/* Construct SELECT statement */
+	appendStringInfo(sql, "SELECT %s FROM", selbuf.data);
+	appendStringInfo(sql, " (%s) l %s JOIN (%s) r",
+					 sql_o, jointype_str, sql_i);
+	/* Append ON clause */
+	if (joinclauses)
+	{
+		ListCell *lc;
+		char *tmp = NULL;
+
+		foreach(lc, joinclauses)
+		{
+			Expr *expr = (Expr *) lfirst(lc);
+
+			if (tmp == NULL)
+				appendStringInfoString(sql, " ON ");
+			else
+				appendStringInfoString(sql, " AND ");
+			tmp = getOracleWhereClause(root, NULL, baserel, expr, NULL, NULL, tlist_o, tlist_i);
+			appendStringInfo(sql, "%s", tmp);
+		}
+	}
+	/* Append WHERE clause */
+	if (otherclauses)
+	{
+		ListCell *lc;
+		char *tmp = NULL;
+
+		foreach(lc, otherclauses)
+		{
+			RestrictInfo *ri = (RestrictInfo *) lfirst(lc);
+
+			Assert(IsA(ri, RestrictInfo));
+
+			if (tmp == NULL)
+				appendStringInfoString(sql, " WHERE ");
+			else
+				appendStringInfoString(sql, " AND ");
+			tmp = getOracleWhereClause(root, NULL, baserel, ri->clause, NULL, NULL, tlist_o, tlist_i);
+			appendStringInfo(sql, "%s", tmp);
+		}
+	}
+
+	elog(DEBUG3, "%s() %s", __func__, sql->data);
+}
+#endif
 
 #ifndef OLD_FDW_API
 /*
@@ -2233,7 +2903,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
  * 		will be stored in paramList.
  */
 char *
-getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
+getOracleWhereClause(PlannerInfo *root, oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, List *tlist_o, List *tlist_i)
 {
 	char *opername, *left, *right, *arg, oprkind;
 	Const *constant;
@@ -2322,13 +2992,32 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 		case T_Var:
 			variable = (Var *)expr;
 
+#ifdef JOIN_API
+			if (foreignrel->reloptkind == RELOPT_JOINREL)
+			{
+				initStringInfo(&result);
+				deparseJoinVar(variable, &result, tlist_o, tlist_i);
+				return result.data;
+			}
+			if (bms_is_member(variable->varno, foreignrel->relids) && variable->varlevelsup == 0)
+#else
 			if (variable->varno == foreignrel->relid && variable->varlevelsup == 0)
+#endif
 			{
 				/* the variable belongs to the foreign table, replace it with the name */
 
 				/* we cannot handle system columns */
 				if (variable->varattno < 1)
 					return NULL;
+
+#ifdef JOIN_API
+				/* Obrain oraTable from corresponding RelOptInfo */
+				if (oraTable == NULL)
+				{
+					RelOptInfo *varrel = root->simple_rel_array[variable->varno];
+					oraTable = ((struct OracleFdwState *)varrel->fdw_private)->oraTable;
+				}
+#endif
 	
 				/*
 				 * Allow boolean columns here.
@@ -2472,7 +3161,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				left = getOracleWhereClause(session, foreignrel, linitial(oper->args), oraTable, params);
+				left = getOracleWhereClause(root, session, foreignrel, linitial(oper->args), oraTable, params, tlist_o, tlist_i);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -2482,7 +3171,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					right = getOracleWhereClause(session, foreignrel, lsecond(oper->args), oraTable, params);
+					right = getOracleWhereClause(root, session, foreignrel, lsecond(oper->args), oraTable, params, tlist_o, tlist_i);
 					if (right == NULL)
 					{
 						pfree(left);
@@ -2591,7 +3280,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(leftargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(arrayoper->args), oraTable, params);
+			left = getOracleWhereClause(root, session, foreignrel, linitial(arrayoper->args), oraTable, params, tlist_o, tlist_i);
 			if (left == NULL)
 				return NULL;
 
@@ -2658,12 +3347,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params);
+			left = getOracleWhereClause(root, session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params, tlist_o, tlist_i);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
+			right = getOracleWhereClause(root, session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params, tlist_o, tlist_i);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -2687,12 +3376,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params);
+			left = getOracleWhereClause(root, session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params, tlist_o, tlist_i);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
+			right = getOracleWhereClause(root, session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params, tlist_o, tlist_i);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -2706,7 +3395,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			arg = getOracleWhereClause(session, foreignrel, linitial(boolexpr->args), oraTable, params);
+			arg = getOracleWhereClause(root, session, foreignrel, linitial(boolexpr->args), oraTable, params, tlist_o, tlist_i);
 			if (arg == NULL)
 				return NULL;
 
@@ -2717,7 +3406,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			for_each_cell(cell, lnext(list_head(boolexpr->args)))
 			{
-				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = getOracleWhereClause(root, session, foreignrel, (Expr *)lfirst(cell), oraTable, params, tlist_o, tlist_i);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -2732,10 +3421,10 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			break;
 		case T_RelabelType:
-			return getOracleWhereClause(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params);
+			return getOracleWhereClause(root, session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params, tlist_o, tlist_i);
 			break;
 		case T_CoerceToDomain:
-			return getOracleWhereClause(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params);
+			return getOracleWhereClause(root, session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params, tlist_o, tlist_i);
 			break;
 		case T_CaseExpr:
 			caseexpr = (CaseExpr *)expr;
@@ -2749,7 +3438,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* for the form "CASE arg WHEN ...", add first expression */
 			if (caseexpr->arg != NULL)
 			{
-				arg = getOracleWhereClause(session, foreignrel, caseexpr->arg, oraTable, params);
+				arg = getOracleWhereClause(root, session, foreignrel, caseexpr->arg, oraTable, params, tlist_o, tlist_i);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -2770,12 +3459,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (caseexpr->arg == NULL)
 				{
 					/* for CASE WHEN ..., use the whole expression */
-					arg = getOracleWhereClause(session, foreignrel, whenclause->expr, oraTable, params);
+					arg = getOracleWhereClause(root, session, foreignrel, whenclause->expr, oraTable, params, tlist_o, tlist_i);
 				}
 				else
 				{
 					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					arg = getOracleWhereClause(session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
+					arg = getOracleWhereClause(root, session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params, tlist_o, tlist_i);
 				}
 
 				if (arg == NULL)
@@ -2790,7 +3479,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				}
 
 				/* THEN */
-				arg = getOracleWhereClause(session, foreignrel, whenclause->result, oraTable, params);
+				arg = getOracleWhereClause(root, session, foreignrel, whenclause->result, oraTable, params, tlist_o, tlist_i);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -2806,7 +3495,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				arg = getOracleWhereClause(session, foreignrel, caseexpr->defresult, oraTable, params);
+				arg = getOracleWhereClause(root, session, foreignrel, caseexpr->defresult, oraTable, params, tlist_o, tlist_i);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -2834,7 +3523,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			first_arg = true;
 			foreach(cell, coalesceexpr->args)
 			{
-				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = getOracleWhereClause(root, session, foreignrel, (Expr *)lfirst(cell), oraTable, params, tlist_o, tlist_i);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -2857,7 +3546,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			break;
 		case T_NullTest:
-			arg = getOracleWhereClause(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params);
+			arg = getOracleWhereClause(root, session, foreignrel, ((NullTest *)expr)->arg, oraTable, params, tlist_o, tlist_i);
 			if (arg == NULL)
 				return NULL;
 
@@ -2874,7 +3563,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
-				return getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params);
+				return getOracleWhereClause(root, session, foreignrel, linitial(func->args), oraTable, params, tlist_o, tlist_i);
 
 			/* get function name and schema */
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->funcid));
@@ -2954,7 +3643,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				first_arg = true;
 				foreach(cell, func->args)
 				{
-					arg = getOracleWhereClause(session, foreignrel, lfirst(cell), oraTable, params);
+					arg = getOracleWhereClause(root, session, foreignrel, lfirst(cell), oraTable, params, tlist_o, tlist_i);
 					if (arg == NULL)
 					{
 						pfree(result.data);
@@ -2979,7 +3668,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				left = getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params);
+				left = getOracleWhereClause(root, session, foreignrel, linitial(func->args), oraTable, params, tlist_o, tlist_i);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -2999,7 +3688,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					right = getOracleWhereClause(session, foreignrel, lsecond(func->args), oraTable, params);
+					right = getOracleWhereClause(root, session, foreignrel, lsecond(func->args), oraTable, params, tlist_o, tlist_i);
 					if (right == NULL)
 					{
 						pfree(opername);
@@ -3653,28 +4342,42 @@ List
 	result = lappend(result, serializeString(fdwState->nls_lang));
 	/* query */
 	result = lappend(result, serializeString(fdwState->query));
-	/* Oracle table data */
-	result = lappend(result, serializeString(fdwState->oraTable->name));
-	/* PostgreSQL table name */
-	result = lappend(result, serializeString(fdwState->oraTable->pgname));
-	/* number of columns in Oracle table */
-	result = lappend(result, serializeInt(fdwState->oraTable->ncols));
-	/* number of columns in PostgreSQL table */
-	result = lappend(result, serializeInt(fdwState->oraTable->npgcols));
-	/* column data */
-	for (i=0; i<fdwState->oraTable->ncols; ++i)
+	if(fdwState->oraTable)
 	{
-		result = lappend(result, serializeString(fdwState->oraTable->cols[i]->name));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->oratype));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->scale));
-		result = lappend(result, serializeString(fdwState->oraTable->cols[i]->pgname));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgattnum));
-		result = lappend(result, serializeOid(fdwState->oraTable->cols[i]->pgtype));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgtypmod));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->used));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pkey));
-		result = lappend(result, serializeLong(fdwState->oraTable->cols[i]->val_size));
-		/* don't serialize val, val_len, val_len4 and val_null */
+		/* Oracle table data */
+		result = lappend(result, serializeString(fdwState->oraTable->name));
+		/* PostgreSQL table name */
+		result = lappend(result, serializeString(fdwState->oraTable->pgname));
+		/* number of columns in Oracle table */
+		result = lappend(result, serializeInt(fdwState->oraTable->ncols));
+		/* number of columns in PostgreSQL table */
+		result = lappend(result, serializeInt(fdwState->oraTable->npgcols));
+		/* column data */
+		for (i=0; i<fdwState->oraTable->ncols; ++i)
+		{
+			result = lappend(result, serializeString(fdwState->oraTable->cols[i]->name));
+			result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->oratype));
+			result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->scale));
+			result = lappend(result, serializeString(fdwState->oraTable->cols[i]->pgname));
+			result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgattnum));
+			result = lappend(result, serializeOid(fdwState->oraTable->cols[i]->pgtype));
+			result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgtypmod));
+			result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->used));
+			result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pkey));
+			result = lappend(result, serializeLong(fdwState->oraTable->cols[i]->val_size));
+			/* don't serialize val, val_len, val_len4 and val_null */
+		}
+	}
+	else
+	{
+		/* Oracle table data */
+		result = lappend(result, serializeString(""));
+		/* PostgreSQL table name */
+		result = lappend(result, serializeString(""));
+		/* number of columns in Oracle table */
+		result = lappend(result, serializeInt(0));
+		/* number of columns in PostgreSQL table */
+		result = lappend(result, serializeInt(0));
 	}
 	/* find length of parameter list */
 	for (param=fdwState->paramList; param; param=param->next)
@@ -3691,6 +4394,12 @@ List
 		/* don't serialize value, node and bindh */
 	}
 	/* don't serialize params, startup_cost, total_cost, pushdown_clauses, rowcount, columnindex and temp_cxt */
+#ifdef JOIN_API
+	/* server oid */
+	result = lappend(result, serializeOid(fdwState->serverid));
+	/* checkAsUser oid */
+	result = lappend(result, serializeOid(fdwState->checkAsUser));
+#endif
 
 	return result;
 }
@@ -3844,6 +4553,14 @@ struct OracleFdwState
 		state->paramList = param;
 	}
 
+#ifdef JOIN_API
+	/* server oid */
+	state->serverid = DatumGetObjectId(((Const *)lfirst(cell))->constvalue);
+	/* checkAsUser oid */
+	cell = lnext(cell);
+	state->checkAsUser = DatumGetObjectId(((Const *)lfirst(cell))->constvalue);
+#endif
+
 	return state;
 }
 
@@ -3942,6 +4659,10 @@ struct OracleFdwState
 	copy->rowcount = 0;
 	copy->columnindex = 0;
 	copy->temp_cxt = NULL;
+#ifdef JOIN_API
+	copy->serverid = orig->serverid;
+	copy->checkAsUser = orig->checkAsUser;
+#endif
 
 	return copy;
 }

@@ -9,8 +9,12 @@ CREATE EXTENSION oracle_fdw;
 
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
 CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
+CREATE SERVER another_server FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
 
 CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
+CREATE USER MAPPING FOR PUBLIC SERVER another_server OPTIONS (user 'SCOTT', password 'tiger');
+
+CREATE USER another_user;
 
 -- Oracle table TYPETEST1 must be created for this one
 CREATE FOREIGN TABLE typetest1 (
@@ -64,6 +68,20 @@ CREATE FOREIGN TABLE longy (
    iym interval,
    x   integer
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
+
+-- a table for join tests
+CREATE FOREIGN TABLE shorty2 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   character(10)
+) SERVER oracle OPTIONS (table 'TYPETEST2');
+CREATE FOREIGN TABLE shorty3 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   character(10)
+) SERVER another_server OPTIONS (table 'TYPETEST2');
+GRANT SELECT ON shorty2 TO another_user;
+CREATE VIEW v_shorty2 AS SELECT * FROM shorty2;
+ALTER VIEW v_shorty2 OWNER TO another_user;
+GRANT ALL ON v_shorty2 TO PUBLIC;
 
 /*
  * Empty the table and INSERT some samples.
@@ -136,6 +154,15 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    '3 years'
 );
 
+-- generate data for join tests
+BEGIN;
+DELETE FROM shorty2;
+INSERT INTO shorty2 (id, c) VALUES (1, '2-1');
+INSERT INTO shorty2 (id, c) VALUES (2, '2-2');
+INSERT INTO shorty2 (id, c) VALUES (4, '2-4');
+INSERT INTO shorty2 (id, c) VALUES (5, '2-5');
+COMMIT;
+
 /*
  * Test SELECT, UPDATE ... RETURNING, DELETE and transactions.
  */
@@ -170,6 +197,68 @@ EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RET
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
 
 /*
+ * join SELECT
+ */
+-- query with ORDER BY causes MergeJoin even cost is not cheapest, so supress it.
+SET enable_mergejoin = off;
+-- simple join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+-- simple join in CTE
+EXPLAIN (COSTS false)
+WITH s AS (SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id) SELECT * FROM s ORDER BY 1, 3;
+WITH s AS (SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id) SELECT * FROM s ORDER BY 1, 3;
+-- left outer join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 LEFT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 LEFT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+-- right outer join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 RIGHT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 RIGHT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+-- full outer join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 FULL JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 FULL JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+-- semi join (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c FROM shorty s1 WHERE EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+SELECT s1.id, s1.c FROM shorty s1 WHERE EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+-- anti join (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c FROM shorty s1 WHERE NOT EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+SELECT s1.id, s1.c FROM shorty s1 WHERE NOT EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+-- cross join (no push-down)
+EXPLAIN (COSTS false)
+SELECT * FROM shorty s1 CROSS JOIN shorty2 s2 ORDER BY 1, 3;
+SELECT * FROM shorty s1 CROSS JOIN shorty2 s2 ORDER BY 1, 3;
+-- UPDATE (no push-down)
+EXPLAIN (COSTS false)
+UPDATE shorty s1 SET c = s2.c FROM shorty2 s2 WHERE s1.id = s2.id;
+UPDATE shorty s1 SET c = s2.c FROM shorty2 s2 WHERE s1.id = s2.id;
+-- DELETE (no push-down)
+EXPLAIN (COSTS false)
+DELETE FROM shorty s1 USING shorty2 s2 WHERE s1.id = s2.id;
+DELETE FROM shorty s1 USING shorty2 s2 WHERE s1.id = s2.id;
+-- different server (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty3 s2 ON s1.id = s2.id ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty3 s2 ON s1.id = s2.id ORDER BY 1, 3;
+-- different checkAsUser
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN v_shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN v_shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+-- unsafe join conditions (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c || now()::text ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c || now()::text ORDER BY 1, 3;
+-- with local filter (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c WHERE s1.c = now()::text ORDER BY 1, 3;
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c WHERE s1.c = now()::text ORDER BY 1, 3;
+
+/*
  * Test parameters.
  */
 
@@ -183,3 +272,9 @@ EXECUTE stmt(1);
 EXPLAIN EXECUTE stmt(1);
 EXECUTE stmt(1);
 DEALLOCATE stmt;
+
+/*
+ * Cleanup
+ */
+DROP OWNED BY another_user;
+DROP USER another_user;
