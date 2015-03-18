@@ -6,7 +6,10 @@ SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
 CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
+CREATE SERVER another_server FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
 CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
+CREATE USER MAPPING FOR PUBLIC SERVER another_server OPTIONS (user 'SCOTT', password 'tiger');
+CREATE USER another_user;
 -- Oracle table TYPETEST1 must be created for this one
 CREATE FOREIGN TABLE typetest1 (
    id  integer OPTIONS (key 'yes') NOT NULL,
@@ -57,6 +60,19 @@ CREATE FOREIGN TABLE longy (
    iym interval,
    x   integer
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
+-- a table for join tests
+CREATE FOREIGN TABLE shorty2 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   character(10)
+) SERVER oracle OPTIONS (table 'TYPETEST2');
+CREATE FOREIGN TABLE shorty3 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   character(10)
+) SERVER another_server OPTIONS (table 'TYPETEST2');
+GRANT SELECT ON shorty2 TO another_user;
+CREATE VIEW v_shorty2 AS SELECT * FROM shorty2;
+ALTER VIEW v_shorty2 OWNER TO another_user;
+GRANT ALL ON v_shorty2 TO PUBLIC;
 /*
  * Empty the table and INSERT some samples.
  */
@@ -122,6 +138,14 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    '23:59:59.999999',
    '3 years'
 );
+-- generate data for join tests
+BEGIN;
+DELETE FROM shorty2;
+INSERT INTO shorty2 (id, c) VALUES (1, '2-1');
+INSERT INTO shorty2 (id, c) VALUES (2, '2-2');
+INSERT INTO shorty2 (id, c) VALUES (4, '2-4');
+INSERT INTO shorty2 (id, c) VALUES (5, '2-5');
+COMMIT;
 /*
  * Test SELECT, UPDATE ... RETURNING, DELETE and transactions.
  */
@@ -175,23 +199,324 @@ SELECT id, c FROM typetest1 ORDER BY id;
  * Test EXPLAIN support.
  */
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;
-                                                                                                     QUERY PLAN                                                                                                     
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                           QUERY PLAN                                                                                                                                           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1
    Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p7 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*398298a2a1cb240aba5041298cc6010c*/ "ID", "C", "NC", "VC", "NVC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1" WHERE ("ID" < 4) FOR UPDATE
+         Oracle query: SELECT /*05a43ffbbec22848a8eea273c19f598f*/ "ID" a_1, "C" a_2, "NC" a_3, "VC" a_4, "NVC" a_5, "R" a_6, "U" a_7, "LB" a_8, "LR" a_9, "B" a_10, "NUM" a_11, "FL" a_12, "DB" a_13, "D" a_14, "TS" a_15, "IDS" a_16, "IYM" a_17 FROM "TYPETEST1" WHERE ("ID" < 4) FOR UPDATE
 (4 rows)
 
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
+                                                                                                                               QUERY PLAN                                                                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on public.shorty
    Output: id, c
-   Oracle query: SELECT /*c46e82933e70cd3612b616bdeca201b4*/ "ID", "C" FROM "TYPETEST1"
+   Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
    Oracle plan: SELECT STATEMENT
    Oracle plan:   TABLE ACCESS FULL TYPETEST1
 (5 rows)
+
+/*
+ * join SELECT
+ */
+-- query with ORDER BY causes MergeJoin even cost is not cheapest, so supress it.
+SET enable_mergejoin = off;
+-- simple join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+                                                                                                                                                                                                                                                                                                             QUERY PLAN                                                                                                                                                                                                                                                                                                             
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id
+   ->  Foreign Scan
+         Oracle query: SELECT r.a_1 a_1, r.a_2 a_2, l.a_1 a_3, l.a_2 a_4 FROM (SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2") l INNER JOIN (SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1") r ON (r.a_1 = l.a_1)
+(4 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+ id |     c      | id |     c      
+----+------------+----+------------
+  1 | fixed chau |  1 | 2-1       
+  4 | short      |  4 | 2-4       
+(2 rows)
+
+-- simple join in CTE
+EXPLAIN (COSTS false)
+WITH s AS (SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id) SELECT * FROM s ORDER BY 1, 3;
+                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s.id, s.id_1
+   CTE s
+     ->  Foreign Scan
+           Oracle query: SELECT r.a_1 a_1, r.a_2 a_2, l.a_1 a_3, l.a_2 a_4 FROM (SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2") l INNER JOIN (SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1") r ON (r.a_1 = l.a_1)
+   ->  CTE Scan on s
+(6 rows)
+
+WITH s AS (SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.id = s2.id) SELECT * FROM s ORDER BY 1, 3;
+ id |     c      | id |     c      
+----+------------+----+------------
+  1 | fixed chau |  1 | 2-1       
+  4 | short      |  4 | 2-4       
+(2 rows)
+
+-- left outer join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 LEFT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+                                                                                                                                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                                                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id, id
+   ->  Foreign Scan
+         Oracle query: SELECT l.a_1 a_1, l.a_2 a_2, r.a_1 a_3, r.a_2 a_4 FROM (SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1") l LEFT JOIN (SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2") r ON (l.a_1 = r.a_1)
+(4 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 LEFT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+ id |          c           | id |     c      
+----+----------------------+----+------------
+  1 | fixed chau           |  1 | 2-1       
+  3 | a\x1B\x07\r\x7Fb     |    | 
+  4 | short                |  4 | 2-4       
+(3 rows)
+
+-- right outer join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 RIGHT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+                                                                                                                                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                                                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id, id
+   ->  Foreign Scan
+         Oracle query: SELECT l.a_1 a_1, l.a_2 a_2, r.a_1 a_3, r.a_2 a_4 FROM (SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2") l LEFT JOIN (SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1") r ON (r.a_1 = l.a_1)
+(4 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 RIGHT JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+ id |     c      | id |     c      
+----+------------+----+------------
+  1 | fixed chau |  1 | 2-1       
+  4 | short      |  4 | 2-4       
+    |            |  2 | 2-2       
+    |            |  5 | 2-5       
+(4 rows)
+
+-- full outer join
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 FULL JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+                                                                                                                                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                                                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id, id
+   ->  Foreign Scan
+         Oracle query: SELECT l.a_1 a_1, l.a_2 a_2, r.a_1 a_3, r.a_2 a_4 FROM (SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1") l FULL JOIN (SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2") r ON (l.a_1 = r.a_1)
+(4 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 FULL JOIN shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+ id |          c           | id |     c      
+----+----------------------+----+------------
+  1 | fixed chau           |  1 | 2-1       
+  3 | a\x1B\x07\r\x7Fb     |    | 
+  4 | short                |  4 | 2-4       
+    |                      |  2 | 2-2       
+    |                      |  5 | 2-5       
+(5 rows)
+
+-- semi join (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c FROM shorty s1 WHERE EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+                                                                                                                                            QUERY PLAN                                                                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id
+   ->  Hash Join
+         Hash Cond: (s1.id = s2.id)
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Hash
+               ->  HashAggregate
+                     Group Key: s2.id
+                     ->  Foreign Scan on shorty2 s2
+                           Oracle query: SELECT /*cc9d5ecd653c449bab192ad5e961c427*/ "ID" a_1, NULL a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(11 rows)
+
+SELECT s1.id, s1.c FROM shorty s1 WHERE EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+ id |     c      
+----+------------
+  1 | fixed chau
+  4 | short     
+(2 rows)
+
+-- anti join (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c FROM shorty s1 WHERE NOT EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+                                                                                                                                         QUERY PLAN                                                                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id
+   ->  Hash Anti Join
+         Hash Cond: (s1.id = s2.id)
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Hash
+               ->  Foreign Scan on shorty2 s2
+                     Oracle query: SELECT /*cc9d5ecd653c449bab192ad5e961c427*/ "ID" a_1, NULL a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(9 rows)
+
+SELECT s1.id, s1.c FROM shorty s1 WHERE NOT EXISTS (SELECT 1 FROM shorty2 s2 WHERE s1.id = s2.id) ORDER BY 1;
+ id |          c           
+----+----------------------
+  3 | a\x1B\x07\r\x7Fb    
+(1 row)
+
+-- cross join (no push-down)
+EXPLAIN (COSTS false)
+SELECT * FROM shorty s1 CROSS JOIN shorty2 s2 ORDER BY 1, 3;
+                                                                                                                                        QUERY PLAN                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id, s2.id
+   ->  Nested Loop
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Materialize
+               ->  Foreign Scan on shorty2 s2
+                     Oracle query: SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(8 rows)
+
+SELECT * FROM shorty s1 CROSS JOIN shorty2 s2 ORDER BY 1, 3;
+ id |          c           | id |     c      
+----+----------------------+----+------------
+  1 | fixed chau           |  1 | 2-1       
+  1 | fixed chau           |  2 | 2-2       
+  1 | fixed chau           |  4 | 2-4       
+  1 | fixed chau           |  5 | 2-5       
+  3 | a\x1B\x07\r\x7Fb     |  1 | 2-1       
+  3 | a\x1B\x07\r\x7Fb     |  2 | 2-2       
+  3 | a\x1B\x07\r\x7Fb     |  4 | 2-4       
+  3 | a\x1B\x07\r\x7Fb     |  5 | 2-5       
+  4 | short                |  1 | 2-1       
+  4 | short                |  2 | 2-2       
+  4 | short                |  4 | 2-4       
+  4 | short                |  5 | 2-5       
+(12 rows)
+
+-- UPDATE (no push-down)
+EXPLAIN (COSTS false)
+UPDATE shorty s1 SET c = s2.c FROM shorty2 s2 WHERE s1.id = s2.id;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Update on shorty s1
+   Oracle statement: UPDATE "TYPETEST1" SET "C" = :p2 WHERE "ID" = :k1
+   ->  Hash Join
+         Hash Cond: (s1.id = s2.id)
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*44fe363235f8c0407e514ed993c335fa*/ "ID" a_1 FROM "TYPETEST1" FOR UPDATE
+         ->  Hash
+               ->  Foreign Scan on shorty2 s2
+                     Oracle query: SELECT /*0b38bb5bb109d5ab48a79f74bf868d2d*/ "ID" a_1, "C" a_2 FROM "TYPETEST2"
+(9 rows)
+
+UPDATE shorty s1 SET c = s2.c FROM shorty2 s2 WHERE s1.id = s2.id;
+-- DELETE (no push-down)
+EXPLAIN (COSTS false)
+DELETE FROM shorty s1 USING shorty2 s2 WHERE s1.id = s2.id;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Delete on shorty s1
+   Oracle statement: DELETE FROM "TYPETEST1" WHERE "ID" = :k1
+   ->  Hash Join
+         Hash Cond: (s1.id = s2.id)
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*44fe363235f8c0407e514ed993c335fa*/ "ID" a_1 FROM "TYPETEST1" FOR UPDATE
+         ->  Hash
+               ->  Foreign Scan on shorty2 s2
+                     Oracle query: SELECT /*2c7fd258f5eaaab3ec797b8243e08908*/ "ID" a_1 FROM "TYPETEST2"
+(9 rows)
+
+DELETE FROM shorty s1 USING shorty2 s2 WHERE s1.id = s2.id;
+-- different server (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty3 s2 ON s1.id = s2.id ORDER BY 1, 3;
+                                                                                                                                        QUERY PLAN                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id
+   ->  Hash Join
+         Hash Cond: (s1.id = s2.id)
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Hash
+               ->  Foreign Scan on shorty3 s2
+                     Oracle query: SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(9 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty3 s2 ON s1.id = s2.id ORDER BY 1, 3;
+ id | c | id | c 
+----+---+----+---
+(0 rows)
+
+-- different checkAsUser
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN v_shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+                                                                                                                                        QUERY PLAN                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id
+   ->  Hash Join
+         Hash Cond: (s1.id = shorty2.id)
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Hash
+               ->  Foreign Scan on shorty2
+                     Oracle query: SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(9 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN v_shorty2 s2 ON s1.id = s2.id ORDER BY 1, 3;
+ id | c | id | c 
+----+---+----+---
+(0 rows)
+
+-- unsafe join conditions (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c || now()::text ORDER BY 1, 3;
+                                                                                                                                        QUERY PLAN                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id, s2.id
+   ->  Hash Join
+         Hash Cond: ((s1.c)::text = ((s2.c)::text || (now())::text))
+         ->  Foreign Scan on shorty s1
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Hash
+               ->  Foreign Scan on shorty2 s2
+                     Oracle query: SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(9 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c || now()::text ORDER BY 1, 3;
+ id | c | id | c 
+----+---+----+---
+(0 rows)
+
+-- with local filter (no push-down)
+EXPLAIN (COSTS false)
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c WHERE s1.c = now()::text ORDER BY 1, 3;
+                                                                                                                                        QUERY PLAN                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: s1.id, s2.id
+   ->  Hash Join
+         Hash Cond: (s1.c = s2.c)
+         ->  Foreign Scan on shorty s1
+               Filter: ((c)::text = (now())::text)
+               Oracle query: SELECT /*1e2d011c693848d03523d465a10e5056*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST1"
+         ->  Hash
+               ->  Foreign Scan on shorty2 s2
+                     Oracle query: SELECT /*2580f1915eab18d0e76c487f6830f1a5*/ "ID" a_1, "C" a_2, NULL a_3, NULL a_4, NULL a_5, NULL a_6, NULL a_7, NULL a_8, NULL a_9, NULL a_10, NULL a_11, NULL a_12, NULL a_13, NULL a_14, NULL a_15, NULL a_16, NULL a_17, NULL a_18 FROM "TYPETEST2"
+(10 rows)
+
+SELECT s1.id, s1.c, s2.id, s2.c FROM shorty s1 JOIN shorty2 s2 ON s1.c = s2.c WHERE s1.c = now()::text ORDER BY 1, 3;
+ id | c | id | c 
+----+---+----+---
+(0 rows)
 
 /*
  * Test parameters.
@@ -242,3 +567,8 @@ EXECUTE stmt(1);
 (1 row)
 
 DEALLOCATE stmt;
+/*
+ * Cleanup
+ */
+DROP OWNED BY another_user;
+DROP USER another_user;

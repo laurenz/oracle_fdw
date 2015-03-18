@@ -1652,7 +1652,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 	col_pos = 0;
 	for (i=0; i<oraTable->ncols; ++i)
 	{
-		if (oraTable->cols[i]->used)
+		if (strcmp(query, "SELECT") == 0 || oraTable->cols[i]->used)
 		{
 			/*
 			 * Unfortunately Oracle handles DML statements with a RETURNING clause
