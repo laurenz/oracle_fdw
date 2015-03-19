@@ -448,9 +448,11 @@ oracle_fdw has been written as a PostgreSQL extension and uses the Extension
 Building Infrastructure "PGXS".  It should be easy to install.
 
 You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
-installed with packages, install the development package).
-You need to install Oracle's C header files as well (SDK package for Instant
-Client).
+installed with packages, install the development package, 
+e.g. "sudo apt install -y postgresql-server-dev-9.4"). You need to install 
+Oracle's C header files as well (SDK package for Instant Client; see
+https://help.ubuntu.com/community/Oracle%20Instant%20Client for a good example
+on Ubuntu).
 
 Make sure that PostgreSQL is configured "--without-ldap" (at least the server).
 See "Problems" below.
