@@ -2,6 +2,8 @@ Version 1.3.0
   Bugfixes:
   - The server crashed for the constructs like "<column> = ANY (NULL)".
     Report and patch by dreckard.
+  - oracle_fdw sometimes failed to recognize the SDO_GEOMETRY data type.
+    Reported by Bevan Jenkins.
 
 Version 1.2.0, released 2015-01-03
   Enhancements:

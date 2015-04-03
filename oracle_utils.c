@@ -771,6 +771,7 @@ struct oraTable
 	sb1 scale;
 	char *qtable, *qschema = NULL, *tablename, *query;
 	OraText *ident, *typname, *typschema;
+	char *type_name, *type_schema;
 	ub4 ncols, ident_size, typname_size, typschema_size;
 	int i, length;
 
@@ -911,6 +912,11 @@ struct oraTable
 				oraMessage);
 		}
 
+		/* create a zero-terminated copy */
+		type_name = oracleAlloc(typname_size + 1);
+		strncpy(type_name, (char *)typname, typname_size);
+		type_name[typname_size] = '\0';
+
 		/* get the column type schema */
 		if (checkerr(
 			OCIAttrGet((dvoid*)colp, OCI_DTYPE_PARAM, (dvoid*)&typschema,
@@ -921,6 +927,11 @@ struct oraTable
 				"error describing remote table: OCIAttrGet failed to get column type schema name",
 				oraMessage);
 		}
+
+		/* create a zero-terminated copy */
+		type_schema = oracleAlloc(typschema_size + 1);
+		strncpy(type_schema, (char *)typschema, typschema_size);
+		type_schema[typschema_size] = '\0';
 
 		/* get the character set form */
 		if (checkerr(
@@ -1092,8 +1103,8 @@ struct oraTable
 				break;
 			case SQLT_NTY:
 				/* named type */
-				if ((strcmp((char *)typschema, "MDSYS") == 0)
-					&& (strcmp((char *)typname, "SDO_GEOMETRY") == 0))
+				if ((strcmp(type_schema, "MDSYS") == 0)
+					&& (strcmp(type_name, "SDO_GEOMETRY") == 0))
 				{
 					reply->cols[i-1]->oratype = ORA_TYPE_GEOMETRY;
 					reply->cols[i-1]->val_size = sizeof(ora_geometry);
