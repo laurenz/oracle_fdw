@@ -465,8 +465,8 @@ Then the software installation should be as simple as
   $ make
   $ make install
 
-For the second step you need write permission to PostgreSQL's shared library
-directory.
+For the second step you need write permission on the directories where
+PostgreSQL is installed.
 
 If you want to build oracle_fdw in a source tree of PostgreSQL, use
 
