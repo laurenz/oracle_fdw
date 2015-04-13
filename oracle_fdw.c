@@ -86,6 +86,11 @@
 #undef WRITE_API
 #endif  /* PG_VERSION_NUM */
 
+/* array_create_iterator has a new signature from 9.5 on */
+#if PG_VERSION_NUM >= 90500
+#define array_create_iterator(arr, slice_ndim) array_create_iterator(arr, slice_ndim, NULL)
+#endif  /* PG_VERSION_NUM */
+
 PG_MODULE_MAGIC;
 
 /*
