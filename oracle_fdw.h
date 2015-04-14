@@ -186,6 +186,7 @@ extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, cha
 extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void *oracleGetGeometryType(oracleSession *session);
+extern int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key);
 
 /*
  * functions defined in oracle_fdw.c

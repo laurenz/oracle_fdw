@@ -1430,7 +1430,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error describing query query: OCIStmtExecute failed to describe remote query",
+			"error describing query: OCIStmtExecute failed to describe remote query",
 			oraMessage);
 	}
 
@@ -2264,6 +2264,303 @@ void *oracleGetGeometryType(oracleSession *session)
 	}
 
 	return session->connp->geomtype;
+}
+
+/*
+ * oracleGetImportColumn
+ * 		Get the next element in the ordered list of tables and their columns for "schema".
+ * 		Returns 0 if there are no more columns, else 1.
+ */
+int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
+{
+	/* the static variables will contain data returned to the caller */
+	static char s_tabname[129], s_colname[129];
+	char typename[129] = { '\0' }, typeowner[129] = { '\0' }, isnull[2] = { '\0' };
+	const char * const column_query =
+		"SELECT col.table_name, col.column_name, col.data_type, col.data_type_owner,\n"
+		"       col.char_length, col.data_precision, col.data_scale, col.nullable,\n"
+		"       CASE WHEN ind.column_position IS NOT NULL THEN 1 ELSE 0 END AS primary_key\n"
+		"FROM all_tab_columns col, all_constraints con, all_ind_columns ind\n"
+		"WHERE col.owner = con.owner(+) AND col.table_name = con.table_name(+) AND col.column_name = ind.column_name(+)\n"
+		"  AND con.owner = ind.table_owner(+) AND (con.owner IS NULL OR con.owner = :nsp)\n"
+		"  AND con.table_name = ind.table_name(+) AND con.index_owner = ind.index_owner(+)\n"
+		"  AND con.index_name = ind.index_name(+) AND NVL(con.constraint_type, 'P') = 'P' AND col.owner = :nsp\n"
+		"ORDER BY col.table_name, col.column_id";
+	OCIBind *bndhp = NULL;
+	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner,
+		ind_charlen, ind_precision, ind_scale, ind_isnull, ind_key;
+	OCIDefine *defnhp_tabname = NULL, *defnhp_colname = NULL, *defnhp_typename = NULL,
+		*defnhp_typeowner = NULL, *defnhp_charlen = NULL, *defnhp_precision = NULL,
+		*defnhp_scale = NULL, *defnhp_isnull = NULL, *defnhp_key = NULL;
+	ub2 len_tabname, len_colname, len_typename, len_typeowner,
+		len_charlen, len_precision, len_scale, len_isnull, len_key;
+	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
+	sword result;
+
+	/* return a pointer to the static variables */
+	*tabname = s_tabname;
+	*colname = s_colname;
+
+	if (session->stmthp == NULL)
+	{
+		/* create statement handle */
+		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+			FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error importing foreign schema: OCIHandleAlloc failed to allocate statement handle");
+
+		/* set prefetch options */
+		if (checkerr(
+			OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
+				OCI_ATTR_PREFETCH_ROWS, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIAttrSet failed to set number of prefetched rows in statement handle",
+				oraMessage);
+		}
+		if (checkerr(
+			OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_memory, 0,
+				OCI_ATTR_PREFETCH_MEMORY, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIAttrSet failed to set prefetch memory in statement handle",
+				oraMessage);
+		}
+
+		/* prepare the query */
+		if (checkerr(
+			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)column_query, (ub4) strlen(column_query),
+				(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIStmtPrepare failed to prepare remote query",
+				oraMessage);
+		}
+
+		/* bind the parameter */
+		if (checkerr(
+			OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":nsp",
+				(sb4)4, (dvoid *)schema, (sb4)(strlen(schema) + 1),
+				SQLT_STR, (dvoid *)&ind,
+				NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIBindByName failed to bind parameter",
+				oraMessage);
+		}
+
+		/* define result values */
+		s_tabname[128] = '\0';
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_tabname, session->envp->errhp, (ub4)1,
+				(dvoid *)s_tabname, (sb4)129,
+				SQLT_STR, (dvoid *)&ind_tabname,
+				(ub2 *)&len_tabname, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for table name",
+				oraMessage);
+		}
+
+		s_colname[128] = '\0';
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_colname, session->envp->errhp, (ub4)2,
+				(dvoid *)s_colname, (sb4)129,
+				SQLT_STR, (dvoid *)&ind_colname,
+				(ub2 *)&len_colname, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for column name",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_typename, session->envp->errhp, (ub4)3,
+				(dvoid *)typename, (sb4)129,
+				SQLT_STR, (dvoid *)&ind_typename,
+				(ub2 *)&len_typename, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for type name",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_typeowner, session->envp->errhp, (ub4)4,
+				(dvoid *)typeowner, (sb4)129,
+				SQLT_STR, (dvoid *)&ind_typeowner,
+				(ub2 *)&len_typeowner, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for type owner",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_charlen, session->envp->errhp, (ub4)5,
+				(dvoid *)charlen, (sb4)sizeof(int),
+				SQLT_INT, (dvoid *)&ind_charlen,
+				(ub2 *)&len_charlen, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for character length",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_precision, session->envp->errhp, (ub4)6,
+				(dvoid *)typeprec, (sb4)sizeof(int),
+				SQLT_INT, (dvoid *)&ind_precision,
+				(ub2 *)&len_precision, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for type precision",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_scale, session->envp->errhp, (ub4)7,
+				(dvoid *)typescale, (sb4)sizeof(int),
+				SQLT_INT, (dvoid *)&ind_scale,
+				(ub2 *)&len_scale, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for type scale",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_isnull, session->envp->errhp, (ub4)8,
+				(dvoid *)isnull, (sb4)2,
+				SQLT_STR, (dvoid *)&ind_isnull,
+				(ub2 *)&len_isnull, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for nullability",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_key, session->envp->errhp, (ub4)9,
+				(dvoid *)key, (sb4)sizeof(int),
+				SQLT_INT, (dvoid *)&ind_key,
+				(ub2 *)&len_key, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result for primary key",
+				oraMessage);
+		}
+
+		/* execute the query and get the first result row */
+		result = checkerr(
+			OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+				(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS;
+
+		if (result != OCI_SUCCESS && result != OCI_NO_DATA)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIStmtExecute failed to execute column query",
+				oraMessage);
+		}
+	}
+	else
+	{
+		/* fetch the next result row */
+		result = checkerr(
+			OCIStmtFetch2(session->stmthp, session->envp->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
+
+		if (result != OCI_SUCCESS && result != OCI_NO_DATA)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIStmtFetch2 failed to fetch next result row",
+				oraMessage);
+		}
+	}
+
+	if (result == OCI_NO_DATA)
+	{
+		/* free the statement handle */
+		freeHandle(session->stmthp, session->connp);
+		session->stmthp = NULL;
+
+		return 0;
+	}
+	else
+	{
+		/* set nullable to 1 if isnull is 'Y', else 0 */
+		*nullable = (isnull[0] == 'Y');
+
+		/* figure out correct data type */
+		if (strncmp(typename, "VARCHAR", 7) == 0)
+			*type = ORA_TYPE_VARCHAR2;
+		else if (strcmp(typename, "NUMBER") == 0)
+			*type = ORA_TYPE_NUMBER;
+		else if (strcmp(typename, "DATE") == 0)
+			*type = ORA_TYPE_DATE;
+		else if (strcmp(typename, "CHAR") == 0)
+			*type = ORA_TYPE_CHAR;
+		else if (strncmp(typename, "TIMESTAMP", 9) == 0)
+		{
+			if (strlen(typename) < 17)
+				*type = ORA_TYPE_TIMESTAMP;
+			else
+				*type = ORA_TYPE_TIMESTAMPTZ;
+		}
+		else if (strcmp(typename, "RAW") == 0)
+			*type = ORA_TYPE_RAW;
+		else if (strcmp(typename, "BLOB") == 0)
+			*type = ORA_TYPE_BLOB;
+		else if (strcmp(typename, "CLOB") == 0)
+			*type = ORA_TYPE_CLOB;
+		else if (strcmp(typename, "BFILE") == 0)
+			*type = ORA_TYPE_BFILE;
+		else if (strcmp(typename, "LONG") == 0)
+			*type = ORA_TYPE_LONG;
+		else if (strcmp(typename, "LONG RAW") == 0)
+			*type = ORA_TYPE_LONGRAW;
+		else if (strcmp(typename, "SDO_GEOMETRY") == 0 && ind_typeowner != OCI_IND_NULL && strcmp(typeowner, "MDSYS") == 0)
+			*type = ORA_TYPE_GEOMETRY;
+		else if (strcmp(typename, "FLOAT") == 0)
+			*type = ORA_TYPE_FLOAT;
+		else if (strncmp(typename, "NVARCHAR", 8) == 0)
+			*type = ORA_TYPE_NVARCHAR2;
+		else if (strcmp(typename, "NCHAR") == 0)
+			*type = ORA_TYPE_NCHAR;
+		else if (strncmp(typename, "INTERVAL DAY", 12) == 0)
+			*type = ORA_TYPE_INTERVALD2S;
+		else if (strncmp(typename, "INTERVAL YEAR", 13) == 0)
+			*type = ORA_TYPE_INTERVALY2M;
+		else if (strcmp(typename, "BINARY_FLOAT") == 0)
+			*type = ORA_TYPE_BINARYFLOAT;
+		else if (strcmp(typename, "BINARY_DOUBLE") == 0)
+			*type = ORA_TYPE_BINARYDOUBLE;
+		else
+			*type = ORA_TYPE_OTHER;
+
+		/* set character length, precision and scale to 0 if it was a NULL value */
+		if (ind_charlen == OCI_IND_NULL)
+			*charlen = 0;
+		if (ind_precision == OCI_IND_NULL)
+			*typeprec = 0;
+		if (ind_scale == OCI_IND_NULL)
+			*typescale = 0;
+	}
+
+	return 1;
 }
 
 /*

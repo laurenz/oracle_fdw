@@ -19,6 +19,7 @@
 #include "catalog/indexing.h"
 #include "catalog/pg_attribute.h"
 #include "catalog/pg_cast.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
 #include "catalog/pg_foreign_table.h"
@@ -53,6 +54,7 @@
 #include "utils/datetime.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
+#include "utils/formatting.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -86,9 +88,13 @@
 #undef WRITE_API
 #endif  /* PG_VERSION_NUM */
 
-/* array_create_iterator has a new signature from 9.5 on */
 #if PG_VERSION_NUM >= 90500
+#define IMPORT_API
+
+/* array_create_iterator has a new signature from 9.5 on */
 #define array_create_iterator(arr, slice_ndim) array_create_iterator(arr, slice_ndim, NULL)
+#else
+#undef IMPORT_API
 #endif  /* PG_VERSION_NUM */
 
 PG_MODULE_MAGIC;
@@ -120,6 +126,11 @@ struct OracleFdwOption
 #define OPT_KEY "key"
 
 #define DEFAULT_MAX_LONG 32767
+
+/*
+ * Options for case folding for names in IMPORT FOREIGN TABLE.
+ */
+typedef enum { CASE_KEEP, CASE_LOWER, CASE_SMART } fold_t;
 
 /*
  * Valid options for oracle_fdw.
@@ -222,6 +233,9 @@ static void oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo);
 static void oracleExplainForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, struct ExplainState *es);
 static int oracleIsForeignRelUpdatable(Relation rel);
 #endif  /* WRITE_API */
+#ifdef IMPORT_API
+static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
+#endif  /* IMPORT_API */
 
 /*
  * Helper functions
@@ -256,6 +270,9 @@ static void exitHook(int code, Datum arg);
 static char *setSelectParameters(struct paramDesc *paramList, ExprContext *econtext);
 static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob);
 static void errorContextCallback(void *arg);
+#ifdef IMPORT_API
+static char *fold_case(char *name, fold_t foldcase);
+#endif  /* IMPORT_API */
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -290,6 +307,9 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 	fdwroutine->ExplainForeignModify = oracleExplainForeignModify;
 	fdwroutine->IsForeignRelUpdatable = oracleIsForeignRelUpdatable;
 #endif  /* WRITE_API */
+#ifdef IMPORT_API
+	fdwroutine->ImportForeignSchema = oracleImportForeignSchema;
+#endif  /* IMPORT_API */
 
 	PG_RETURN_POINTER(fdwroutine);
 }
@@ -1761,6 +1781,222 @@ oracleIsForeignRelUpdatable(Relation rel)
 	return (1 << CMD_UPDATE) | (1 << CMD_INSERT) | (1 << CMD_DELETE);
 }
 #endif  /* WRITE_API */
+
+#ifdef IMPORT_API
+/*
+ * oracleImportForeignSchema
+ * 		Returns a List of CREATE FOREIGN TABLE statements.
+ */
+List *
+oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
+{
+	ForeignServer *server;
+	UserMapping *mapping;
+	ForeignDataWrapper *wrapper;
+	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	oraType type;
+	int charlen, typeprec, typescale, nullable, key, rc;
+	List *options, *result = NIL;
+	ListCell *cell;
+	oracleSession *session;
+	fold_t foldcase = CASE_SMART;
+	StringInfoData buf;
+	bool firstcol = true;
+
+	/* get the foreign server, the user mapping and the FDW */
+	server = GetForeignServer(serverOid);
+	mapping = GetUserMapping(GetUserId(), serverOid);
+	wrapper = GetForeignDataWrapper(server->fdwid);
+
+	/* get all options for these objects */
+	options = wrapper->options;
+	options = list_concat(options, server->options);
+	options = list_concat(options, mapping->options);
+
+	foreach(cell, options)
+	{
+		DefElem *def = (DefElem *) lfirst(cell);
+		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
+			nls_lang = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_DBSERVER) == 0)
+			dbserver = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_USER) == 0)
+			user = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_PASSWORD) == 0)
+			password = ((Value *) (def->arg))->val.str;
+	}
+
+	/* process the options of the IMPORT FOREIGN SCHEMA command */
+	foreach(cell, stmt->options)
+	{
+		DefElem *def = (DefElem *) lfirst(cell);
+
+		if (strcmp(def->defname, "case") == 0)
+		{
+			char *s = ((Value *) (def->arg))->val.str;
+			if (strcmp(s, "keep") == 0)
+				foldcase = CASE_KEEP;
+			else if (strcmp(s, "lower") == 0)
+				foldcase = CASE_LOWER;
+			else if (strcmp(s, "smart") == 0)
+				foldcase = CASE_SMART;
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are: %s", "keep, lower, smart")));
+			continue;
+		}
+
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+				errmsg("invalid option \"%s\"", def->defname),
+				errhint("Valid options in this context are: %s", "case")));
+	}
+
+	elog(DEBUG1, "importing schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
+
+	/* guess a good NLS_LANG environment setting */
+	nls_lang = guessNlsLang(nls_lang);
+
+	/* connect to Oracle database */
+	session = oracleGetSession(
+		dbserver,
+		user,
+		password,
+		nls_lang,
+		NULL,
+		1
+	);
+
+	initStringInfo(&buf);
+	do {
+		/* get the next column definition */
+		rc = oracleGetImportColumn(session, stmt->remote_schema, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
+
+		if ((rc == 0 && oldtabname[0] != '\0')
+			|| (rc == 1 && oldtabname[0] != '\0' && strcmp(tabname, oldtabname)))
+		{
+			/* finish previous CREATE FOREIGN TABLE statement */
+			appendStringInfo(&buf, ") SERVER \"%s\" OPTIONS (schema '%s', table '%s')",
+				server->servername, stmt->remote_schema, oldtabname);
+
+			result = lappend(result, pstrdup(buf.data));
+		}
+
+		if (rc == 1 && (oldtabname[0] == '\0' || strcmp(tabname, oldtabname)))
+		{
+			/* start a new CREATE FOREIGN TABLE statement */
+			resetStringInfo(&buf);
+			foldedname = fold_case(tabname, foldcase);
+			appendStringInfo(&buf, "CREATE FOREIGN TABLE \"%s\" (", foldedname);
+			pfree(foldedname);
+
+			firstcol = true;
+			strcpy(oldtabname, tabname);
+		}
+
+		if (rc == 1)
+		{
+			/*
+			 * Add a column definition.
+			 */
+
+			if (firstcol)
+				firstcol = false;
+			else
+				appendStringInfo(&buf, ", ");
+
+			/* column name */
+			foldedname = fold_case(colname, foldcase);
+			appendStringInfo(&buf, "\"%s\" ", foldedname);
+			pfree(foldedname);
+
+			/* data type */
+			switch (type)
+			{
+				case ORA_TYPE_CHAR:
+				case ORA_TYPE_NCHAR:
+					appendStringInfo(&buf, "character(%d)", charlen);
+					break;
+				case ORA_TYPE_VARCHAR2:
+				case ORA_TYPE_NVARCHAR2:
+					appendStringInfo(&buf, "character varying(%d)", charlen);
+					break;
+				case ORA_TYPE_CLOB:
+				case ORA_TYPE_LONG:
+					appendStringInfo(&buf, "text");
+					break;
+				case ORA_TYPE_NUMBER:
+					if (typeprec == 0)
+						appendStringInfo(&buf, "numeric");
+					else if (typescale == 0)
+					{
+						if (typeprec < 10)
+							appendStringInfo(&buf, "integer");
+						else if (typeprec < 19)
+							appendStringInfo(&buf, "bigint");
+						else
+							appendStringInfo(&buf, "numeric(%d)", typeprec);
+					}
+					else
+						appendStringInfo(&buf, "numeric(%d, %d)", typeprec, typescale);
+					break;
+				case ORA_TYPE_FLOAT:
+					appendStringInfo(&buf, "float(%d)", typeprec);
+					break;
+				case ORA_TYPE_BINARYFLOAT:
+					appendStringInfo(&buf, "real");
+					break;
+				case ORA_TYPE_BINARYDOUBLE:
+					appendStringInfo(&buf, "double precision");
+					break;
+				case ORA_TYPE_RAW:
+				case ORA_TYPE_BLOB:
+				case ORA_TYPE_BFILE:
+				case ORA_TYPE_LONGRAW:
+					appendStringInfo(&buf, "bytea");
+					break;
+				case ORA_TYPE_DATE:
+					appendStringInfo(&buf, "timestamp(0) without time zone");
+					break;
+				case ORA_TYPE_TIMESTAMP:
+					appendStringInfo(&buf, "timestamp(%d) without time zone", (typescale > 6) ? 6 : typescale);
+					break;
+				case ORA_TYPE_TIMESTAMPTZ:
+					appendStringInfo(&buf, "timestamp(%d) with time zone", (typescale > 6) ? 6 : typescale);
+					break;
+				case ORA_TYPE_INTERVALY2M:
+				case ORA_TYPE_INTERVALD2S:
+					appendStringInfo(&buf, "interval(0)");
+					break;
+				case ORA_TYPE_GEOMETRY:
+					if (GEOMETRYOID != InvalidOid)
+					{
+						appendStringInfo(&buf, "geometry");
+						break;
+					}
+					/* fall through */
+				default:
+					elog(DEBUG2, "column \"%s\" of table \"%s\" has an untranslatable data type", colname, tabname);
+					appendStringInfo(&buf, "text");
+			}
+
+			/* part of the primary key */
+			if (key)
+				appendStringInfo(&buf, " OPTIONS (key 'true')");
+
+			/* not nullable */
+			if (!nullable)
+				appendStringInfo(&buf, " NOT NULL");
+		}
+	}
+	while (rc == 1);
+
+	return result;
+}
+#endif  /* IMPORT_API */
 
 /*
  * getFdwState
@@ -4620,6 +4856,35 @@ errorContextCallback(void *arg)
 		quote_identifier(fdw_state->oraTable->pgname),
 		fdw_state->rowcount);
 }
+
+#ifdef IMPORT_API
+/*
+ * fold_case
+ * 		Returns a palloc'ed string that is the case-folded first argument.
+ */
+char *
+fold_case(char *name, fold_t foldcase)
+{
+	if (foldcase == CASE_KEEP)
+		return pstrdup(name);
+
+	if (foldcase == CASE_LOWER)
+ 		return str_tolower(name, strlen(name), DEFAULT_COLLATION_OID);
+
+	if (foldcase == CASE_SMART)
+	{
+		char *upstr = str_toupper(name, strlen(name), DEFAULT_COLLATION_OID);
+
+		/* fold case only if it does not contain lower case characters */
+		if (strcmp(upstr, name) == 0)
+			return str_tolower(name, strlen(name), DEFAULT_COLLATION_OID);
+		else
+			return pstrdup(name);
+	}
+
+	elog(ERROR, "impossible case folding type %d", foldcase);
+}
+#endif  /* IMPORT_API */
 
 /*
  * oracleGetShareFileName

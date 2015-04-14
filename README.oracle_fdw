@@ -409,6 +409,34 @@ For other conversions between Oracle SRID and PostGIS SRID, create a file
 shall contain an Oracle SRID and the corresponding PostGIS SRID, separated
 by whitespace.  Keep the file small for good performance.
 
+Support for IMPORT FOREIGN SCHEMA
+---------------------------------
+
+From PostgreSQL 9.5 on, IMPORT FOREIGN SCHEMA is supported to bulk import
+table definitions for all tables in an Oracle schema.
+In addition to the documentation of IMPORT FOREIGN SCHEMA, consider the
+following:
+
+- IMPORT FOREIGN SCHEMA will create foreign tables for all objects found in
+  ALL_TAB_COLUMNS.  That includes tables, views and materialized views,
+  but not synonyms.
+
+- There is one supported option for IMPORT FOREIGN SCHEMA named "case" that
+  controls case folding for table and column names during import.
+  The possible values are:
+  "keep": leave the names as they are in Oracle, usually in upper case.
+  "lower": translate all table and column names to lower case.
+  "smart": only translate names that are all upper case in Oracle
+           (this is the default).
+
+- The Oracle schema name must be written exactly as it is in Oracle, so
+  normally in upper case.  Since PostgreSQL translates names to lower case
+  before processing, you must protect the schema name with double quotes
+  (for example "SCOTT").
+
+- Table names in the LIMIT TO or EXCEPT clause must be written as they
+  will appear in PostgreSQL after the case folding described above.
+
 5. Installation Requirements
 ============================
 
