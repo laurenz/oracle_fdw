@@ -1,0 +1,35 @@
+SET client_min_messages = WARNING;
+CREATE SCHEMA import;
+IMPORT FOREIGN SCHEMA "SCOTT" LIMIT TO ("typetest1") FROM SERVER oracle INTO import OPTIONS (case 'lower');
+\det import
+   List of foreign tables
+ Schema |   Table   | Server 
+--------+-----------+--------
+ import | typetest1 | oracle
+(1 row)
+
+\d import.typetest1
+                  Foreign table "import.typetest1"
+ Column |              Type              | Modifiers | FDW Options  
+--------+--------------------------------+-----------+--------------
+ id     | integer                        | not null  | (key 'true')
+ c      | character(10)                  |           | 
+ nc     | character(10)                  |           | 
+ vc     | character varying(10)          |           | 
+ nvc    | character varying(10)          |           | 
+ lc     | text                           |           | 
+ r      | bytea                          |           | 
+ u      | bytea                          |           | 
+ lb     | bytea                          |           | 
+ lr     | bytea                          |           | 
+ b      | smallint                       |           | 
+ num    | numeric(7,5)                   |           | 
+ fl     | real                           |           | 
+ db     | double precision               |           | 
+ d      | timestamp(0) without time zone |           | 
+ ts     | timestamp(6) with time zone    |           | 
+ ids    | interval(6)                    |           | 
+ iym    | interval(0)                    |           | 
+Server: oracle
+FDW Options: (schema 'SCOTT', "table" 'TYPETEST1')
+

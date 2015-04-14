@@ -1855,7 +1855,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				errhint("Valid options in this context are: %s", "case")));
 	}
 
-	elog(DEBUG1, "importing schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
+	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
@@ -1933,7 +1933,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						appendStringInfo(&buf, "numeric");
 					else if (typescale == 0)
 					{
-						if (typeprec < 10)
+						if (typeprec < 5)
+							appendStringInfo(&buf, "smallint");
+						else if (typeprec < 10)
 							appendStringInfo(&buf, "integer");
 						else if (typeprec < 19)
 							appendStringInfo(&buf, "bigint");
@@ -1967,8 +1969,10 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				case ORA_TYPE_TIMESTAMPTZ:
 					appendStringInfo(&buf, "timestamp(%d) with time zone", (typescale > 6) ? 6 : typescale);
 					break;
-				case ORA_TYPE_INTERVALY2M:
 				case ORA_TYPE_INTERVALD2S:
+					appendStringInfo(&buf, "interval(%d)", (typescale > 6) ? 6 : typescale);
+					break;
+				case ORA_TYPE_INTERVALY2M:
 					appendStringInfo(&buf, "interval(0)");
 					break;
 				case ORA_TYPE_GEOMETRY:

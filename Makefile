@@ -3,7 +3,7 @@ OBJS = oracle_fdw.o oracle_utils.o oracle_gis.o
 EXTENSION = oracle_fdw
 DATA = oracle_fdw--1.1.sql oracle_fdw--1.0--1.1.sql
 DOCS = README.oracle_fdw
-REGRESS = oracle_fdw oracle_gis
+REGRESS = oracle_fdw oracle_gis oracle_import
 
 # Oracle's shared library is oci.dll on Windows and libclntsh elsewhere
 ORACLE_SHLIB=$(if $(findstring win32,$(PORTNAME)),oci,clntsh)
