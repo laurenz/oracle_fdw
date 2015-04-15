@@ -1949,7 +1949,10 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						appendStringInfo(&buf, "numeric(%d, %d)", typeprec, typescale);
 					break;
 				case ORA_TYPE_FLOAT:
-					appendStringInfo(&buf, "float(%d)", typeprec);
+					if (typeprec < 54)
+						appendStringInfo(&buf, "float(%d)", typeprec);
+					else
+						appendStringInfo(&buf, "numeric");
 					break;
 				case ORA_TYPE_BINARYFLOAT:
 					appendStringInfo(&buf, "real");
