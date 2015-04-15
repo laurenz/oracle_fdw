@@ -802,26 +802,70 @@ ewkbPointLen(oracleSession *session, ora_geometry *geom)
 char *
 ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 {
-
-	if (geom->indicator->sdo_point.x == OCI_IND_NULL
-		|| geom->indicator->sdo_point.y == OCI_IND_NULL 
-		|| (ewkbDimension(session, geom) == 3 
-			&& geom->indicator->sdo_point.z == OCI_IND_NULL) ) 
-	{
-		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: null point coordinates not supported");
-	}
-
+	unsigned dim = ewkbDimension(session, geom);
 	dest = unsignedFill(POINTTYPE, dest);
 	dest = unsignedFill(1, dest);
 
-	numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.x), dest);
-	dest += sizeof(double);
-	numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.y), dest);
-	dest += sizeof(double);
-	if (3 == ewkbDimension(session, geom))
+	if (geom->indicator->sdo_point._atomic != OCI_IND_NOTNULL)
 	{
-		numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.z), dest);
+		/* the point must be stored in SDO_ORDINATES */
+		unsigned numElems, elem = 0, offset, etype, interpretation;
+		double *doubleDest = (double *)dest;
+
+		if (geom->indicator->sdo_elem_info != OCI_IND_NOTNULL)
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_POINT and SDO_ELEM_INFO cannot both be NULL for a point");
+		if (geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_POINT and SDO_ORDINATES cannot both be NULL for a point");
+
+		numElems = numElemInfo(session, geom);
+		do
+		{
+			if (numElems < elem + 3)
+				oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: not enough values in SDO_ELEM_INFO");
+
+			offset = elemInfo(session, geom, elem);
+			etype = elemInfo(session, geom, elem + 1);
+			interpretation = elemInfo(session, geom, elem + 2);
+
+			/* skip triples with etype 0 */
+			if (etype == 0)
+				elem += 3;
+		}
+		while (etype == 0);
+
+		if (etype != 1)
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: point cannot have ETYPE different from 1");
+		if (interpretation != 1)
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: point with SDO_INTERPRETATION different from 1 is not supported");
+
+		*doubleDest = coord(session, geom, offset - 1);
+		*(++doubleDest) = coord(session, geom, offset);
+		dest += 2 * sizeof(double);
+		if (dim == 3) {
+			*(++doubleDest) = coord(session, geom, offset + 1);
+			dest += sizeof(double);
+		}
+	}
+	else
+	{
+		/* the point must be stored in SDO_POINT */
+		if (geom->indicator->sdo_point.x != OCI_IND_NOTNULL
+			|| geom->indicator->sdo_point.y != OCI_IND_NOTNULL 
+			|| (dim == 3 
+				&& geom->indicator->sdo_point.z != OCI_IND_NOTNULL) ) 
+		{
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: null point coordinates not supported");
+		}
+
+		numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.x), dest);
 		dest += sizeof(double);
+		numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.y), dest);
+		dest += sizeof(double);
+		if (3 == dim)
+		{
+			numberToDouble(session->envp->errhp, &(geom->geometry->sdo_point.z), dest);
+			dest += sizeof(double);
+		}
 	}
 
 	return dest;
