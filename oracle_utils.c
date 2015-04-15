@@ -2287,8 +2287,9 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 		"  AND con.index_name = ind.index_name(+) AND NVL(con.constraint_type, 'P') = 'P' AND col.owner = :nsp\n"
 		"ORDER BY col.table_name, col.column_id";
 	OCIBind *bndhp = NULL;
-	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner,
-		ind_charlen, ind_precision, ind_scale, ind_isnull, ind_key;
+	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner = OCI_IND_NOTNULL,
+		ind_charlen = OCI_IND_NOTNULL, ind_precision = OCI_IND_NOTNULL, ind_scale = OCI_IND_NOTNULL,
+		ind_isnull, ind_key;
 	OCIDefine *defnhp_tabname = NULL, *defnhp_colname = NULL, *defnhp_typename = NULL,
 		*defnhp_typeowner = NULL, *defnhp_charlen = NULL, *defnhp_precision = NULL,
 		*defnhp_scale = NULL, *defnhp_isnull = NULL, *defnhp_key = NULL;
@@ -2532,7 +2533,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 			*type = ORA_TYPE_LONG;
 		else if (strcmp(typename, "LONG RAW") == 0)
 			*type = ORA_TYPE_LONGRAW;
-		else if (strcmp(typename, "SDO_GEOMETRY") == 0 && ind_typeowner != OCI_IND_NULL && strcmp(typeowner, "MDSYS") == 0)
+		else if (strcmp(typename, "SDO_GEOMETRY") == 0 && ind_typeowner == OCI_IND_NOTNULL && strcmp(typeowner, "MDSYS") == 0)
 			*type = ORA_TYPE_GEOMETRY;
 		else if (strcmp(typename, "FLOAT") == 0)
 			*type = ORA_TYPE_FLOAT;
@@ -2552,11 +2553,11 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 			*type = ORA_TYPE_OTHER;
 
 		/* set character length, precision and scale to 0 if it was a NULL value */
-		if (ind_charlen == OCI_IND_NULL)
+		if (ind_charlen != OCI_IND_NOTNULL)
 			*charlen = 0;
-		if (ind_precision == OCI_IND_NULL)
+		if (ind_precision != OCI_IND_NOTNULL)
 			*typeprec = 0;
-		if (ind_scale == OCI_IND_NULL)
+		if (ind_scale != OCI_IND_NOTNULL)
 			*typescale = 0;
 	}
 
