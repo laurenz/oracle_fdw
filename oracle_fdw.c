@@ -783,11 +783,14 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	else
 	{
 		/* otherwise, use a random "high" value for cost */
-		fdwState->startup_cost = fdwState->total_cost = 10000.0;
+		fdwState->startup_cost = 10000.0;
 
 		/* if baserel->pages > 0, there was an ANALYZE; use the row count estimate */
 		if (baserel->pages > 0)
 			ntuples = baserel->tuples;
+
+		/* estimate total cost as startup cost + 10 * (row count) */
+		fdwState->total_cost = fdwState->startup_cost + ntuples * 10.0;
 
 		/* estimale selectivity locally for all conditions */
 		local_conditions = baserel->baserestrictinfo;

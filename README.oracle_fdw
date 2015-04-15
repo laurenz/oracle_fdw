@@ -175,7 +175,7 @@ Foreign table options
   granularity).
   Since this cost estimate is almost useless but expensive to collect,
   oracle_fdw by default does not bother to get Oracle's cost estimates and
-  estimates the cost to 10000 regardless of the actual query.
+  estimates the cost to 10000+10*(row count) regardless of the actual query.
 
   From PostgreSQL 9.2 on, it is usually better to gather statistics on the
   foreign table (see ANALYZE below) and keep this option disabled.

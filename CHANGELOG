@@ -1,6 +1,9 @@
 Version 1.3.0
   Enhancements:
   - Add support for IMPORT FOREIGN SCHEMA for PostgreSQL 9.5 and higher.
+  - Improve cost estimates by using the row count estimate.
+    Inspiration by Daniele Sevegnani.
+
   Bugfixes:
   - The server crashed for the constructs like "<column> = ANY (NULL)".
     Report and patch by dreckard.
