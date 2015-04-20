@@ -809,7 +809,7 @@ ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 	if (geom->indicator->sdo_point._atomic != OCI_IND_NOTNULL)
 	{
 		/* the point must be stored in SDO_ORDINATES */
-		unsigned numElems, elem = 0, offset, etype, interpretation;
+		unsigned offset, etype, interpretation;
 		double *doubleDest = (double *)dest;
 
 		if (geom->indicator->sdo_elem_info != OCI_IND_NOTNULL)
@@ -817,21 +817,12 @@ ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 		if (geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_POINT and SDO_ORDINATES cannot both be NULL for a point");
 
-		numElems = numElemInfo(session, geom);
-		do
-		{
-			if (numElems < elem + 3)
-				oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: not enough values in SDO_ELEM_INFO");
+		if (numElemInfo(session, geom) < 3)
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: not enough values in SDO_ELEM_INFO");
 
-			offset = elemInfo(session, geom, elem);
-			etype = elemInfo(session, geom, elem + 1);
-			interpretation = elemInfo(session, geom, elem + 2);
-
-			/* skip triples with etype 0 */
-			if (etype == 0)
-				elem += 3;
-		}
-		while (etype == 0);
+		offset = elemInfo(session, geom, 0);
+		etype = elemInfo(session, geom, 1);
+		interpretation = elemInfo(session, geom, 2);
 
 		if (etype != 1)
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: point cannot have ETYPE different from 1");
@@ -1135,7 +1126,7 @@ setMultiLine(oracleSession *session, ora_geometry *geom, const char *data)
 unsigned
 ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 {
-	/* polygons are padded, so the size detremination is a bit trickier */
+	/* polygons are padded, so the size determination is a bit trickier */
 	const unsigned totalNumRings = numElemInfo(session, geom)/3;
 	unsigned numPolygon = 0;
 	unsigned i, j;
