@@ -63,7 +63,7 @@ static struct envEntry *envlist = NULL;
 /*
  * NULL value used for "in" callback in RETURNING clauses.
  */
-static ora_geometry null_geometry = { NULL, NULL, -1, NULL, -1, NULL };
+static ora_geometry null_geometry = { NULL, NULL };
 
 /*
  * Helper functions
@@ -1715,10 +1715,6 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 					ora_geometry *geom = (ora_geometry *)oraTable->cols[i]->val;
 					geom->geometry = NULL;
 					geom->indicator = NULL;
-					geom->num_elems = -1;
-					geom->elem = NULL;
-					geom->num_coords = -1;
-					geom->coord = NULL;
 
 					/* define the result for the named type */
 					if (checkerr(
