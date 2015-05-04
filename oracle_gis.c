@@ -141,6 +141,8 @@ static sword checkerr(sword status, OCIError *handle);
 static void initSRIDMap(void);
 static unsigned epsgFromOracle(unsigned srid);
 static unsigned epsgToOracle(unsigned srid);
+static void unpack(oracleSession *session, ora_geometry *geom);
+static void freeUnpacked(oracleSession *session, ora_geometry *geom);
 
 /* All ...Fill() functions return a pointer to the end of the written zone
  */
@@ -366,6 +368,10 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 
 	ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
 	oracleGeometryAlloc(session, geom);
+	geom->num_elems = -1;
+	geom->elem = NULL;
+	geom->num_coords = -1;
+	geom->coord = NULL;
 
 	/* for NULL data, return an object that is atomically NULL */
 	if (data == NULL || ewkb_length == 0)
@@ -433,6 +439,10 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 	/* return zero length for atomically NULL objects */
 	if (geom->indicator->_atomic == OCI_IND_NULL)
 		return 0;
+
+	/* unpack SDO_ELEM_INFO and SDO_ORDINATES */
+	if (geom->num_elems == -1)
+		unpack(session, geom);
 
 	/* a first check for supported types is done in ewkbType */
 	type = ewkbType(session, geom);
@@ -515,6 +525,10 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned size, char *
 	/* check that we have reached the end of the input buffer */
 	if (dest - orig != size)
 		oracleError_ii(FDW_ERROR, "oracle_fdw internal error: number of bytes written %u is different from size %u", dest - orig, size);
+
+	/* free memory in unpacked geometry */
+	if (geom->num_elems != -1)
+		freeUnpacked(session, geom);
 
 	return dest;
 }
@@ -1306,6 +1320,90 @@ elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 		oracleError_i(FDW_ERROR, "element %u of element info collection is NULL", i);
 	numberToUint(session->envp->errhp, oci_number, &info);
 	return info;
+}
+
+/*
+ * unpack
+ * 		Unpack the data from the collections and store them in "geom".
+ * 		Also remove all the elements with SDO_ETYPE 0.
+ */
+void
+unpack(oracleSession *session, ora_geometry *geom)
+{
+	int elemCount, coordCount, elem_i, coord_i, elem_pos = 0, coord_pos = 0;
+	unsigned next_offset = 0;
+
+	/* don't do anything for NULL SDO_ELEM_INFO and SDO_ORDINATES */
+	if (geom->indicator->sdo_elem_info != OCI_IND_NOTNULL
+			&& geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
+		return;
+
+	/* both SDO_ELEM_INFO and SDO_ORDINATES must be NOT NULL */
+	if (geom->indicator->sdo_elem_info != OCI_IND_NOTNULL
+			|| geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_ELEM_INFO and SDO_ORDINATES must either both be NULL");
+
+	elemCount = numElemInfo(session,geom);
+	coordCount = numCoord(session,geom);
+
+	if (elemCount%3 != 0)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: size of SDO_ELEM_INFO must be a multiple of three");
+
+	/* this might be too big if some elements with etype 0 are deleted */
+	geom->elem = oracleAlloc(elemCount * sizeof(unsigned));
+	geom->coord = oracleAlloc(coordCount * sizeof(double));
+
+	for (elem_i = 0; elem_i + 1 < elemCount; elem_i +=3)
+	{
+		unsigned offset, etype, interpretation;
+
+		if (next_offset == 0)
+			offset = elemInfo(session, geom, elem_i);
+		else
+			offset = next_offset;
+		etype = elemInfo(session, geom, elem_i + 1);
+		interpretation = elemInfo(session, geom, elem_i + 2);
+		if (elem_i + 4 < elemCount)
+			next_offset = elemInfo(session, geom, elem_i + 3);
+		else
+			next_offset = elemCount + 1;
+
+		if (etype != 0)
+		{
+			/* just copy the data from the collections */
+			geom->elem[elem_pos] = offset;
+			geom->elem[elem_pos + 1] = etype;
+			geom->elem[elem_pos + 2] = interpretation;
+
+			elem_pos += 3;
+
+			for (coord_i=offset - 1; coord_i < next_offset - 1; ++coord_i)
+				geom->coord[coord_pos++] = coord(session, geom, coord_i);
+		}
+
+		elem_i += 3;
+	}
+
+	geom->num_elems = elem_pos;
+	geom->num_coords = coord_pos;
+}
+
+/*
+ * freeUnpacked
+ * 		Free the memory allocated in "unpack" and clear the settings in "geom".
+ */
+void
+freeUnpacked(oracleSession *session, ora_geometry *geom)
+{
+	if (geom->elem != NULL)
+		oracleFree(geom->elem);
+	if (geom->coord != NULL)
+		oracleFree(geom->coord);
+
+	geom->num_elems = -1;
+	geom->elem = NULL;
+	geom->num_coords = -1;
+	geom->coord = NULL;
 }
 
 /*

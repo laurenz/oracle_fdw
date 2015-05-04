@@ -164,6 +164,11 @@ typedef struct
 {
 	struct sdo_geometry *geometry;
 	struct sdo_geometry_ind *indicator;
+	/* these are extracted from "geometry" during processing */
+	int num_elems;
+	unsigned *elem;
+	int num_coords;
+	double *coord;
 } ora_geometry;
 
 /*

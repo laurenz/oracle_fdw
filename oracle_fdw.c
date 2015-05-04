@@ -4521,6 +4521,9 @@ transactionCallback(XactEvent event, void *arg)
 	{
 #ifdef WRITE_API
 		case XACT_EVENT_PRE_COMMIT:
+#ifdef IMPORT_API
+		case XACT_EVENT_PARALLEL_PRE_COMMIT:
+#endif  /* IMPORT_API */
 			/* remote commit */
 			oracleEndTransaction(arg, 1, 0);
 			break;
@@ -4532,6 +4535,9 @@ transactionCallback(XactEvent event, void *arg)
 #endif  /* WRITE_API */
 		case XACT_EVENT_COMMIT:
 		case XACT_EVENT_PREPARE:
+#ifdef IMPORT_API
+		case XACT_EVENT_PARALLEL_COMMIT:
+#endif  /* IMPORT_API */
 			/*
 			 * Commit the remote transaction ignoring errors.
 			 * In 9.3 or higher, the transaction must already be closed, so this does nothing.
@@ -4540,6 +4546,9 @@ transactionCallback(XactEvent event, void *arg)
 			oracleEndTransaction(arg, 1, 1);
 			break;
 		case XACT_EVENT_ABORT:
+#ifdef IMPORT_API
+		case XACT_EVENT_PARALLEL_ABORT:
+#endif  /* IMPORT_API */
 			/* remote rollback */
 			oracleEndTransaction(arg, 0, 1);
 			break;
