@@ -141,6 +141,8 @@ static sword checkerr(sword status, OCIError *handle);
 static void initSRIDMap(void);
 static unsigned epsgFromOracle(unsigned srid);
 static unsigned epsgToOracle(unsigned srid);
+static void unpack(oracleSession *session, ora_geometry *geom);
+static void freeUnpacked(oracleSession *session, ora_geometry *geom);
 
 /* All ...Fill() functions return a pointer to the end of the written zone
  */
@@ -366,6 +368,10 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 
 	ora_geometry *geom = (ora_geometry *)oracleAlloc(sizeof(ora_geometry));
 	oracleGeometryAlloc(session, geom);
+	geom->num_elems = -1;
+	geom->elem = NULL;
+	geom->num_coords = -1;
+	geom->coord = NULL;
 
 	/* for NULL data, return an object that is atomically NULL */
 	if (data == NULL || ewkb_length == 0)
@@ -434,6 +440,10 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->_atomic == OCI_IND_NULL)
 		return 0;
 
+	/* unpack SDO_ELEM_INFO and SDO_ORDINATES */
+	if (geom->num_elems == -1)
+		unpack(session, geom);
+
 	/* a first check for supported types is done in ewkbType */
 	type = ewkbType(session, geom);
 
@@ -443,11 +453,11 @@ oracleGetEWKBLen(oracleSession *session, ora_geometry *geom)
 	 */
 	if (geom->indicator->sdo_elem_info == OCI_IND_NOTNULL)
 	{
-		const unsigned n = numElemInfo(session, geom);
+		const unsigned n = geom->num_elems;
 		unsigned i;
 		for (i=0; i<n; i+=3){
-			const unsigned etype = elemInfo(session, geom, i+1);
-			const unsigned interpretation = elemInfo(session, geom, i+2);
+			const unsigned etype = geom->elem[i+1];
+			const unsigned interpretation = geom->elem[i+2];
 			if (!((1 == etype && 1 == interpretation)
 				||(2 == etype && 1 == interpretation)
 				||(1003 == etype && 1 == interpretation)
@@ -515,6 +525,10 @@ oracleFillEWKB(oracleSession *session, ora_geometry *geom, unsigned size, char *
 	/* check that we have reached the end of the input buffer */
 	if (dest - orig != size)
 		oracleError_ii(FDW_ERROR, "oracle_fdw internal error: number of bytes written %u is different from size %u", dest - orig, size);
+
+	/* free memory in unpacked geometry */
+	if (geom->num_elems != -1)
+		freeUnpacked(session, geom);
 
 	return dest;
 }
@@ -817,23 +831,23 @@ ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 		if (geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_POINT and SDO_ORDINATES cannot both be NULL for a point");
 
-		if (numElemInfo(session, geom) < 3)
+		if (geom->num_elems < 3)
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: not enough values in SDO_ELEM_INFO");
 
-		offset = elemInfo(session, geom, 0);
-		etype = elemInfo(session, geom, 1);
-		interpretation = elemInfo(session, geom, 2);
+		offset = geom->elem[0];
+		etype = geom->elem[1];
+		interpretation = geom->elem[2];
 
 		if (etype != 1)
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: point cannot have ETYPE different from 1");
 		if (interpretation != 1)
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: point with SDO_INTERPRETATION different from 1 is not supported");
 
-		*doubleDest = coord(session, geom, offset - 1);
-		*(++doubleDest) = coord(session, geom, offset);
+		*doubleDest = geom->coord[offset - 1];
+		*(++doubleDest) = geom->coord[offset];
 		dest += 2 * sizeof(double);
 		if (dim == 3) {
-			*(++doubleDest) = coord(session, geom, offset + 1);
+			*(++doubleDest) = geom->coord[offset + 1];
 			dest += sizeof(double);
 		}
 	}
@@ -892,18 +906,18 @@ setPoint(oracleSession *session, ora_geometry *geom, const char *data)
 unsigned
 ewkbLineLen(oracleSession *session, ora_geometry *geom)
 {
-	return 2*sizeof(unsigned) + sizeof(double)*numCoord(session, geom);
+	return 2 * sizeof(unsigned) + sizeof(double) * geom->num_coords;
 }
 
 char *
 ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
-	const unsigned numC = numCoord(session, geom);
+	const unsigned numC = geom->num_coords;
 	const unsigned numPoints = numC / ewkbDimension(session, geom);
 	dest = unsignedFill(LINETYPE, dest);
 	dest = unsignedFill(numPoints, dest);
-	for (i=0; i<numC; i++) dest = doubleFill(coord(session, geom, i), dest);
+	for (i=0; i<numC; i++) dest = doubleFill(geom->coord[i], dest);
 	return dest;
 }
 
@@ -936,12 +950,12 @@ setLine(oracleSession *session, ora_geometry *geom, const char *data)
 unsigned
 ewkbPolygonLen(oracleSession *session, ora_geometry *geom)
 {
-	const unsigned numRings = numElemInfo(session, geom)/3;
+	const unsigned numRings = geom->num_elems / 3;
 	/* there is the number of rings, and, for each ring the number of points
 	 * numRings%2 is there for padding
 	 */
-	return (numRings+2+numRings%2)*sizeof(unsigned)
-			+ sizeof(double)*numCoord(session, geom);
+	return (numRings + 2 + numRings % 2) * sizeof(unsigned)
+			+ sizeof(double) * geom->num_coords;
 }
 
 const char *
@@ -986,8 +1000,8 @@ char *
 ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	const unsigned dimension = ewkbDimension(session, geom);
-	const unsigned numRings = numElemInfo(session, geom)/3;
-	const unsigned numC = numCoord(session, geom);
+	const unsigned numRings = geom->num_elems / 3;
+	const unsigned numC = geom->num_coords;
 	unsigned i;
 	dest = unsignedFill(POLYGONTYPE, dest);
 
@@ -995,10 +1009,10 @@ ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 
 	for (i=0; i<numRings; i++)
 	{
-		const unsigned coord_b = elemInfo(session, geom, i*3) - 1;
+		const unsigned coord_b = geom->elem[i*3] - 1;
 		const unsigned coord_e = i+1 == numRings
 								 ? numC
-								 : elemInfo(session, geom, (i+1)*3) - 1;
+								 : geom->elem[(i+1)*3] - 1;
 		const unsigned numPoints = (coord_e - coord_b) / dimension;
 		dest = unsignedFill(numPoints, dest);
 	}
@@ -1006,7 +1020,7 @@ ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 	/* padding */
 	if ( numRings % 2 != 0 ) dest = unsignedFill(0, dest);
 
-	for (i=0; i<numC; i++) dest = doubleFill(coord(session, geom, i), dest);
+	for (i=0; i<numC; i++) dest = doubleFill(geom->coord[i], dest);
 
 	return dest;
 }
@@ -1014,7 +1028,7 @@ ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 unsigned
 ewkbMultiPointLen(oracleSession *session, ora_geometry *geom)
 {
-	const unsigned numC = numCoord(session, geom);
+	const unsigned numC = geom->num_coords;
 	const unsigned numPoints = numC / ewkbDimension(session, geom);
 	return 2*sizeof(unsigned) + (2*sizeof(unsigned)*numPoints) + sizeof(double)*numC;
 }
@@ -1024,7 +1038,7 @@ ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
 	const unsigned dim = ewkbDimension(session, geom);
-	const unsigned numPoints = numCoord(session, geom) / dim;
+	const unsigned numPoints = geom->num_coords / dim;
 	dest = unsignedFill(MULTIPOINTTYPE, dest);
 	dest = unsignedFill(numPoints, dest);
 	for (i=0; i<numPoints; i++)
@@ -1032,7 +1046,7 @@ ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
 		unsigned j;
 		dest = unsignedFill(POINTTYPE, dest);
 		dest = unsignedFill(1, dest);
-		for (j=0; j<dim; j++) dest = doubleFill(coord(session, geom, i*dim+j), dest);
+		for (j=0; j<dim; j++) dest = doubleFill(geom->coord[i*dim+j], dest);
 	}
 
 	return dest;
@@ -1076,30 +1090,30 @@ setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
 unsigned
 ewkbMultiLineLen(oracleSession *session, ora_geometry *geom)
 {
-	const unsigned numLines = numElemInfo(session, geom)/3;
-	return 2*sizeof(unsigned) + 2*sizeof(unsigned)*numLines + sizeof(double)*numCoord(session, geom);
+	const unsigned numLines = geom->num_elems / 3;
+	return 2 * sizeof(unsigned) + 2 * sizeof(unsigned) * numLines + sizeof(double) * geom->num_coords;
 }
 
 char *
 ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
-	const unsigned numC = numCoord(session, geom);
+	const unsigned numC = geom->num_coords;
 	const unsigned dimension = ewkbDimension(session, geom);
-	const unsigned numLines = numElemInfo(session, geom)/3;
+	const unsigned numLines = geom->num_elems / 3;
 	dest = unsignedFill(MULTILINETYPE, dest);
 	dest = unsignedFill(numLines, dest);
 	for (i=0; i<numLines; i++)
 	{
 		unsigned j;
-		const unsigned coord_b = elemInfo(session, geom, i*3) - 1;
+		const unsigned coord_b = geom->elem[i*3] - 1;
 		const unsigned coord_e = i+1 == numLines
 								 ? numC
-								 : elemInfo(session, geom, (i+1)*3) - 1;
+								 : geom->elem[(i+1)*3] - 1;
 		const unsigned numPoints = (coord_e - coord_b) / dimension;
 		dest = unsignedFill(LINETYPE, dest);
 		dest = unsignedFill(numPoints, dest);
-		for (j=coord_b; j<coord_e; j++) dest = doubleFill(coord(session, geom, j), dest);
+		for (j=coord_b; j<coord_e; j++) dest = doubleFill(geom->coord[j], dest);
 	}
 
 	return dest;
@@ -1127,19 +1141,19 @@ unsigned
 ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 {
 	/* polygons are padded, so the size determination is a bit trickier */
-	const unsigned totalNumRings = numElemInfo(session, geom)/3;
+	const unsigned totalNumRings = geom->num_elems / 3;
 	unsigned numPolygon = 0;
 	unsigned i, j;
 	unsigned padding = 0;
 
 	for (i = 0; i<totalNumRings; i++)
-		numPolygon += elemInfo(session, geom, i*3+1) == 1003 ;
+		numPolygon += geom->elem[i*3+1] == 1003 ;
 
 	for (i=0, j=0; i < numPolygon; i++)
 	{
 		unsigned numRings = 1;
 		/* move j to the next ext ring, or the end */
-		for (j++; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++, numRings++);
+		for (j++; j < totalNumRings && geom->elem[j*3+1] != 1003; j++, numRings++);
 		padding += numRings%2;
 
 	}
@@ -1151,7 +1165,7 @@ ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 	return 2*sizeof(unsigned) +
 		   + numPolygon*(2*sizeof(unsigned))
 		   + (totalNumRings + padding)*(sizeof(unsigned))
-		   + sizeof(double)*numCoord(session, geom);
+		   + sizeof(double) * geom->num_coords;
 }
 
 
@@ -1159,13 +1173,13 @@ char *
 ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	const unsigned dimension = ewkbDimension(session, geom);
-	const unsigned numC = numCoord(session, geom);
-	const unsigned totalNumRings = numElemInfo(session, geom)/3;
+	const unsigned numC = geom->num_coords;
+	const unsigned totalNumRings = geom->num_elems / 3;
 	unsigned numPolygon = 0;
 	unsigned i, j;
 
 	for (i = 0; i<totalNumRings; i++)
-		numPolygon += elemInfo(session, geom, i*3+1) == 1003 ;
+		numPolygon += geom->elem[i*3+1] == 1003 ;
 
 	dest = unsignedFill(MULTIPOLYGONTYPE, dest);
 	dest = unsignedFill(numPolygon, dest);
@@ -1175,7 +1189,7 @@ ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 		unsigned end, k;
 		unsigned numRings = 1;
 		/* move j to the next ext ring, or the end */
-		for (j++; j < totalNumRings && elemInfo(session, geom, j*3+1) != 1003; j++, numRings++);
+		for (j++; j < totalNumRings && geom->elem[j*3+1] != 1003; j++, numRings++);
 		dest = unsignedFill(POLYGONTYPE, dest);
 		dest = unsignedFill(numRings, dest);
 
@@ -1185,10 +1199,10 @@ ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 		 */
 		for (end = j, j -= numRings; j<end; j++)
 		{
-			const unsigned coord_b = elemInfo(session, geom, j*3) - 1;
+			const unsigned coord_b = geom->elem[j*3] - 1;
 			const unsigned coord_e = j+1 == totalNumRings
 									 ? numC
-									 : elemInfo(session, geom, (j+1)*3) - 1;
+									 : geom->elem[(j+1)*3] - 1;
 			const unsigned numPoints = (coord_e - coord_b) / dimension;
 			dest = unsignedFill(numPoints, dest);
 		}
@@ -1197,12 +1211,12 @@ ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 
 		for (end = j, j -= numRings; j<end; j++)
 		{
-			const unsigned coord_b = elemInfo(session, geom, j*3) - 1;
+			const unsigned coord_b = geom->elem[j*3] - 1;
 			const unsigned coord_e = j+1 == totalNumRings
 									 ? numC
-									 : elemInfo(session, geom, (j+1)*3) - 1;
+									 : geom->elem[(j+1)*3] - 1;
 
-			for (k=coord_b; k<coord_e; k++) dest = doubleFill(coord(session, geom, k), dest);
+			for (k=coord_b; k<coord_e; k++) dest = doubleFill(geom->coord[k], dest);
 		}
 	}
 	return dest;
@@ -1227,6 +1241,11 @@ setMultiPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 	return data;
 }
 
+/*
+ * numCoord
+ * 		Get the number of elements in the SDO_ORDINATES collection of "geom".
+ * 		This should only be called from unpack() and the set...() functions.
+ */
 unsigned
 numCoord(oracleSession *session, ora_geometry *geom)
 {
@@ -1242,6 +1261,11 @@ numCoord(oracleSession *session, ora_geometry *geom)
 	return n;
 }
 
+/*
+ * coord
+ * 		Get the i'th element of the SDO_ORDINATES collection of "geom".
+ * 		This should only be called from unpack().
+ */
 double
 coord(oracleSession *session, ora_geometry *geom, unsigned i)
 {
@@ -1269,6 +1293,11 @@ coord(oracleSession *session, ora_geometry *geom, unsigned i)
 	return coord;
 }
 
+/*
+ * numElemInfo
+ * 		Get the number of elements in the SDO_ELEM_INFO collection of "geom".
+ * 		This should only be called from unpack() and the set...() functions.
+ */
 unsigned
 numElemInfo(oracleSession *session, ora_geometry *geom)
 {
@@ -1283,6 +1312,11 @@ numElemInfo(oracleSession *session, ora_geometry *geom)
 	return n;
 }
 
+/*
+ * elemInfo
+ * 		Get the i'th element of the SDO_ELEM_INFO collection of "geom".
+ * 		This should only be called from unpack().
+ */
 unsigned
 elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 {
@@ -1306,6 +1340,96 @@ elemInfo(oracleSession *session, ora_geometry *geom, unsigned i)
 		oracleError_i(FDW_ERROR, "element %u of element info collection is NULL", i);
 	numberToUint(session->envp->errhp, oci_number, &info);
 	return info;
+}
+
+/*
+ * unpack
+ * 		Unpack the data from the collections and store them in "geom".
+ * 		Also remove all the elements with SDO_ETYPE 0.
+ */
+void
+unpack(oracleSession *session, ora_geometry *geom)
+{
+	int elemCount, coordCount, elem_i, coord_i, elem_pos = 0, coord_pos = 0;
+	unsigned next_offset = 0;
+
+	/* don't do anything for NULL SDO_ELEM_INFO and SDO_ORDINATES */
+	if (geom->indicator->sdo_elem_info != OCI_IND_NOTNULL
+			&& geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
+		return;
+
+	/* both SDO_ELEM_INFO and SDO_ORDINATES must be NOT NULL */
+	if (geom->indicator->sdo_elem_info != OCI_IND_NOTNULL
+			|| geom->indicator->sdo_ordinates != OCI_IND_NOTNULL)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_ELEM_INFO and SDO_ORDINATES must either both be NULL");
+
+	elemCount = numElemInfo(session,geom);
+	coordCount = numCoord(session,geom);
+
+	if (elemCount%3 != 0)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: size of SDO_ELEM_INFO must be a multiple of three");
+
+	/* this might be too big if some elements with etype 0 are deleted */
+	geom->elem = oracleAlloc(elemCount * sizeof(unsigned));
+	geom->coord = oracleAlloc(coordCount * sizeof(double));
+
+	for (elem_i = 0; elem_i + 1 < elemCount; elem_i +=3)
+	{
+		unsigned offset, etype, interpretation;
+
+		if (next_offset == 0)
+			offset = elemInfo(session, geom, elem_i);
+		else
+			offset = next_offset;
+		etype = elemInfo(session, geom, elem_i + 1);
+		interpretation = elemInfo(session, geom, elem_i + 2);
+		if (elem_i + 4 < elemCount)
+			next_offset = elemInfo(session, geom, elem_i + 3);
+		else
+			next_offset = coordCount + 1;
+
+		if (etype != 0)
+		{
+			/*
+			 * Copy the three ELEM_INFO entries and their ordinates.
+			 */
+
+			/* adjust offset */
+			geom->elem[elem_pos] = coord_pos + 1;
+			geom->elem[elem_pos + 1] = etype;
+			geom->elem[elem_pos + 2] = interpretation;
+
+			elem_pos += 3;
+
+			/* copy ordinates for this entry */
+			for (coord_i=offset - 1; coord_i < next_offset - 1; ++coord_i)
+				geom->coord[coord_pos++] = coord(session, geom, coord_i);
+		}
+	}
+
+	geom->num_elems = elem_pos;
+	geom->num_coords = coord_pos;
+
+	if (elem_pos == 0)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: SDO_ELEM_INFO must contain element with non-zero ETYPE");
+}
+
+/*
+ * freeUnpacked
+ * 		Free the memory allocated in "unpack" and clear the settings in "geom".
+ */
+void
+freeUnpacked(oracleSession *session, ora_geometry *geom)
+{
+	if (geom->elem != NULL)
+		oracleFree(geom->elem);
+	if (geom->coord != NULL)
+		oracleFree(geom->coord);
+
+	geom->num_elems = -1;
+	geom->elem = NULL;
+	geom->num_coords = -1;
+	geom->coord = NULL;
 }
 
 /*

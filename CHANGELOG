@@ -11,6 +11,9 @@ Version 1.3.0
     Per report from Bevan Jenkins.
   - Some point geometries were not translated properly.
     Per report from Bevan Jenkins.
+  - Ignore SDO_GEOMETRY elements with zero SDO_ETYPE.
+    According to Oracle, that is the correct behaviour.
+    Per report from Bevan Jenkins.
 
 Version 1.2.0, released 2015-01-03
   Enhancements:
