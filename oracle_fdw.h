@@ -164,6 +164,11 @@ typedef struct
 {
 	struct sdo_geometry *geometry;
 	struct sdo_geometry_ind *indicator;
+	/* the following fields are extracted from "geometry" by unpack() */
+	int num_elems;   /* number of SDO_ELEM_INFO entries, -1 for "not unpacked" */
+	unsigned *elem;  /* unpacked SDO_ELEM_INFO entries */
+	int num_coords;  /* number of SDO_ORDINATES entries, -1 for "not unpacked" */
+	double *coord;   /* unpacked SDO_ORDINATES entries */
 } ora_geometry;
 
 /*
