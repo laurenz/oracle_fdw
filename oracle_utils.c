@@ -1974,11 +1974,17 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		{
 			ora_geometry *geom = (ora_geometry *)value;
 
-			/* for output parameters, set the column to a NULL value */
 			if (param->bindType == BIND_OUTPUT)
 			{
+				/* for output parameters, set the column to a NULL value */
 				geom = (ora_geometry *)oraTable->cols[param->colnum]->val;
 				setNullGeometry(session, geom);
+
+				/* ... and initialize the other ora_geometry fields */
+				geom->num_elems = -1;
+				geom->elem = NULL;
+				geom->num_coords = -1;
+				geom->coord = NULL;
 			}
 
 			if (checkerr(
