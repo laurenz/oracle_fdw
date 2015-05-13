@@ -794,13 +794,13 @@ struct oraTable
 	oracleFree(qtable);
 	if (schema != NULL)
 		oracleFree(qschema);
-	
+
 	/* construct a "SELECT * FROM ..." query to describe columns */
 	length += 14;
 	query = oracleAlloc(length + 1);
 	strcpy(query, "SELECT * FROM ");
 	strcat(query, tablename);
-	
+
 	/* create statement handle */
 	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
 		FDW_UNABLE_TO_CREATE_REPLY,
@@ -1853,7 +1853,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					/* convert parameter string to NUMBER */
 					if (checkerr(
 						OCINumberFromText(session->envp->errhp, (const OraText *)param->value,
-							(ub4)value_len, (const OraText *)num_format, (ub4)value_len, 
+							(ub4)value_len, (const OraText *)num_format, (ub4)value_len,
 							(const OraText *)NULL, (ub4)0, number),
 						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{

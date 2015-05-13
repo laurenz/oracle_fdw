@@ -7,7 +7,7 @@
  */
 
 /*
- * The code relies heavilly on the PostGIS internal data stucture that is explained 
+ * The code relies heavily on the PostGIS internal data stucture that is explained
  * in g_serialized.txt in the PostGIS source code and implemented in liblwgeom.h.
  */
 
@@ -382,10 +382,10 @@ oracleEWKBToGeom(oracleSession *session, unsigned ewkb_length, char *ewkb_data)
 	data = setSridAndFlags(session, geom, data);
 
 	/*
-	 * We don't move the data pointer after this call because 
+	 * We don't move the data pointer after this call because
 	 * it will be moved after the following setTYPE functions
 	 * and those functions expect the data pointer to be on the
-	 * type and not after (see comment above about g_serialized.txt 
+	 * type and not after (see comment above about g_serialized.txt
 	 * and set... functions).
 	 */
 	setType(session, geom, data);
@@ -586,7 +586,7 @@ oracleGeometryAlloc(oracleSession *session, ora_geometry *geom)
 							(void **)&geom->indicator),
 			session->envp->errhp) != OCI_SUCCESS)
 		oracleError_d(FDW_ERROR, "cannot get indicator for new SDO_GEOMETRY object", oraMessage);
-		
+
 	/* initialize as atomic NULL */
 	geom->indicator->_atomic = OCI_IND_NULL;
 }
@@ -855,9 +855,9 @@ ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 	{
 		/* the point must be stored in SDO_POINT */
 		if (geom->indicator->sdo_point.x != OCI_IND_NOTNULL
-			|| geom->indicator->sdo_point.y != OCI_IND_NOTNULL 
-			|| (dim == 3 
-				&& geom->indicator->sdo_point.z != OCI_IND_NOTNULL) ) 
+			|| geom->indicator->sdo_point.y != OCI_IND_NOTNULL
+			|| (dim == 3
+				&& geom->indicator->sdo_point.z != OCI_IND_NOTNULL))
 		{
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: null point coordinates not supported");
 		}
