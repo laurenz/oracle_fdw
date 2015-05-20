@@ -867,7 +867,11 @@ ForeignScan
 	keep_clauses = extract_actual_clauses(keep_clauses, false);
 
 	/* Create the ForeignScan node */
-	return make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private);
+	return make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private
+#if PG_VERSION_NUM >= 90500
+							, NIL
+#endif  /* PG_VERSION_NUM */
+							);
 }
 
 bool
@@ -1254,7 +1258,11 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 			break;
 		case CMD_UPDATE:
+#if PG_VERSION_NUM >= 90500
+			tmpset = bms_copy(rte->updatedCols);
+#else
 			tmpset = bms_copy(rte->modifiedCols);
+#endif  /* PG_VERSION_NUM */
 
 			while ((col = bms_first_member(tmpset)) >= 0)
 			{
@@ -4524,9 +4532,9 @@ transactionCallback(XactEvent event, void *arg)
 	{
 #ifdef WRITE_API
 		case XACT_EVENT_PRE_COMMIT:
-#ifdef IMPORT_API
+#if PG_VERSION_NUM >= 90500
 		case XACT_EVENT_PARALLEL_PRE_COMMIT:
-#endif  /* IMPORT_API */
+#endif  /* PG_VERSION_NUM */
 			/* remote commit */
 			oracleEndTransaction(arg, 1, 0);
 			break;
@@ -4538,9 +4546,9 @@ transactionCallback(XactEvent event, void *arg)
 #endif  /* WRITE_API */
 		case XACT_EVENT_COMMIT:
 		case XACT_EVENT_PREPARE:
-#ifdef IMPORT_API
+#if PG_VERSION_NUM >= 90500
 		case XACT_EVENT_PARALLEL_COMMIT:
-#endif  /* IMPORT_API */
+#endif  /* PG_VERSION_NUM */
 			/*
 			 * Commit the remote transaction ignoring errors.
 			 * In 9.3 or higher, the transaction must already be closed, so this does nothing.
@@ -4549,9 +4557,9 @@ transactionCallback(XactEvent event, void *arg)
 			oracleEndTransaction(arg, 1, 1);
 			break;
 		case XACT_EVENT_ABORT:
-#ifdef IMPORT_API
+#if PG_VERSION_NUM >= 90500
 		case XACT_EVENT_PARALLEL_ABORT:
-#endif  /* IMPORT_API */
+#endif  /* PG_VERSION_NUM */
 			/* remote rollback */
 			oracleEndTransaction(arg, 0, 1);
 			break;
