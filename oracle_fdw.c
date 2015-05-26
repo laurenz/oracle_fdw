@@ -1208,6 +1208,14 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	Bitmapset *tmpset;
 	AttrNumber col;
 
+#if PG_VERSION_NUM >= 90500
+	/* we don't support INSERT ... ON CONFLICT */
+	if (plan->onConflictAction != ONCONFLICT_NONE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+				errmsg("INSERT with ON CONFLICT clause is not supported")));
+#endif  /* PG_VERSION_NUM */
+
 	/* check if the foreign table is scanned */
 	if (resultRelation < root->simple_rel_array_size
 			&& root->simple_rel_array[resultRelation] != NULL)
