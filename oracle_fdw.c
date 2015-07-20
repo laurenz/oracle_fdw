@@ -3294,7 +3294,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			{
 				/* special case: current timestamp */
 				initStringInfo(&result);
-				appendStringInfo(&result, ":now");
+				appendStringInfo(&result, "(CAST (:now AS TIMESTAMP WITH TIME ZONE))");
 			}
 			else
 			{
@@ -3349,7 +3349,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					appendStringInfo(&result, "(CAST (:now AS TIMESTAMP))");
 					break;
 				case TIMESTAMPTZOID:
-					appendStringInfo(&result, ":now");
+					appendStringInfo(&result, "(CAST (:now AS TIMESTAMP WITH TIME ZONE))");
 			}
 
 			break;
