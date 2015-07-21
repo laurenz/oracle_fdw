@@ -167,7 +167,9 @@ Foreign table options
   occurs in Oracle's system catalog, so normally consist of uppercase letters
   only.
 
-- plan_costs (optional, defaults to "off")
+- plan_costs (deprecated, optional, defaults to "off")
+
+  This option will not work with Oracle 9i or older (see "Problems" below).
 
   If set to yes/on/true, Oracle's cost estimates will be used.  The problem is
   that Oracle gives good estimates for the result size, but not for the cost
@@ -182,6 +184,7 @@ Foreign table options
 
   Turn this on only if a) query execution is expensive and b) it has a positive
   influence on PostgreSQL query planning.
+  This option is deprecated and will be removed in a future release.
 
 - max_long (optional, defaults to "32767")
 
@@ -379,7 +382,8 @@ EXPLAIN
 -------
 
 PostgreSQL's EXPLAIN will show the query that is actually issued to Oracle.
-EXPLAIN VERBOSE will show Oracle's execution plan.
+EXPLAIN VERBOSE will show Oracle's execution plan (that will not work with
+Oracle server 9i or older, see "Problems" below).
 
 ANALYZE
 -------
@@ -653,6 +657,20 @@ calls to the Oracle server for every foreign table during query planning.
 That means that there might be a noticeable performance improvement
 if query plans are cached, for example by using prepared statements or
 PL/pgSQL functions.
+
+Limited functionality in old Oracle versions
+--------------------------------------------
+
+The definition of the Oracle system catalogs V$SQL and V$SQL_PLAN has
+changed with Oracle 10.1.  Using EXPLAIN VERBOSE or the "plan_costs" option
+with such Oracle server versions will result in errors like
+
+ERROR:  error describing query: OCIStmtExecute failed to execute
+        remote query for sql_id
+DETAIL:  ORA-00904: "LAST_ACTIVE_TIME": invalid identifier
+
+There is no plan to fix this, since Oracle 9i has been out of Extended Support
+since 2010 and the functionality is not essential.
 
 LDAP libraries
 --------------
