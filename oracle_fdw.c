@@ -97,6 +97,11 @@
 #undef IMPORT_API
 #endif  /* PG_VERSION_NUM */
 
+#if PG_VERSION_NUM >= 90600
+/* GetConfigOptionByName has a new signature from 9.6 on */
+#define GetConfigOptionByName(name, varname) GetConfigOptionByName(name, varname, false)
+#endif  /* PG_VERSION_NUM */
+
 PG_MODULE_MAGIC;
 
 /*
