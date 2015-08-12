@@ -26,6 +26,10 @@
 		color: #202020;
 	}
 
+	P.quote {
+		font-size:larger;
+	}
+
 /* give the rule a bit of extra space (above and below), since its being used to divide
    sections on some pages (project summary) */
 	HR { margin: 5px 0px 5px 0px }
@@ -107,7 +111,17 @@
 
 <body>
 <center>
-<img style="border: none; margin-left: auto; margin-right: auto;" src="elephantSmall.png" alt="Picture of an elephant"/>
+<table width="30%" border="0" cellpadding="10">
+	<tr>
+		<td align="right"><img style="border: none; margin-left: auto; margin-right: auto;" src="smirk.jpeg" alt="Smirking graffito face"/></td>
+		<td align="left">
+			<p class="quote">One database to rule them all,<br/>
+			One database to find them,<br/>
+			One database to bring them all,<br/>
+			And in a wrapper bind them.</p>
+		</td>
+	</tr>
+</table>
 <hr/>
 <h1>PostgreSQL Foreign Data Wrapper for Oracle</h1>
 <table width="50%" border="0">
@@ -117,7 +131,6 @@
 		<td><a href="https://github.com/laurenz/oracle_fdw">Source Repository</a></td>
 		<td><a href="https://raw.github.com/laurenz/oracle_fdw/master/LICENSE">License</a></td>
 	</tr>
-
 </table>
 </center>
 <hr />
@@ -143,7 +156,7 @@ for easy and efficient access to Oracle databases.</p>
 	<li>Supports gathering statistics with <tt>ANALYZE</tt> from PostgreSQL 9.2 on</li>
 	<li>Supports <tt>INSERT</tt>, <tt>UPDATE</tt> and <tt>DELETE</tt> from PostgreSQL 9.3 on</li>
 	<li>Efficient mapping between <tt>MDSYS.SDO_GEOMETRY</tt> and PostGIS <tt>geometry</tt></li>
-	<li>Supports <tt>IMPORT FOREIGN SCHEMA</tt> from PostgreSQL 9.5 on</LI>
+	<li>Supports <tt>IMPORT FOREIGN SCHEMA</tt> from PostgreSQL 9.5 on</li>
 </ul>
 
 <p>Requirements:</p>
