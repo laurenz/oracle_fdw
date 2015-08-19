@@ -2478,7 +2478,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 		result = checkerr(
 			OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 				(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS;
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 		{
