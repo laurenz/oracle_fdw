@@ -128,6 +128,7 @@ typedef struct sdo_geometry_ind
 
 static unsigned ewkbType(oracleSession *session, ora_geometry *geom);
 static unsigned ewkbDimension(oracleSession *session, ora_geometry *geom);
+static unsigned ewkbIsMeasured(oracleSession *session, ora_geometry *geom);
 static unsigned ewkbSrid(oracleSession *session, ora_geometry *geom);
 static unsigned numCoord(oracleSession *session, ora_geometry *geom);
 static double coord(oracleSession *session, ora_geometry *geom, unsigned i);
@@ -633,7 +634,7 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 
 	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
-	switch (gtype%1000)
+	switch (gtype%100)
 	{
 		case 1:
 			return POINTTYPE;
@@ -725,8 +726,13 @@ char *
 ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	const unsigned srid = ewkbSrid(session, geom);
-	const ub1 flags = ((3 == ewkbDimension(session, geom)) ? 0x01 : 0x00 );
+	ub1 flags;
 	ub1 s[3];
+
+	if (ewkbIsMeasured(session, geom))
+		flags = 0x02;  /* two-dimensional geometry with measure */
+	else
+		flags = ((3 == ewkbDimension(session, geom)) ? 0x01 : 0x00 );
 
 	s[0] = (srid & 0x001F0000) >> 16;
 	s[1] = (srid & 0x0000FF00) >> 8;
@@ -739,7 +745,30 @@ ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 	return dest;
 }
 
+unsigned
+ewkbIsMeasured(oracleSession *session, ora_geometry *geom)
+{
+	unsigned gtype = 0;
+	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
+		numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
+	switch ((gtype % 1000) / 100)
+	{
+		case 0:
+			return 0;
+		case 3:
+			return 1;
+		default:
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: measure dimension must be \"0\" or \"3\"");
+			return 0;  /* keep the compiler happy */
+	}
+}
 
+/*
+ * ewkbDimension
+ * 		Returns the dimension as Oracle understands it.
+ * 		For a measured geometry with two dimensions and one measure dimension,
+ * 		it will return 3 (PostGIS considers such an object two-dimensional).
+ */
 unsigned
 ewkbDimension(oracleSession *session, ora_geometry *geom)
 {
@@ -756,7 +785,7 @@ ewkbSrid(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
 		numberToUint(session->envp->errhp, &(geom->geometry->sdo_srid), &srid);
 
-	/* convert PostGIS->Oracle SRID when needed */
+	/* convert Oracle->PostGIS SRID when needed */
 	return epsgFromOracle(srid);
 }
 
@@ -777,7 +806,7 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 
 	data += 3;
 
-	/* convert Oracle->PostGIS SRID when needed */
+	/* convert PostGIS->Oracle SRID when needed */
 	srid = epsgToOracle(srid);
 
 	geom->indicator->sdo_srid = (srid == 0) ? OCI_IND_NULL : OCI_IND_NOTNULL;
@@ -787,13 +816,23 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 
 	gtype = (((ub1)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
 	if (data[0] & 0x02)
-		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: measure dimension not supported");
+	{
+		/*
+ 		 * What PostGIS sees as a two-dimensional geometry with measure
+ 		 * is a three-dimensional geometry in Oracle, and the measure
+ 		 * dimension is the third dimension.
+ 		 */
+		gtype += 1300;
+
+		if (gtype >= 4000)
+			oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: measure dimension only supported for two-dimensional geometries");
+	}
 	if (data[0] & 0x08)
 		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geodetic not supported");
 
 	if (((ub1)data[0]) & 0x04) /* has bbox, offsets */
 	{
-		data += 1 + 2*(((ub1)data[0]) & 0x01 ? 3 : 2)*sizeof(float);
+		data += 1 + 2*(gtype / 1000)*sizeof(float);
 	}
 	else
 	{

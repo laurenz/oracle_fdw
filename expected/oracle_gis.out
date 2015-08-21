@@ -24,7 +24,9 @@ INSERT INTO gis (id, g) VALUES
    (5, 'SRID=8307;MULTIPOLYGON(((50 168,50 160,55 160,55 168,50 168),(51 167,54 167,54 161,51 161,51 162,52 163,51 164,51 165,51 166,51 167)),((52 166,52 162,53 162,53 166,52 166)))'),
    (6, 'SRID=8307;POLYGON((35 10,45 45,15 40,10 20,35 10),(20 30,35 35,30 20,20 30))'),
    (7, 'SRID=8307;MULTILINESTRING((10 10,20 20,10 40),(40 40,30 30,40 20,30 10))'),
-   (8, 'SRID=8307;MULTIPOLYGON(((40 40,20 45,45 30,40 40)),((20 35,10 30,10 10,30 5,45 20,20 35),(30 20,20 15,20 25,30 20)))');
+   (8, 'SRID=8307;MULTIPOLYGON(((40 40,20 45,45 30,40 40)),((20 35,10 30,10 10,30 5,45 20,20 35),(30 20,20 15,20 25,30 20)))'),
+   (9, 'SRID=8307;POINT M (12 13 14)'),
+   (10, 'SRID=8307;POLYGON M ((0 0 0, 1 0 2, 1 1 4, 0 1 2, 0 0 0))');
 /*
  * Test empty geometries.
  */
@@ -32,6 +34,11 @@ UPDATE gis SET g = 'POINT Z EMPTY' WHERE id = 1;
 ERROR:  error converting geometry to SDO_GEOMETRY: empty point is not supported
 UPDATE gis SET g = 'MULTIPOLYGON(((10 10,20 10,20 20,10 20,10 10)),EMPTY)' WHERE id = 8;
 ERROR:  error converting geometry to SDO_GEOMETRY: empty polygon is not supported
+/*
+ * Test four-dimensional geometry.
+ */
+UPDATE gis SET g = 'POINT ZM (12 13 14 15)';
+ERROR:  error converting geometry to SDO_GEOMETRY: measure dimension only supported for two-dimensional geometries
 /*
  * Test SELECT and UPDATE ... RETURNING.
  */
@@ -47,7 +54,9 @@ SELECT id, st_srid(g), st_astext(g) FROM gis ORDER BY id;
   6 |    8307 | POLYGON((35 10,45 45,15 40,10 20,35 10),(20 30,35 35,30 20,20 30))
   7 |    8307 | MULTILINESTRING((10 10,20 20,10 40),(40 40,30 30,40 20,30 10))
   8 |    8307 | MULTIPOLYGON(((40 40,20 45,45 30,40 40)),((20 35,10 30,10 10,30 5,45 20,20 35),(30 20,20 15,20 25,30 20)))
-(8 rows)
+  9 |    8307 | POINT M (12 13 14)
+ 10 |    8307 | POLYGON M ((0 0 0,1 0 2,1 1 4,0 1 2,0 0 0))
+(10 rows)
 
 -- UPDATE with RETURNING clause
 WITH upd (id, srid, wkt) AS
@@ -63,5 +72,7 @@ SELECT * FROM upd ORDER BY id;
   6 | 8307 | POLYGON((35 10,45 45,15 40,10 20,35 10),(20 30,35 35,30 20,20 30))
   7 | 8307 | MULTILINESTRING((10 10,20 20,10 40),(40 40,30 30,40 20,30 10))
   8 | 8307 | MULTIPOLYGON(((40 40,20 45,45 30,40 40)),((20 35,10 30,10 10,30 5,45 20,20 35),(30 20,20 15,20 25,30 20)))
-(8 rows)
+  9 | 8307 | POINT M (12 13 14)
+ 10 | 8307 | POLYGON M ((0 0 0,1 0 2,1 1 4,0 1 2,0 0 0))
+(10 rows)
 
