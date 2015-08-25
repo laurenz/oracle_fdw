@@ -726,8 +726,12 @@ char *
 ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	const unsigned srid = ewkbSrid(session, geom);
+	const unsigned sdoDim = sdoDimension(session, geom);
 	ub1 flags;
 	ub1 s[3];
+
+	if (sdoDim > 3)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: four-dimensional geometries are unsupported");
 
 	if (ewkbIsMeasured(session, geom))
 		/*
@@ -737,7 +741,7 @@ ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 		 */
 		flags = 0x02;
 	else
-		flags = ((3 == sdoDimension(session, geom)) ? 0x01 : 0x00 );
+		flags = ((3 == sdoDim) ? 0x01 : 0x00 );
 
 	s[0] = (srid & 0x001F0000) >> 16;
 	s[1] = (srid & 0x0000FF00) >> 8;
