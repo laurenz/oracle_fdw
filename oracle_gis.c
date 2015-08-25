@@ -127,7 +127,8 @@ typedef struct sdo_geometry_ind
 } sdo_geometry_ind;
 
 static unsigned ewkbType(oracleSession *session, ora_geometry *geom);
-static unsigned ewkbDimension(oracleSession *session, ora_geometry *geom);
+static unsigned sdoDimension(oracleSession *session, ora_geometry *geom);
+static unsigned ewkbIsMeasured(oracleSession *session, ora_geometry *geom);
 static unsigned ewkbSrid(oracleSession *session, ora_geometry *geom);
 static unsigned numCoord(oracleSession *session, ora_geometry *geom);
 static double coord(oracleSession *session, ora_geometry *geom, unsigned i);
@@ -633,7 +634,7 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 
 	numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
 
-	switch (gtype%1000)
+	switch (gtype%100)
 	{
 		case 1:
 			return POINTTYPE;
@@ -725,8 +726,22 @@ char *
 ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	const unsigned srid = ewkbSrid(session, geom);
-	const ub1 flags = ((3 == ewkbDimension(session, geom)) ? 0x01 : 0x00 );
+	const unsigned sdoDim = sdoDimension(session, geom);
+	ub1 flags;
 	ub1 s[3];
+
+	if (sdoDim > 3)
+		oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: four-dimensional geometries are unsupported");
+
+	if (ewkbIsMeasured(session, geom))
+		/*
+		 * In Oracle, the measure dimension counts as third dimension,
+		 * so "sdoDim" will be 3.  This corresponds to a two-dimensional
+		 * PostGIS geometry with the "measure" flag set.
+		 */
+		flags = 0x02;
+	else
+		flags = ((3 == sdoDim) ? 0x01 : 0x00 );
 
 	s[0] = (srid & 0x001F0000) >> 16;
 	s[1] = (srid & 0x0000FF00) >> 8;
@@ -739,9 +754,32 @@ ewkbHeaderFill(oracleSession *session, ora_geometry *geom, char * dest)
 	return dest;
 }
 
-
 unsigned
-ewkbDimension(oracleSession *session, ora_geometry *geom)
+ewkbIsMeasured(oracleSession *session, ora_geometry *geom)
+{
+	unsigned gtype = 0;
+	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
+		numberToUint(session->envp->errhp, &(geom->geometry->sdo_gtype), &gtype);
+	switch ((gtype % 1000) / 100)
+	{
+		case 0:
+			return 0;
+		case 3:
+			return 1;
+		default:
+			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: measure dimension must be \"0\" or \"3\"");
+			return 0;  /* keep the compiler happy */
+	}
+}
+
+/*
+ * sdoDimension
+ * 		Returns the dimension as Oracle understands it.
+ * 		For a measured geometry with two dimensions and one measure dimension,
+ * 		it will return 3 (PostGIS considers such an object two-dimensional).
+ */
+unsigned
+sdoDimension(oracleSession *session, ora_geometry *geom)
 {
 	unsigned gtype = 0;
 	if (geom->indicator->sdo_gtype == OCI_IND_NOTNULL)
@@ -756,7 +794,7 @@ ewkbSrid(oracleSession *session, ora_geometry *geom)
 	if (geom->indicator->sdo_srid == OCI_IND_NOTNULL)
 		numberToUint(session->envp->errhp, &(geom->geometry->sdo_srid), &srid);
 
-	/* convert PostGIS->Oracle SRID when needed */
+	/* convert Oracle->PostGIS SRID when needed */
 	return epsgFromOracle(srid);
 }
 
@@ -777,7 +815,7 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 
 	data += 3;
 
-	/* convert Oracle->PostGIS SRID when needed */
+	/* convert PostGIS->Oracle SRID when needed */
 	srid = epsgToOracle(srid);
 
 	geom->indicator->sdo_srid = (srid == 0) ? OCI_IND_NULL : OCI_IND_NOTNULL;
@@ -787,13 +825,23 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 
 	gtype = (((ub1)data[0]) & 0x01 ) ? 3000 : 2000; /* 3d/2d */
 	if (data[0] & 0x02)
-		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: measure dimension not supported");
+	{
+		/*
+ 		 * What PostGIS sees as a two-dimensional geometry with measure
+ 		 * is a three-dimensional geometry in Oracle, and the measure
+ 		 * dimension is the third dimension.
+ 		 */
+		gtype += 1300;
+
+		if (gtype >= 4000)
+			oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: measure dimension only supported for two-dimensional geometries");
+	}
 	if (data[0] & 0x08)
 		oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geodetic not supported");
 
 	if (((ub1)data[0]) & 0x04) /* has bbox, offsets */
 	{
-		data += 1 + 2*(((ub1)data[0]) & 0x01 ? 3 : 2)*sizeof(float);
+		data += 1 + 2*(gtype / 1000)*sizeof(float);
 	}
 	else
 	{
@@ -810,13 +858,13 @@ setSridAndFlags(oracleSession *session, ora_geometry *geom, const char *data)
 unsigned
 ewkbPointLen(oracleSession *session, ora_geometry *geom)
 {
-	return 2*sizeof(unsigned) + sizeof(double)*ewkbDimension(session, geom);
+	return 2*sizeof(unsigned) + sizeof(double)*sdoDimension(session, geom);
 }
 
 char *
 ewkbPointFill(oracleSession *session, ora_geometry *geom, char *dest)
 {
-	unsigned dim = ewkbDimension(session, geom);
+	unsigned dim = sdoDimension(session, geom);
 	dest = unsignedFill(POINTTYPE, dest);
 	dest = unsignedFill(1, dest);
 
@@ -894,7 +942,7 @@ setPoint(oracleSession *session, ora_geometry *geom, const char *data)
 	geom->indicator->sdo_point.y = OCI_IND_NOTNULL;
 	doubleToNumber(session->envp->errhp, data, &(geom->geometry->sdo_point.y));
 	data += sizeof(double);
-	if (3 == ewkbDimension(session, geom))
+	if (3 == sdoDimension(session, geom))
 	{
 		geom->indicator->sdo_point.z = OCI_IND_NOTNULL;
 		doubleToNumber(session->envp->errhp, data, &(geom->geometry->sdo_point.z));
@@ -914,7 +962,7 @@ ewkbLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
 	const unsigned numC = geom->num_coords;
-	const unsigned numPoints = numC / ewkbDimension(session, geom);
+	const unsigned numPoints = numC / sdoDimension(session, geom);
 	dest = unsignedFill(LINETYPE, dest);
 	dest = unsignedFill(numPoints, dest);
 	for (i=0; i<numC; i++) dest = doubleFill(geom->coord[i], dest);
@@ -929,7 +977,7 @@ setLine(oracleSession *session, ora_geometry *geom, const char *data)
 	if (*((unsigned *)data) != LINETYPE)
 		oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: expected line, got type %u", *((unsigned *)data));
 	data += sizeof(unsigned);
-	n = *((unsigned *)data) * ewkbDimension(session, geom);
+	n = *((unsigned *)data) * sdoDimension(session, geom);
 	data += sizeof(unsigned);
 
 	if (!n)
@@ -962,7 +1010,7 @@ const char *
 setPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 {
 	unsigned r, i, numRings;
-	const unsigned dimension = ewkbDimension(session, geom);
+	const unsigned dimension = sdoDimension(session, geom);
 	const char * ringSizeData;
 
 	if (*((unsigned *)data) != POLYGONTYPE)
@@ -999,7 +1047,7 @@ setPolygon(oracleSession *session, ora_geometry *geom, const char *data)
 char *
 ewkbPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-	const unsigned dimension = ewkbDimension(session, geom);
+	const unsigned dimension = sdoDimension(session, geom);
 	const unsigned numRings = geom->num_elems / 3;
 	const unsigned numC = geom->num_coords;
 	unsigned i;
@@ -1029,7 +1077,7 @@ unsigned
 ewkbMultiPointLen(oracleSession *session, ora_geometry *geom)
 {
 	const unsigned numC = geom->num_coords;
-	const unsigned numPoints = numC / ewkbDimension(session, geom);
+	const unsigned numPoints = numC / sdoDimension(session, geom);
 	return 2*sizeof(unsigned) + (2*sizeof(unsigned)*numPoints) + sizeof(double)*numC;
 }
 
@@ -1037,7 +1085,7 @@ char *
 ewkbMultiPointFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
-	const unsigned dim = ewkbDimension(session, geom);
+	const unsigned dim = sdoDimension(session, geom);
 	const unsigned numPoints = geom->num_coords / dim;
 	dest = unsignedFill(MULTIPOINTTYPE, dest);
 	dest = unsignedFill(numPoints, dest);
@@ -1056,7 +1104,7 @@ const char *
 setMultiPoint(oracleSession *session, ora_geometry *geom, const char *data)
 {
 	unsigned i, j, numPoints;
-	const unsigned dimension = ewkbDimension(session, geom);
+	const unsigned dimension = sdoDimension(session, geom);
 
 	if (*((unsigned *)data) != MULTIPOINTTYPE)
 		oracleError_i(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: expected multipoint, got type %u", *((unsigned *)data));
@@ -1099,7 +1147,7 @@ ewkbMultiLineFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
 	unsigned i;
 	const unsigned numC = geom->num_coords;
-	const unsigned dimension = ewkbDimension(session, geom);
+	const unsigned dimension = sdoDimension(session, geom);
 	const unsigned numLines = geom->num_elems / 3;
 	dest = unsignedFill(MULTILINETYPE, dest);
 	dest = unsignedFill(numLines, dest);
@@ -1172,7 +1220,7 @@ ewkbMultiPolygonLen(oracleSession *session, ora_geometry *geom)
 char *
 ewkbMultiPolygonFill(oracleSession *session, ora_geometry *geom, char * dest)
 {
-	const unsigned dimension = ewkbDimension(session, geom);
+	const unsigned dimension = sdoDimension(session, geom);
 	const unsigned numC = geom->num_coords;
 	const unsigned totalNumRings = geom->num_elems / 3;
 	unsigned numPolygon = 0;
