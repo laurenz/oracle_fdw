@@ -2289,12 +2289,15 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 	const char * const column_query =
 		"SELECT col.table_name, col.column_name, col.data_type, col.data_type_owner,\n"
 		"       col.char_length, col.data_precision, col.data_scale, col.nullable,\n"
-		"       CASE WHEN ind.column_position IS NOT NULL THEN 1 ELSE 0 END AS primary_key\n"
-		"FROM all_tab_columns col, all_constraints con, all_ind_columns ind\n"
-		"WHERE col.owner = con.owner(+) AND col.table_name = con.table_name(+) AND col.column_name = ind.column_name(+)\n"
-		"  AND con.owner = ind.table_owner(+) AND (con.owner IS NULL OR con.owner = :nsp)\n"
-		"  AND con.table_name = ind.table_name(+) AND con.index_owner = ind.index_owner(+)\n"
-		"  AND con.index_name = ind.index_name(+) AND NVL(con.constraint_type, 'P') = 'P' AND col.owner = :nsp\n"
+		"       CASE WHEN primkey_col.column_position IS NOT NULL THEN 1 ELSE 0 END AS primary_key\n"
+		"FROM all_tab_columns col,\n"
+		"     (SELECT con.table_name, ind.column_name, ind.column_position\n"
+		"      FROM all_constraints con, all_ind_columns ind\n"
+		"      WHERE con.owner = ind.table_owner AND con.table_name = ind.table_name\n"
+		"        AND con.index_owner = ind.index_owner AND con.index_name = ind.index_name\n"
+		"        AND con.constraint_type = 'P' AND con.owner = :nsp) primkey_col\n"
+		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
+		"  AND col.owner = :nsp\n"
 		"ORDER BY col.table_name, col.column_id";
 	OCIBind *bndhp = NULL;
 	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner = OCI_IND_NOTNULL,
