@@ -2279,13 +2279,15 @@ void *oracleGetGeometryType(oracleSession *session)
 /*
  * oracleGetImportColumn
  * 		Get the next element in the ordered list of tables and their columns for "schema".
- * 		Returns 0 if there are no more columns, else 1.
+ * 		Returns 0 if there are no more columns, -1 if the remote schema does not exist, else 1.
  */
 int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
 {
 	/* the static variables will contain data returned to the caller */
 	static char s_tabname[129], s_colname[129];
 	char typename[129] = { '\0' }, typeowner[129] = { '\0' }, isnull[2] = { '\0' };
+	int count = 0;
+	const char * const schema_query = "SELECT COUNT(*) FROM all_users WHERE username = :nsp";
 	const char * const column_query =
 		"SELECT col.table_name, col.column_name, col.data_type, col.data_type_owner,\n"
 		"       col.char_length, col.data_precision, col.data_scale, col.nullable,\n"
@@ -2305,15 +2307,80 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 		ind_isnull, ind_key;
 	OCIDefine *defnhp_tabname = NULL, *defnhp_colname = NULL, *defnhp_typename = NULL,
 		*defnhp_typeowner = NULL, *defnhp_charlen = NULL, *defnhp_precision = NULL,
-		*defnhp_scale = NULL, *defnhp_isnull = NULL, *defnhp_key = NULL;
+		*defnhp_scale = NULL, *defnhp_isnull = NULL, *defnhp_key = NULL, *defnhp_count = NULL;
 	ub2 len_tabname, len_colname, len_typename, len_typeowner,
-		len_charlen, len_precision, len_scale, len_isnull, len_key;
+		len_charlen, len_precision, len_scale, len_isnull, len_key, len_count;
 	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
 	sword result;
 
 	/* return a pointer to the static variables */
 	*tabname = s_tabname;
 	*colname = s_colname;
+
+	/* when first called, check if the schema does exist */
+	if (session->stmthp == NULL)
+	{
+		/* create statement handle */
+		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+			FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error importing foreign schema: OCIHandleAlloc failed to allocate statement handle");
+
+		/* prepare the query */
+		if (checkerr(
+			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)schema_query, (ub4) strlen(schema_query),
+				(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIStmtPrepare failed to prepare schema query",
+				oraMessage);
+		}
+
+		/* bind the parameter */
+		if (checkerr(
+			OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":nsp",
+				(sb4)4, (dvoid *)schema, (sb4)(strlen(schema) + 1),
+				SQLT_STR, (dvoid *)&ind,
+				NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIBindByName failed to bind parameter",
+				oraMessage);
+		}
+
+		/* define the result value */
+		if (checkerr(
+			OCIDefineByPos(session->stmthp, &defnhp_count, session->envp->errhp, (ub4)1,
+				(dvoid *)&count, (sb4)sizeof(int),
+				SQLT_INT, (dvoid *)&ind,
+				(ub2 *)&len_count, NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIDefineByPos failed to define result",
+				oraMessage);
+		}
+
+		/* execute the query and get the first result row */
+		if (checkerr(
+			OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+				(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIStmtExecute failed to execute schema query",
+				oraMessage);
+		}
+
+		/* free the statement handle */
+		freeHandle(session->stmthp, session->connp);
+		session->stmthp = NULL;
+
+		/* return -1 if the remote schema does not exist */
+		if (count == 0)
+			return -1;
+	}
 
 	if (session->stmthp == NULL)
 	{

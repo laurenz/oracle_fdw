@@ -1902,6 +1902,17 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		/* get the next column definition */
 		rc = oracleGetImportColumn(session, stmt->remote_schema, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
 
+		if (rc == -1)
+		{
+			/* remote schema does not exist, issue a warning */
+			ereport(WARNING,
+					(errcode(ERRCODE_WARNING),
+					errmsg("remote schema \"%s\" does not exist", stmt->remote_schema),
+					errhint("Enclose the schema name in double quotes to prevent case folding.")));
+
+			return NIL;
+		}
+
 		if ((rc == 0 && oldtabname[0] != '\0')
 			|| (rc == 1 && oldtabname[0] != '\0' && strcmp(tabname, oldtabname)))
 		{
