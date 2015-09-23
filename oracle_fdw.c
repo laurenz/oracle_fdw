@@ -4937,6 +4937,8 @@ fold_case(char *name, fold_t foldcase)
 	}
 
 	elog(ERROR, "impossible case folding type %d", foldcase);
+
+	return NULL;  /* unreachable, but keeps compiler happy */
 }
 #endif  /* IMPORT_API */
 
