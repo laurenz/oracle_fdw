@@ -3913,8 +3913,8 @@ char
 	return buf.data;
 }
 
-#define serializeInt(x) makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)(x)), 0, 1)
-#define serializeOid(x) makeConst(OIDOID, -1, InvalidOid, 4, ObjectIdGetDatum(x), 0, 1)
+#define serializeInt(x) makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)(x)), false, true)
+#define serializeOid(x) makeConst(OIDOID, -1, InvalidOid, 4, ObjectIdGetDatum(x), false, true)
 
 /*
  * serializePlanData
@@ -3992,7 +3992,7 @@ Const
 	if (s == NULL)
 		return makeNullConst(TEXTOID, -1, InvalidOid);
 	else
-		return makeConst(TEXTOID, -1, InvalidOid, -1, PointerGetDatum(cstring_to_text(s)), 0, 0);
+		return makeConst(TEXTOID, -1, InvalidOid, -1, PointerGetDatum(cstring_to_text(s)), false, false);
 }
 
 /*
@@ -4004,15 +4004,15 @@ Const
 *serializeLong(long i)
 {
 	if (sizeof(long) <= 4)
-		return makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)i), 1, 0);
+		return makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)i), false, true);
 	else
-		return makeConst(INT4OID, -1, InvalidOid, 8, Int64GetDatum((int64)i),
+		return makeConst(INT4OID, -1, InvalidOid, 8, Int64GetDatum((int64)i), false,
 #ifdef USE_FLOAT8_BYVAL
-				1,
+					true
 #else
-				0,
+					false
 #endif  /* USE_FLOAT8_BYVAL */
-				0);
+				);
 }
 
 /*
