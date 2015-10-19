@@ -871,7 +871,7 @@ ForeignScan
 	/* Create the ForeignScan node */
 	return make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private
 #if PG_VERSION_NUM >= 90500
-							, NIL
+							, NIL, NIL  /* no parameterized paths */
 #endif  /* PG_VERSION_NUM */
 							);
 }
