@@ -228,10 +228,10 @@ EXECUTE stmt(1);
  10-20-1968
 (1 row)
 
-EXPLAIN EXECUTE stmt(1);
+EXPLAIN (COSTS off) EXECUTE stmt(1);
                                                 QUERY PLAN                                                 
 -----------------------------------------------------------------------------------------------------------
- Foreign Scan on typetest1  (cost=10000.00..10000.00 rows=1000 width=4)
+ Foreign Scan on typetest1
    Oracle query: SELECT /*9c6176932fee128d5bb3e292c1743289*/ "ID", "D" FROM "TYPETEST1" WHERE ("ID" = :p1)
 (2 rows)
 

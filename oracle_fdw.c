@@ -794,12 +794,6 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 		if (baserel->pages > 0)
 			ntuples = baserel->tuples;
 
-		/* if we have statistics, estimate total cost as startup cost + 10 * (row count) */
-		if (ntuples >= 0)
-			fdwState->total_cost = fdwState->startup_cost + ntuples * 10.0;
-		else
-			fdwState->total_cost = fdwState->startup_cost;
-
 		/* estimale selectivity locally for all conditions */
 		local_conditions = baserel->baserestrictinfo;
 	}
@@ -817,6 +811,9 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 		ntuples = clamp_row_est(ntuples);
 		baserel->rows = ntuples;
 	}
+
+	/* estimate total cost as startup cost + 10 * (returned rows) */
+	fdwState->total_cost = fdwState->startup_cost + baserel->rows * 10.0;
 
 	/* store the state so that the other planning functions can use it */
 	baserel->fdw_private = (void *)fdwState;

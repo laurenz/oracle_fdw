@@ -180,6 +180,6 @@ EXECUTE stmt(1);
 EXECUTE stmt(1);
 EXECUTE stmt(1);
 EXECUTE stmt(1);
-EXPLAIN EXECUTE stmt(1);
+EXPLAIN (COSTS off) EXECUTE stmt(1);
 EXECUTE stmt(1);
 DEALLOCATE stmt;
