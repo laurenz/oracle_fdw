@@ -1,18 +1,14 @@
 This is a list of things that should be done.
 Help is welcome!
 
-Support for IMPORT FOREIGN SCHEMA
----------------------------------
+Support parameterized paths
+---------------------------
 
-Starting with PostgreSQL 9.5, this command can be used to create a bunch of
-foreign tables corresponding to a remote schema in one statement.
+If the ForeignScan is the inner loop of a nested loop join, try to create
+parameterized paths.
+Support for Parameterized paths exists since PostgreSQL 9.2.
 
-This means adding a new callback "oracleImportForeignSchema", surrounded by
-#ifdefs for conditional compilation on PostgreSQL > 9.4 only.
+Support join pushdown
+---------------------
 
-There should be some automatism for column type conversions.
-
-Since Oracle names default to upper case, it would be nice to have some
-support for case folding.  I envision an option "lowercase" with possible
-values "off" (leave names as they are), "on" (always fold to lower case)
-and "smart" (the default, only fold names that consist of capitals only).
+Try to push down joins from PostgreSQL 9.5 on.
