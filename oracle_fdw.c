@@ -1957,7 +1957,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 					break;
 				case ORA_TYPE_VARCHAR2:
 				case ORA_TYPE_NVARCHAR2:
-					appendStringInfo(&buf, "character varying(%d)", charlen);
+					appendStringInfo(&buf, "character varying(%d)", charlen == 0 ? 1 : charlen);
 					break;
 				case ORA_TYPE_CLOB:
 				case ORA_TYPE_LONG:
