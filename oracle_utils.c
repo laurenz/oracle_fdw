@@ -1062,18 +1062,18 @@ struct oraTable
 			case SQLT_DAT:
 				/* DATE */
 				reply->cols[i-1]->oratype = ORA_TYPE_DATE;
-				reply->cols[i-1]->val_size = 20;
+				reply->cols[i-1]->val_size = 23;
 				break;
 			case SQLT_TIMESTAMP:
 				/* TIMESTAMP */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMP;
-				reply->cols[i-1]->val_size = 30;
+				reply->cols[i-1]->val_size = 34;
 				break;
 			case SQLT_TIMESTAMP_TZ:
 			case SQLT_TIMESTAMP_LTZ:
 				/* TIMESTAMP WITH TIMEZONE and TIMESTAMP WITH LOCAL TIMEZONE */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMPTZ;
-				reply->cols[i-1]->val_size = 36;
+				reply->cols[i-1]->val_size = 40;
 				break;
 			case SQLT_INTERVAL_YM:
 				/* INTERVAL YEAR TO MONTH */
@@ -1306,7 +1306,7 @@ setOracleEnvironment(char *nls_lang)
 	}
 
 	/* other environment variables that control Oracle formats */
-	if (putenv("NLS_DATE_FORMAT=YYYY-MM-DD HH24:MI:SS") != 0)
+	if (putenv("NLS_DATE_FORMAT=YYYY-MM-DD HH24:MI:SS BC") != 0)
 	{
 		free(nls_lang);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
@@ -1314,7 +1314,7 @@ setOracleEnvironment(char *nls_lang)
 			"Environment variable NLS_DATE_FORMAT cannot be set.");
 	}
 
-	if (putenv("NLS_TIMESTAMP_FORMAT=YYYY-MM-DD HH24:MI:SS.FF") != 0)
+	if (putenv("NLS_TIMESTAMP_FORMAT=YYYY-MM-DD HH24:MI:SS.FF9 BC") != 0)
 	{
 		free(nls_lang);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
@@ -1322,7 +1322,7 @@ setOracleEnvironment(char *nls_lang)
 			"Environment variable NLS_TIMESTAMP_FORMAT cannot be set.");
 	}
 
-	if (putenv("NLS_TIMESTAMP_TZ_FORMAT=YYYY-MM-DD HH24:MI:SS.FFTZH:TZM") != 0)
+	if (putenv("NLS_TIMESTAMP_TZ_FORMAT=YYYY-MM-DD HH24:MI:SS.FF9TZH:TZM BC") != 0)
 	{
 		free(nls_lang);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,

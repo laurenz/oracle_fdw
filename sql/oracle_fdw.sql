@@ -87,7 +87,7 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    3.14159,
    3.14159,
    '1968-10-20',
-   '2009-01-26 22:30:00 PST',
+   '2009-01-26 15:02:54.893532 PST',
    '1 day 2 hours 30 seconds 1 microsecond',
    '-6 months'
 );
@@ -109,8 +109,8 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    -2.71828,
    -2.71828,
    -2.71828,
-   '2014-11-25',
-   '2014-11-25 15:02:54.893532 PST',
+   '0044-03-15 BC',
+   '0044-03-15 12:00:00 BC',
    '-2 days -12 hours -30 minutes',
    '-2 years -6 months'
 );

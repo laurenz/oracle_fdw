@@ -77,7 +77,7 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    3.14159,
    3.14159,
    '1968-10-20',
-   '2009-01-26 22:30:00 PST',
+   '2009-01-26 15:02:54.893532 PST',
    '1 day 2 hours 30 seconds 1 microsecond',
    '-6 months'
 );
@@ -97,8 +97,8 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    -2.71828,
    -2.71828,
    -2.71828,
-   '2014-11-25',
-   '2014-11-25 15:02:54.893532 PST',
+   '0044-03-15 BC',
+   '0044-03-15 12:00:00 BC',
    '-2 days -12 hours -30 minutes',
    '-2 years -6 months'
 );
@@ -128,12 +128,12 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
 -- simple SELECT
 SELECT id, c, nc, vc, nvc, length(lc), r, u, length(lb), length(lr), b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
 WARNING:  column number 19 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
- id |          c           |          nc          |        vc        |       nvc        | length |     r      |                  u                   | length | length | b |   num    |     fl      |    db    |     d      |                 ts                  |                ids                |         iym          | x 
-----+----------------------+----------------------+------------------+------------------+--------+------------+--------------------------------------+--------+--------+---+----------+-------------+----------+------------+-------------------------------------+-----------------------------------+----------------------+---
-  1 | fixed char           | nat'l char           | varlena          | nat'l var        |     22 | \xdeadbeef | 055e26fa-f1d8-771f-e053-1645990add93 |      4 |      4 | t |  3.14159 |  3.14159012 |  3.14159 | 10-20-1968 | Mon Jan 26 22:30:00 2009 PST        | @ 1 day 2 hours 30.000001 secs    | @ 6 mons ago         |  
-  2 |                      |                      |                  |                  |        |            |                                      |        |        |   |          |             |          |            |                                     |                                   |                      |  
-  3 | a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb | a\x1B\x07\r\x7Fb |   9010 | \xdeadf00d | 055f3b32-a02c-4532-e053-1645990a6db2 |     12 |     12 | f | -2.71828 | -2.71828008 | -2.71828 | 11-25-2014 | Tue Nov 25 15:02:54.893532 2014 PST | @ 2 days 12 hours 30 mins ago     | @ 2 years 6 mons ago |  
-  4 | short                | short                | short            | short            |      5 | \xdeadf00d | 0560ee34-2ef9-1137-e053-1645990ac874 |      4 |      4 |   |  0.00000 |           0 |        0 |            |                                     | @ 23 hours 59 mins 59.999999 secs | @ 3 years            |  
+ id |          c           |          nc          |        vc        |       nvc        | length |     r      |                  u                   | length | length | b |   num    |     fl      |    db    |       d       |                 ts                  |                ids                |         iym          | x 
+----+----------------------+----------------------+------------------+------------------+--------+------------+--------------------------------------+--------+--------+---+----------+-------------+----------+---------------+-------------------------------------+-----------------------------------+----------------------+---
+  1 | fixed char           | nat'l char           | varlena          | nat'l var        |     22 | \xdeadbeef | 055e26fa-f1d8-771f-e053-1645990add93 |      4 |      4 | t |  3.14159 |  3.14159012 |  3.14159 | 10-20-1968    | Mon Jan 26 15:02:54.893532 2009 PST | @ 1 day 2 hours 30.000001 secs    | @ 6 mons ago         |  
+  2 |                      |                      |                  |                  |        |            |                                      |        |        |   |          |             |          |               |                                     |                                   |                      |  
+  3 | a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb | a\x1B\x07\r\x7Fb |   9010 | \xdeadf00d | 055f3b32-a02c-4532-e053-1645990a6db2 |     12 |     12 | f | -2.71828 | -2.71828008 | -2.71828 | 03-15-0044 BC | Fri Mar 15 12:00:00 0044 PST BC     | @ 2 days 12 hours 30 mins ago     | @ 2 years 6 mons ago |  
+  4 | short                | short                | short            | short            |      5 | \xdeadf00d | 0560ee34-2ef9-1137-e053-1645990ac874 |      4 |      4 |   |  0.00000 |           0 |        0 |               |                                     | @ 23 hours 59 mins 59.999999 secs | @ 3 years            |  
 (4 rows)
 
 -- mass UPDATE

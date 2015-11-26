@@ -4466,7 +4466,10 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 								&(datetime_tm.tm_mday));
 
 						initStringInfo(&s);
-						appendStringInfo(&s, "%04d-%02d-%02d", datetime_tm.tm_year, datetime_tm.tm_mon, datetime_tm.tm_mday);
+						appendStringInfo(&s, "%04d-%02d-%02d 00:00:00.0+00:00 %s",
+								datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+								datetime_tm.tm_mon, datetime_tm.tm_mday,
+								(datetime_tm.tm_year > 0) ? "AD" : "BC");
 						param->value = s.data;
 
 						break;
@@ -4479,6 +4482,7 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 									errmsg("infinite timestamp value cannot be stored in Oracle")));
 
 						/* get the parts */
+						tzoffset = 0;
 						(void)timestamp2tm(DatumGetTimestampTz(datum),
 									(oraTable->cols[param->colnum]->pgtype == TIMESTAMPOID) ? NULL : &tzoffset,
 									&datetime_tm,
@@ -4487,12 +4491,12 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 									NULL);
 
 						initStringInfo(&s);
-						appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d",
-								datetime_tm.tm_year, datetime_tm.tm_mon, datetime_tm.tm_mday,
-								datetime_tm.tm_hour, datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec);
-						if (oraTable->cols[param->colnum]->pgtype == TIMESTAMPTZOID)
-							appendStringInfo(&s, "%+03d:%02d", -tzoffset / 3600,
-									(tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600);
+						appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d%+03d:%02d %s",
+								datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+								datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
+								datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
+								-tzoffset / 3600, ((tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600) / 60,
+								(datetime_tm.tm_year > 0) ? "AD" : "BC");
 						param->value = s.data;
 
 						break;
