@@ -1,13 +1,6 @@
 This is a list of things that should be done.
 Help is welcome!
 
-Support parameterized paths
----------------------------
-
-If the ForeignScan is the inner loop of a nested loop join, try to create
-parameterized paths.
-Support for Parameterized paths exists since PostgreSQL 9.2.
-
 Support join pushdown
 ---------------------
 
