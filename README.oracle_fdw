@@ -745,21 +745,17 @@ If that causes an error, please also include the output of
   SELECT oracle_diag();
 
 If you have a problem or question or any kind of feedback, the preferred
-option is to send an e-mail to oracle-fdw-general@lists.pgfoundry.org
-You can subscribe here:
+option is to open an issue on GitHub:
+https://github.com/laurenz/oracle_fdw/issues
+This requires a GitHub account.
+
+You can send an e-mail to oracle-fdw-general@lists.pgfoundry.org
+This requires that you subscribe here:
 http://lists.pgfoundry.org/mailman/listinfo/oracle-fdw-general
 There is a mail archive here:
 http://lists.pgfoundry.org/pipermail/oracle-fdw-general/
 
 There is the option to open an issue on GitHub:
-https://github.com/laurenz/oracle_fdw/issues
-This requires a GitHub account.
-
-You can also use the issue trackers on pgFoundry:
-http://pgfoundry.org/tracker/?group_id=1000600
-pgFoundry also offers forums for questions:
-http://pgfoundry.org/forum/?group_id=1000600
-The trackers and forums require a pgFoundry account.
 
 I will also answer e-mail sent to me at laurenz.albe@wien.gv.at, but that way
 you exclude others from helping you or benefiting from your experience.
