@@ -466,7 +466,7 @@ oracleSession
 			 * Certain Oracle errors mean that the session or the server connection
 			 * got terminated.  Retry once in that case.
 			 */
-			if (retry && (err_code == 1012 || err_code == 28 || err_code == 3113))
+			if (retry && (err_code == 1012 || err_code == 28 || err_code == 3113 || err_code == 3135))
 			{
 				oracleDebug2("oracle_fdw: session has been terminated, try to reconnect");
 
