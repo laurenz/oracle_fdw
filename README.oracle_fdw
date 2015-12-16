@@ -238,7 +238,7 @@ The function oracle_close_connections() can be used to close all cached Oracle
 connections.  This can be useful for long-running sessions that don't access
 foreign tables all the time and want to avoid blocking the resources needed
 by an open Oracle connection.
-Don't call this function inside a transaction that modifies Oracle data.
+You cannot call this function inside a transaction that modifies Oracle data.
 
 Columns
 -------
