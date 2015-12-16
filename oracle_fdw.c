@@ -105,6 +105,11 @@
 PG_MODULE_MAGIC;
 
 /*
+ * "true" if Oracle data have been modified in the current transaction.
+ */
+static bool dml_in_transaction = false;
+
+/*
  * PostGIS geometry type, set upon library initialization.
  */
 static Oid GEOMETRYOID = InvalidOid;
@@ -443,6 +448,12 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 PGDLLEXPORT Datum
 oracle_close_connections(PG_FUNCTION_ARGS)
 {
+	if (dml_in_transaction)
+		ereport(ERROR,
+				(errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+				errmsg("connections with an active transaction cannot be closed"),
+				errhint("The transaction that modified Oracle data must be closed first.")));
+
 	elog(DEBUG1, "oracle_fdw: close all Oracle connections");
 	oracleCloseConnections();
 
@@ -1631,6 +1642,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table insert on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	++fdw_state->rowcount;
+	dml_in_transaction = true;
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -1675,6 +1687,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table update on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	++fdw_state->rowcount;
+	dml_in_transaction = true;
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -1720,6 +1733,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table delete on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	++fdw_state->rowcount;
+	dml_in_transaction = true;
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -4589,6 +4603,8 @@ transactionCallback(XactEvent event, void *arg)
 			oracleEndTransaction(arg, 0, 1);
 			break;
 	}
+
+	dml_in_transaction = false;
 }
 
 /*

@@ -5,6 +5,8 @@ Version 1.3.0
     Inspiration by Daniele Sevegnani.
   - Support two-dimensional geometries with an additional measure dimension.
     Idea by Paul Dziemiela.
+  - Throw an error if oracle_close_connections() is called inside a
+    transaction that modified Oracle data.
 
   Bugfixes:
   - The server crashed for the constructs like "<column> = ANY (NULL)".
