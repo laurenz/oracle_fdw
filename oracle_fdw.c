@@ -224,7 +224,7 @@ static FdwPlan *oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, Rel
 #else
 static void oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
 static void oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
-static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses);
+static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan);
 static bool oracleAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockNumber *totalpages);
 #endif  /* OLD_FDW_API */
 static void oracleExplainForeignScan(ForeignScanState *node, ExplainState *es);
@@ -840,8 +840,11 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 
 	add_path(baserel,
 		(Path *)create_foreignscan_path(root, baserel, baserel->rows,
-				fdwState->startup_cost, fdwState->total_cost,
-				NIL, NULL, NIL));
+				fdwState->startup_cost, fdwState->total_cost, NIL, NULL,
+#if PG_VERSION_NUM >= 90500
+				NULL,  /* no extra plan */
+#endif  /* PG_VERSION_NUM */
+				NIL));
 }
 
 /*
@@ -851,7 +854,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
  * 		of parameters we need for execution.
  */
 ForeignScan
-*oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses)
+*oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan)
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 	List *fdw_private, *keep_clauses = NIL;
@@ -882,7 +885,9 @@ ForeignScan
 	/* Create the ForeignScan node */
 	return make_foreignscan(tlist, keep_clauses, baserel->relid, fdwState->params, fdw_private
 #if PG_VERSION_NUM >= 90500
-							, NIL, NIL  /* no parameterized paths */
+							, NIL,
+							NIL,  /* no parameterized paths */
+							outer_plan
 #endif  /* PG_VERSION_NUM */
 							);
 }
