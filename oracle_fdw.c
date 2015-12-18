@@ -224,7 +224,11 @@ static FdwPlan *oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, Rel
 #else
 static void oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
 static void oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
-static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan);
+static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses
+#if PG_VERSION_NUM >= 90500
+, Plan *outer_plan
+#endif  /* PG_VERSION_NUM */
+);
 static bool oracleAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockNumber *totalpages);
 #endif  /* OLD_FDW_API */
 static void oracleExplainForeignScan(ForeignScanState *node, ExplainState *es);
@@ -854,7 +858,11 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
  * 		of parameters we need for execution.
  */
 ForeignScan
-*oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan)
+*oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses
+#if PG_VERSION_NUM >= 90500
+, Plan *outer_plan
+#endif  /* PG_VERSION_NUM */
+)
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 	List *fdw_private, *keep_clauses = NIL;
