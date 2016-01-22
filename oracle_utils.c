@@ -1306,6 +1306,14 @@ setOracleEnvironment(char *nls_lang)
 	}
 
 	/* other environment variables that control Oracle formats */
+	if (putenv("NLS_DATE_LANGUAGE=AMERICAN") != 0)
+	{
+		free(nls_lang);
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			"error connecting to Oracle",
+			"Environment variable NLS_DATE_LANGUAGE cannot be set.");
+	}
+
 	if (putenv("NLS_DATE_FORMAT=YYYY-MM-DD HH24:MI:SS BC") != 0)
 	{
 		free(nls_lang);
