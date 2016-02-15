@@ -461,11 +461,16 @@ The supported Oracle server versions depend on the used client version (see the
 Oracle Client/Server Interoperability Matrix in support document 207303.1).
 For maximum coverage use Oracle Client 10.2.0.5, as this will allow you to
 connect to every server version from 8.1.7 to 12.1.0 except 9.0.1.
+PostgreSQL and Oracle need to have the same architecture, for example you
+cannot have 32-bit software for the one and 64-bit software for the other.
 
 It is advisable to use the latest Patch Set on both Oracle client and server,
 particularly with desupported Oracle versions.
 For a list of Oracle bugs that are known to affect oracle_fdw's usability,
 see the "Problems" section below.
+Consult the oracle_fdw Wiki (https://github.com/laurenz/oracle_fdw/wiki)
+for tips about Oracle installation and configuration and share your own
+knowledge there.
 
 6. Installation
 ===============
