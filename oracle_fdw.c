@@ -1853,7 +1853,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	oracleSession *session;
 	fold_t foldcase = CASE_SMART;
 	StringInfoData buf;
-	bool firstcol = true;
+	bool readonly = false, firstcol = true;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -1899,11 +1899,28 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errhint("Valid values in this context are: %s", "keep, lower, smart")));
 			continue;
 		}
+		else if (strcmp(def->defname, "readonly") == 0)
+		{
+			char *s = ((Value *) (def->arg))->val.str;
+			if (pg_strcasecmp(s, "on") != 0
+					|| pg_strcasecmp(s, "yes") != 0
+					|| pg_strcasecmp(s, "true") != 0)
+				readonly = true;
+			else if (pg_strcasecmp(s, "off") != 0
+					|| pg_strcasecmp(s, "no") != 0
+					|| pg_strcasecmp(s, "false") != 0)
+				readonly = false;
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname)));
+			continue;
+		}
 
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
 				errmsg("invalid option \"%s\"", def->defname),
-				errhint("Valid options in this context are: %s", "case")));
+				errhint("Valid options in this context are: %s", "case, readonly")));
 	}
 
 	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
@@ -1941,8 +1958,11 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			|| (rc == 1 && oldtabname[0] != '\0' && strcmp(tabname, oldtabname)))
 		{
 			/* finish previous CREATE FOREIGN TABLE statement */
-			appendStringInfo(&buf, ") SERVER \"%s\" OPTIONS (schema '%s', table '%s')",
+			appendStringInfo(&buf, ") SERVER \"%s\" OPTIONS (schema '%s', table '%s'",
 				server->servername, stmt->remote_schema, oldtabname);
+			if (readonly)
+				appendStringInfo(&buf, ", readonly 'true'");
+			appendStringInfo(&buf, ")");
 
 			result = lappend(result, pstrdup(buf.data));
 		}

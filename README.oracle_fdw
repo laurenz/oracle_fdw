@@ -425,13 +425,17 @@ following:
   ALL_TAB_COLUMNS.  That includes tables, views and materialized views,
   but not synonyms.
 
-- There is one supported option for IMPORT FOREIGN SCHEMA named "case" that
-  controls case folding for table and column names during import.
-  The possible values are:
-  "keep": leave the names as they are in Oracle, usually in upper case.
-  "lower": translate all table and column names to lower case.
-  "smart": only translate names that are all upper case in Oracle
-           (this is the default).
+- There are two supported options for IMPORT FOREIGN SCHEMA:
+  - "case": controls case folding for table and column names during import.
+    The possible values are:
+      "keep": leave the names as they are in Oracle, usually in upper case.
+      "lower": translate all table and column names to lower case.
+      "smart": only translate names that are all upper case in Oracle
+               (this is the default).
+  - "readonly" (boolean): controls if imported tables can be modified.
+    If set to "true", all imported tables are created with the foreign
+    table option "readonly" set to "true" (see "Options" above).
+    The default is "false".
 
 - The Oracle schema name must be written exactly as it is in Oracle, so
   normally in upper case.  Since PostgreSQL translates names to lower case

@@ -1,4 +1,8 @@
-Version 1.3.1
+Version 1.4.0
+  Enhancements:
+  - Add option "readonly" for IMPORT FOREIGN TABLE that sets the foreign table
+    option "readonly" to "true" on all imported foreign tables.
+    Idea by Julien Goux.
   Bugfixes:
   - Selecting timestamps with lc_messages set to French caused error
     "ORA-01406: la valeur de la colonne extraite a été tronquée"
