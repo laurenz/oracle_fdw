@@ -2000,7 +2000,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			{
 				case ORA_TYPE_CHAR:
 				case ORA_TYPE_NCHAR:
-					appendStringInfo(&buf, "character(%d)", charlen);
+					appendStringInfo(&buf, "character(%d)", charlen == 0 ? 1 : charlen);
 					break;
 				case ORA_TYPE_VARCHAR2:
 				case ORA_TYPE_NVARCHAR2:
