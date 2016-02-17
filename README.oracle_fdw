@@ -543,7 +543,7 @@ Running the regression tests:
 -----------------------------
 
 Unless you are developing oracle_fdw or want to test its functionality
-on an exotic platform, you don't have to do that.
+on an exotic platform, you don't have to do this.
 
 For the regression tests to work, you must have a PostgreSQL cluster
 (9.3 or better) and an Oracle server (10.1 or better with Locator or Spatial)
