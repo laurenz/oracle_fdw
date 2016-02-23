@@ -3751,6 +3751,9 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 		case T_CoerceToDomain:
 			getUsedColumns(((CoerceToDomain *)expr)->arg, oraTable);
 			break;
+		case T_PlaceHolderVar:
+			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable);
+			break;
 		default:
 			/*
 			 * We must be able to handle all node types that can
