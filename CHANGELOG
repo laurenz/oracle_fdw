@@ -10,6 +10,8 @@ Version 1.4.0
   - Complicated queries could lead to an error like
     "Internal oracle_fdw error: encountered unknown node type 524."
     Report by "bartonjd".
+  - PostGIS type "geometry" cannot be found if ArcGIS is installed.
+    Report by "dtoller".
 
 Version 1.3.0, released 2015-12-21
   Enhancements:

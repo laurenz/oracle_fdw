@@ -50,6 +50,7 @@
 #include "storage/lock.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
 #include "utils/date.h"
 #include "utils/datetime.h"
 #include "utils/elog.h"
@@ -595,33 +596,28 @@ oracle_diag(PG_FUNCTION_ARGS)
 void
 _PG_init(void)
 {
-	Relation proc_rel;
-	ScanKeyData key;
-	SysScanDesc scan;
-	HeapTuple tuple;
+	CatCList *catlist;
+	int i, argcount = 1;
+	Oid argtypes[] = { INTERNALOID };
 
 	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 
-	/* initialize index scan for "st_geomfromwkb" in pg_proc */
-	proc_rel = heap_open(ProcedureRelationId, AccessShareLock);
-	ScanKeyInit(&key, Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum("st_geomfromwkb"));
-	scan = systable_beginscan(proc_rel, ProcedureNameArgsNspIndexId, true, GetTransactionSnapshot(), 1, &key);
+	/* find all functions called "geometry_recv" with "internal" argument type */
+	catlist = SearchSysCacheList2(
+					PROCNAMEARGSNSP,
+					CStringGetDatum("geometry_recv"),
+					PointerGetDatum(buildoidvector(argtypes, argcount)));
 
-	/* find the first function with two arguments */
-	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	for (i = 0; i < catlist->n_members; i++)
 	{
-		oidvector argtypes;
-		Form_pg_proc proc_tuple = (Form_pg_proc)GETSTRUCT(tuple);
-
-		argtypes = proc_tuple->proargtypes;
-		if (argtypes.dim1 != 2)
-			continue;
+		HeapTuple proctup = &catlist->members[i]->tuple;
+		Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
 
 		/*
-		 * If we find two two-argument functions called 
-		 * "st_geomfromwkb", assume that two copies of PostGIS
-		 * are installed and give up.
+		 * If we find more than one "geometry_recv" function, there is
+		 * probably more than one installation of PostGIS.
+		 * We don't know which one to use and give up trying.
 		 */
 		if (GEOMETRYOID != InvalidOid)
 		{
@@ -631,15 +627,11 @@ _PG_init(void)
 			break;
 		}
 
-		/* the return type must be the PostGIS geometry type */
-		GEOMETRYOID = proc_tuple->prorettype;
+		/* "geometry" is the return type of the "geometry_recv" function */
+		GEOMETRYOID = procform->prorettype;
 
 		elog(DEBUG1, "oracle_fdw: PostGIS is installed, GEOMETRYOID = %d", GEOMETRYOID);
 	}
-
-	/* end scan */
-	systable_endscan(scan);
-	heap_close(proc_rel, AccessShareLock);
 }
 
 #ifdef OLD_FDW_API
