@@ -632,6 +632,7 @@ _PG_init(void)
 
 		elog(DEBUG1, "oracle_fdw: PostGIS is installed, GEOMETRYOID = %d", GEOMETRYOID);
 	}
+	ReleaseSysCacheList(catlist);
 }
 
 #ifdef OLD_FDW_API
