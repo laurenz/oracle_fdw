@@ -2686,6 +2686,8 @@ checkerr(sword status, dvoid *handle, ub4 handleType)
 /*
  * copyOraText
  * 		Returns a palloc'ed string containing a (possibly quoted) copy of "string".
+ * 		If the string starts with "(" and ends with ")", no quoting will take place
+ * 		even if "quote" is true.
  */
 char
 *copyOraText(const char *string, int size, int quote)
@@ -2694,6 +2696,15 @@ char
 	register int i, j=-1;
 	char *result;
 
+	/* if "string" is parenthized, return a copy */
+	if (string[0] == '(' && string[size-1] == ')')
+	{
+		result = oracleAlloc(size + 1);
+		memcpy(result, string, size);
+		result[size] = '\0';
+		return result;
+	}
+		
 	if (quote)
 	{
 		for (i=0; i<size; ++i)

@@ -3,6 +3,9 @@ Version 1.4.0
   - Add option "readonly" for IMPORT FOREIGN TABLE that sets the foreign table
     option "readonly" to "true" on all imported foreign tables.
     Idea by Julien Goux.
+  - Allow foreign tables based on arbitrary Oracle queries.
+    The query, enclosed in parentheses, can be supplied as option "table".
+    Requested by "tsykes", "cirix81" and Julien Goux.
   Bugfixes:
   - Selecting timestamps with lc_messages other than English caused errors like
     "ORA-01406: la valeur de la colonne extraite a été tronquée"

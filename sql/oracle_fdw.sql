@@ -183,3 +183,22 @@ EXECUTE stmt(1);
 EXPLAIN (COSTS off) EXECUTE stmt(1);
 EXECUTE stmt(1);
 DEALLOCATE stmt;
+
+/*
+ * Test foreign table based on SELECT statement.
+ */
+
+CREATE FOREIGN TABLE qtest (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   vc  character varying(10),
+   num numeric(7,5)
+) SERVER oracle OPTIONS (table '(SELECT id, vc, num FROM typetest1)');
+
+-- INSERT works with simple "view"
+INSERT INTO qtest (id, vc, num) VALUES (5, 'via query', -12.5);
+
+ALTER FOREIGN TABLE qtest OPTIONS (SET table '(SELECT id, SUBSTR(vc, 1, 3), num FROM typetest1)');
+
+-- SELECT and DELETE should also work with derived columns
+SELECT * FROM qtest ORDER BY id;
+DELETE FROM qtest WHERE id = 5;

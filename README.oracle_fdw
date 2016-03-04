@@ -160,6 +160,14 @@ Foreign table options
   The Oracle table name.  This name must be written exactly as it occurs in
   Oracle's system catalog, so normally consist of uppercase letters only.
 
+  To define a foreign table based on an arbitrary Oracle query, set this
+  option to the query enclosed in parentheses, like
+     OPTIONS (table '(SELECT col FROM tab)')
+  Do not set the "schema" option in this case.
+  INSERT, UPDATE and DELETE will work on foreign tables defined on simple
+  queries; if you want to avoid that (or confusing Oracle error messages
+  for more complicated queries), use the table option "readonly".
+
 - schema (optional)
 
   The table's schema (or owner).  Useful to access tables that do not belong
