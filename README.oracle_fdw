@@ -161,8 +161,8 @@ Foreign table options
   Oracle's system catalog, so normally consist of uppercase letters only.
 
   To define a foreign table based on an arbitrary Oracle query, set this
-  option to the query enclosed in parentheses, like
-     OPTIONS (table '(SELECT col FROM tab)')
+  option to the query enclosed in parentheses, e.g.
+     OPTIONS (table '(SELECT col FROM tab WHERE val = ''string'')')
   Do not set the "schema" option in this case.
   INSERT, UPDATE and DELETE will work on foreign tables defined on simple
   queries; if you want to avoid that (or confusing Oracle error messages
