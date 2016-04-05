@@ -677,7 +677,16 @@ oraclePlanForeignScan(Oid foreigntableid,
 	if (plan_costs)
 	{
 		/* get Oracle's cost estimates for the query */
-		oracleEstimate(fdwState->session, fdwState->query, seq_page_cost, BLCKSZ, &(fdwState->startup_cost), &(fdwState->total_cost), &baserel->rows, &baserel->width);
+		oracleEstimate(
+			fdwState->session,
+			fdwState->query,
+			seq_page_cost,
+			BLCKSZ,
+			&(fdwState->startup_cost),
+			&(fdwState->total_cost),
+			&baserel->rows,
+			&baserel->width
+		);
 	}
 	else
 	{
@@ -786,7 +795,20 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	if (plan_costs)
 	{
 		/* get Oracle's cost estimates for the query */
-		oracleEstimate(fdwState->session, fdwState->query, seq_page_cost, BLCKSZ, &(fdwState->startup_cost), &(fdwState->total_cost), &ntuples, &baserel->width);
+		oracleEstimate(
+			fdwState->session,
+			fdwState->query,
+			seq_page_cost,
+			BLCKSZ,
+			&(fdwState->startup_cost),
+			&(fdwState->total_cost),
+			&ntuples,
+#if PG_VERSION_NUM < 90600
+			&baserel->width
+#else
+			&baserel->reltarget->width
+#endif
+		);
 
 		/* estimate selectivity only for conditions that are not pushed down */
 		for (i=list_length(baserel->baserestrictinfo)-1; i>=0; --i)
@@ -836,12 +858,23 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 
 	add_path(baserel,
-		(Path *)create_foreignscan_path(root, baserel, baserel->rows,
-				fdwState->startup_cost, fdwState->total_cost, NIL, NULL,
-#if PG_VERSION_NUM >= 90500
-				NULL,  /* no extra plan */
+		(Path *)create_foreignscan_path(
+					root,
+					baserel,
+#if PG_VERSION_NUM >= 90600
+					NULL,  /* default pathtarget */
 #endif  /* PG_VERSION_NUM */
-				NIL));
+					baserel->rows,
+					fdwState->startup_cost,
+					fdwState->total_cost,
+					NIL,
+					NULL,
+#if PG_VERSION_NUM >= 90500
+					NULL,  /* no extra plan */
+#endif  /* PG_VERSION_NUM */
+					NIL
+				)
+	);
 }
 
 /*
@@ -2285,8 +2318,14 @@ char
 	int i, clause_count = -1, index;
 	char *where, *wherecopy, *p, md5[33], parname[10];
 	StringInfoData query, result;
-	List *columnlist = foreignrel->reltargetlist,
+	List *columnlist,
 		*conditions = foreignrel->baserestrictinfo;
+
+#if PG_VERSION_NUM < 90600
+	columnlist = foreignrel->reltargetlist;
+#else
+	columnlist = foreignrel->reltarget->exprs;
+#endif
 
 	/* first, find all the columns to include in the select list */
 
