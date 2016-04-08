@@ -1,4 +1,4 @@
-Version 1.4.0
+Version 1.4.0, released 2016-04-08
   Enhancements:
   - Add option "readonly" for IMPORT FOREIGN TABLE that sets the foreign table
     option "readonly" to "true" on all imported foreign tables.
