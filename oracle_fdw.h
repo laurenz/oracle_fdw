@@ -128,7 +128,6 @@ struct oraTable
 typedef enum {
 	BIND_STRING,
 	BIND_NUMBER,
-	BIND_TIMESTAMP,
 	BIND_LONG,
 	BIND_LONGRAW,
 	BIND_GEOMETRY,

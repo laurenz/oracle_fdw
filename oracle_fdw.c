@@ -278,6 +278,8 @@ static bool optionIsTrue(const char *value);
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
 static void addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
+static char *deparseDate(Datum datum);
+static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable, oracleSession *session);
 #endif  /* WRITE_API */
 static void transactionCallback(XactEvent event, void *arg);
@@ -1016,11 +1018,10 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		paramDesc->type = exprType((Node *)(expr->expr));
 
 		if (paramDesc->type == TEXTOID || paramDesc->type == VARCHAROID
-				|| paramDesc->type == BPCHAROID || paramDesc->type == CHAROID)
-			paramDesc->bindType = BIND_STRING;
-		else if (paramDesc->type == DATEOID || paramDesc->type == TIMESTAMPOID
+				|| paramDesc->type == BPCHAROID || paramDesc->type == CHAROID
+				|| paramDesc->type == DATEOID || paramDesc->type == TIMESTAMPOID
 				|| paramDesc->type == TIMESTAMPTZOID)
-			paramDesc->bindType = BIND_TIMESTAMP;
+			paramDesc->bindType = BIND_STRING;
 		else
 			paramDesc->bindType = BIND_NUMBER;
 
@@ -1039,7 +1040,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
 		paramDesc->name = pstrdup(":now");
 		paramDesc->type = TIMESTAMPTZOID;
-		paramDesc->bindType = BIND_TIMESTAMP;
+		paramDesc->bindType = BIND_STRING;
 		paramDesc->value = NULL;
 		paramDesc->node = NULL;
 		paramDesc->bindh = NULL;
@@ -2677,7 +2678,15 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* parameters will be called :p1, :p2 etc. */
 			initStringInfo(&result);
+			if (param->paramtype == DATEOID || param->paramtype == TIMESTAMPOID || param->paramtype == TIMESTAMPTZOID)
+				appendStringInfo(&result, "(CAST (");
 			appendStringInfo(&result, ":p%d", index);
+			if (param->paramtype == DATEOID)
+				appendStringInfo(&result, " AS DATE))");
+			else if (param->paramtype == TIMESTAMPOID)
+				appendStringInfo(&result, " AS TIMESTAMP))");
+			else if (param->paramtype == TIMESTAMPTZOID)
+				appendStringInfo(&result, " AS TIMESTAMP WITH TIME ZONE))");
 
 			break;
 #endif  /* OLD_FDW_API */
@@ -3435,10 +3444,10 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			switch (coerce->resulttype)
 			{
 				case DATEOID:
-					appendStringInfo(&result, "TRUNC(CAST (:now AS DATE))");
+					appendStringInfo(&result, "TRUNC(CAST (CAST(:now AS TIMESTAMP WITH TIME ZONE) AS DATE))");
 					break;
 				case TIMESTAMPOID:
-					appendStringInfo(&result, "(CAST (:now AS TIMESTAMP))");
+					appendStringInfo(&result, "(CAST (CAST (:now AS TIMESTAMP WITH TIME ZONE) AS TIMESTAMP))");
 					break;
 				case TIMESTAMPTZOID:
 					appendStringInfo(&result, "(CAST (:now AS TIMESTAMP WITH TIME ZONE))");
@@ -3517,19 +3526,19 @@ static char
 			appendStringInfo(&result, "%s", str);
 			break;
 		case DATEOID:
-			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			str = deparseDate(datum);
 			initStringInfo(&result);
-			appendStringInfo(&result, "TO_TIMESTAMP('%s', 'YYYY-MM-DD')", str);
+			appendStringInfo(&result, "(CAST ('%s' AS DATE))", str);
 			break;
 		case TIMESTAMPOID:
-			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			str = deparseTimestamp(datum, false);
 			initStringInfo(&result);
-			appendStringInfo(&result, "TO_TIMESTAMP('%s', 'YYYY-MM-DD HH24:MI:SS.FF')", str);
+			appendStringInfo(&result, "(CAST ('%s' AS TIMESTAMP))", str);
 			break;
 		case TIMESTAMPTZOID:
-			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			str = deparseTimestamp(datum, true);
 			initStringInfo(&result);
-			appendStringInfo(&result, "TO_TIMESTAMP_TZ('%s', 'YYYY-MM-DD HH24:MI:SS.FFTZH:TZM')", str);
+			appendStringInfo(&result, "(CAST ('%s' AS TIMESTAMP WITH TIME ZONE))", str);
 			break;
 		case INTERVALOID:
 			if (interval2tm(*DatumGetIntervalP(datum), &tm, &fsec) != 0)
@@ -4344,11 +4353,6 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 		case ORA_TYPE_BINARYDOUBLE:
 			param->bindType = BIND_NUMBER;
 			break;
-		case ORA_TYPE_DATE:
-		case ORA_TYPE_TIMESTAMP:
-		case ORA_TYPE_TIMESTAMPTZ:
-			param->bindType = BIND_TIMESTAMP;
-			break;
 		case ORA_TYPE_LONG:
 		case ORA_TYPE_CLOB:
 			param->bindType = BIND_LONG;
@@ -4382,6 +4386,81 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 }
 
 /*
+ * deparseDate
+ * 		Render a PostgreSQL date so that Oracle can parse it.
+ */
+char *
+deparseDate(Datum datum)
+{
+	struct pg_tm datetime_tm;
+	StringInfoData s;
+
+	if (DATE_NOT_FINITE(DatumGetDateADT(datum)))
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+				errmsg("infinite date value cannot be stored in Oracle")));
+
+	/* get the parts */
+	(void)j2date(DatumGetDateADT(datum) + POSTGRES_EPOCH_JDATE,
+			&(datetime_tm.tm_year),
+			&(datetime_tm.tm_mon),
+			&(datetime_tm.tm_mday));
+
+	initStringInfo(&s);
+	appendStringInfo(&s, "%04d-%02d-%02d 00:00:00 %s",
+			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+			datetime_tm.tm_mon, datetime_tm.tm_mday,
+			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+
+	return s.data;
+}
+
+/*
+ * deparseTimestamp
+ * 		Render a PostgreSQL timestamp so that Oracle can parse it.
+ */
+char *
+deparseTimestamp(Datum datum, bool hasTimezone)
+{
+	struct pg_tm datetime_tm;
+	int32 tzoffset;
+	fsec_t datetime_fsec;
+	StringInfoData s;
+
+	/* this is sloppy, but DatumGetTimestampTz and DatumGetTimestamp are the same */
+	if (TIMESTAMP_NOT_FINITE(DatumGetTimestampTz(datum)))
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+				errmsg("infinite timestamp value cannot be stored in Oracle")));
+
+	/* get the parts */
+	tzoffset = 0;
+	(void)timestamp2tm(DatumGetTimestampTz(datum),
+				hasTimezone ? &tzoffset : NULL,
+				&datetime_tm,
+				&datetime_fsec,
+				NULL,
+				NULL);
+
+	initStringInfo(&s);
+	if (hasTimezone)
+		appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d%+03d:%02d %s",
+			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
+			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
+			-tzoffset / 3600, ((tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600) / 60,
+			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+	else
+		appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d %s",
+			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
+			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
+			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+
+	return s.data;
+}
+
+/*
  * setModifyParameters
  * 		Set the parameter values from the values in the slots.
  * 		"newslot" contains the new values, "oldslot" the old ones.
@@ -4392,11 +4471,12 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 	struct paramDesc *param;
 	Datum datum;
 	bool isnull;
-	int32 value_len, tzoffset;
+	int32 value_len;
 	char *p, *q;
 	struct pg_tm datetime_tm;
 	fsec_t datetime_fsec;
 	StringInfoData s;
+	Oid pgtype;
 
 	for (param=paramList; param != NULL; param=param->next)
 	{
@@ -4425,8 +4505,20 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 					break;
 				}
 
-				/* special treatment for intervals */
-				if (oraTable->cols[param->colnum]->pgtype == INTERVALOID)
+				pgtype = oraTable->cols[param->colnum]->pgtype;
+
+				/* special treatment for date, timestamps and intervals */
+				if (pgtype == DATEOID)
+				{
+					param->value = deparseDate(datum);
+					break;  /* from switch (param->bindType) */
+				}
+				else if (pgtype == TIMESTAMPOID || pgtype == TIMESTAMPTZOID)
+				{
+					param->value = deparseTimestamp(datum, (pgtype == TIMESTAMPTZOID));
+					break;  /* from switch (param->bindType) */
+				}
+				else if (pgtype == INTERVALOID)
 				{
 					char sign = '+';
 
@@ -4521,71 +4613,6 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 						/* nothing to be done */
 						break;
 				}
-				break;
-			case BIND_TIMESTAMP:
-				if (isnull)
-				{
-					param->value = NULL;
-					break;
-				}
-
-				/*
-				 * We have to handle datetime types specially, because
-				 * their string representation depends on DateStyle.
-				 */
-				switch(oraTable->cols[param->colnum]->pgtype)
-				{
-					case DATEOID:
-						if (DATE_NOT_FINITE(DatumGetDateADT(datum)))
-							ereport(ERROR,
-									(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-									errmsg("infinite date value cannot be stored in Oracle")));
-
-						/* get the parts */
-						(void)j2date(DatumGetDateADT(datum) + POSTGRES_EPOCH_JDATE,
-								&(datetime_tm.tm_year),
-								&(datetime_tm.tm_mon),
-								&(datetime_tm.tm_mday));
-
-						initStringInfo(&s);
-						appendStringInfo(&s, "%04d-%02d-%02d 00:00:00.0+00:00 %s",
-								datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
-								datetime_tm.tm_mon, datetime_tm.tm_mday,
-								(datetime_tm.tm_year > 0) ? "AD" : "BC");
-						param->value = s.data;
-
-						break;
-					case TIMESTAMPOID:
-					case TIMESTAMPTZOID:
-						/* this is sloppy, but DatumGetTimestampTz and DatumGetTimestamp are the same */
-						if (TIMESTAMP_NOT_FINITE(DatumGetTimestampTz(datum)))
-							ereport(ERROR,
-									(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-									errmsg("infinite timestamp value cannot be stored in Oracle")));
-
-						/* get the parts */
-						tzoffset = 0;
-						(void)timestamp2tm(DatumGetTimestampTz(datum),
-									(oraTable->cols[param->colnum]->pgtype == TIMESTAMPOID) ? NULL : &tzoffset,
-									&datetime_tm,
-									&datetime_fsec,
-									NULL,
-									NULL);
-
-						initStringInfo(&s);
-						appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d%+03d:%02d %s",
-								datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
-								datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
-								datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
-								-tzoffset / 3600, ((tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600) / 60,
-								(datetime_tm.tm_year > 0) ? "AD" : "BC");
-						param->value = s.data;
-
-						break;
-					default:
-						elog(ERROR, "impossible datetime type for binding as timestamp");
-				}
-
 				break;
 			case BIND_LONG:
 			case BIND_LONGRAW:
@@ -4737,19 +4764,26 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 		}
 		else
 		{
-			regproc typoutput;
-
-			/* get the type's output function */
-			tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(param->type));
-			if (!HeapTupleIsValid(tuple))
+			if (param->type == DATEOID)
+				param->value = deparseDate(datum);
+			else if (param->type == TIMESTAMPOID || param->type == TIMESTAMPTZOID)
+				param->value = deparseTimestamp(datum, (param->type == TIMESTAMPTZOID));
+			else
 			{
-				elog(ERROR, "cache lookup failed for type %u", param->type);
-			}
-			typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
-			ReleaseSysCache(tuple);
+				regproc typoutput;
 
-			/* convert the parameter value into a string */
-			param->value = DatumGetCString(OidFunctionCall1(typoutput, datum));
+				/* get the type's output function */
+				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(param->type));
+				if (!HeapTupleIsValid(tuple))
+				{
+					elog(ERROR, "cache lookup failed for type %u", param->type);
+				}
+				typoutput = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
+				ReleaseSysCache(tuple);
+
+				/* convert the parameter value into a string */
+				param->value = DatumGetCString(OidFunctionCall1(typoutput, datum));
+			}
 		}
 
 		/* build a parameter list for the DEBUG message */

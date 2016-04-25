@@ -1830,7 +1830,6 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		sb4 value_len = 0;           /* length of "value" */
 		ub2 value_type = SQLT_STR;   /* SQL_STR works for NULLs of all types */
 		ub4 oci_mode = OCI_DEFAULT;  /* changed only for output parameters */
-		OCIDateTime **timest;
 		OCINumber *number;
 		char *num_format, *pos;
 
@@ -1874,34 +1873,6 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					value = (dvoid *)number;
 					value_len = sizeof(OCINumber);
 					value_type = SQLT_VNU;
-					break;
-				case BIND_TIMESTAMP:
-					/* timest must exist until the OCIStmtExecute call */
-					timest = (OCIDateTime **)oracleAlloc(sizeof(OCIDateTime *));
-
-					/* allocate timestamp descriptor */
-					allocHandle((void **)timest, OCI_DTYPE_TIMESTAMP_TZ, 1, session->envp->envhp, session->connp,
-						FDW_UNABLE_TO_CREATE_EXECUTION,
-						"error executing query: OCIDescriptorAlloc failed to allocate Timestamp descriptor");
-
-					/* convert parameter string to TIMESTAMP WITH TIME ZONE */
-					if (checkerr(
-						OCIDateTimeFromText((dvoid *)session->connp->userhp, session->envp->errhp,
-							(const OraText *)param->value, strlen(param->value), (const OraText *)NULL, (ub1)0,
-							(const OraText *)NULL, (size_t)0, *timest),
-						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-					{
-						oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-							"error executing query: OCIDateTimeFromText failed to convert parameter",
-							oraMessage);
-					}
-
-					/* store in param->value to be able to free it later */
-					param->value = (char *)*timest;
-
-					value = (dvoid *)timest;
-					value_len = sizeof(OCIDateTime **);
-					value_type = SQLT_TIMESTAMP_TZ;
 					break;
 				case BIND_STRING:
 					value = param->value;

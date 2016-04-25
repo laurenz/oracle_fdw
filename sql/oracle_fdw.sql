@@ -143,11 +143,13 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
 -- simple SELECT
 SELECT id, c, nc, vc, nvc, length(lc), r, u, length(lb), length(lr), b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
 -- mass UPDATE
-WITH upd (id, c, lb) AS
+WITH upd (id, c, lb, d, ts) AS
    (UPDATE longy SET c = substr(c, 1, 9) || 'u',
                     lb = lb || bytea('\x00'),
-                    lr = lr || bytea('\x00')
-   WHERE id < 3 RETURNING id + 1, c, lb)
+                    lr = lr || bytea('\x00'),
+                     d = d + 1,
+                    ts = ts + '1 day'
+   WHERE id < 3 RETURNING id + 1, c, lb, d, ts)
 SELECT * FROM upd ORDER BY id;
 -- transactions
 BEGIN;
@@ -173,16 +175,26 @@ EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
  * Test parameters.
  */
 
-PREPARE stmt(integer) AS SELECT d FROM typetest1 WHERE id = $1;
+PREPARE stmt(integer, date, timestamp) AS SELECT d FROM typetest1 WHERE id = $1 AND d < $2 AND ts < $3;
 -- six executions to switch to generic plan
-EXECUTE stmt(1);
-EXECUTE stmt(1);
-EXECUTE stmt(1);
-EXECUTE stmt(1);
-EXECUTE stmt(1);
-EXPLAIN (COSTS off) EXECUTE stmt(1);
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 DEALLOCATE stmt;
+
+/*
+ * Test current_timestamp.
+ */
+SELECT id FROM typetest1
+   WHERE d < current_date
+     AND ts < now()
+     AND ts < current_timestamp
+     AND ts < 'now'::timestamp
+ORDER BY id;
 
 /*
  * Test foreign table based on SELECT statement.

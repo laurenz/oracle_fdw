@@ -137,17 +137,19 @@ WARNING:  column number 19 of foreign table "longy" does not exist in foreign Or
 (4 rows)
 
 -- mass UPDATE
-WITH upd (id, c, lb) AS
+WITH upd (id, c, lb, d, ts) AS
    (UPDATE longy SET c = substr(c, 1, 9) || 'u',
                     lb = lb || bytea('\x00'),
-                    lr = lr || bytea('\x00')
-   WHERE id < 3 RETURNING id + 1, c, lb)
+                    lr = lr || bytea('\x00'),
+                     d = d + 1,
+                    ts = ts + '1 day'
+   WHERE id < 3 RETURNING id + 1, c, lb, d, ts)
 SELECT * FROM upd ORDER BY id;
 WARNING:  column number 19 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
- id |     c      |      lb      
-----+------------+--------------
-  2 | fixed chau | \xdeadbeef00
-  3 |            | 
+ id |     c      |      lb      |     d      |                 ts                  
+----+------------+--------------+------------+-------------------------------------
+  2 | fixed chau | \xdeadbeef00 | 10-21-1968 | Tue Jan 27 15:02:54.893532 2009 PST
+  3 |            |              |            | 
 (2 rows)
 
 -- transactions
@@ -196,52 +198,67 @@ EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
 /*
  * Test parameters.
  */
-PREPARE stmt(integer) AS SELECT d FROM typetest1 WHERE id = $1;
+PREPARE stmt(integer, date, timestamp) AS SELECT d FROM typetest1 WHERE id = $1 AND d < $2 AND ts < $3;
 -- six executions to switch to generic plan
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
      d      
 ------------
- 10-20-1968
+ 10-21-1968
 (1 row)
 
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
      d      
 ------------
- 10-20-1968
+ 10-21-1968
 (1 row)
 
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
      d      
 ------------
- 10-20-1968
+ 10-21-1968
 (1 row)
 
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
      d      
 ------------
- 10-20-1968
+ 10-21-1968
 (1 row)
 
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
      d      
 ------------
- 10-20-1968
+ 10-21-1968
 (1 row)
 
-EXPLAIN (COSTS off) EXECUTE stmt(1);
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+                                                                                       QUERY PLAN                                                                                        
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*9c6176932fee128d5bb3e292c1743289*/ "ID", "D" FROM "TYPETEST1" WHERE ("ID" = :p1)
+   Oracle query: SELECT /*b0e9418f248c91fc812822f073879c9e*/ "ID", "D", "TS" FROM "TYPETEST1" WHERE ("D" < (CAST (:p1 AS DATE))) AND ("TS" < (CAST (:p2 AS TIMESTAMP))) AND ("ID" = :p3)
 (2 rows)
 
-EXECUTE stmt(1);
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
      d      
 ------------
- 10-20-1968
+ 10-21-1968
 (1 row)
 
 DEALLOCATE stmt;
+/*
+ * Test current_timestamp.
+ */
+SELECT id FROM typetest1
+   WHERE d < current_date
+     AND ts < now()
+     AND ts < current_timestamp
+     AND ts < 'now'::timestamp
+ORDER BY id;
+ id 
+----
+  1
+  3
+(2 rows)
+
 /*
  * Test foreign table based on SELECT statement.
  */

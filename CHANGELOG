@@ -1,3 +1,13 @@
+Version 1.5.0
+  Bugfixes:
+  - Fix errors with now() and date/timestamp parameters in queries
+    This bug was introduced in 1.3.0 and caused errors like
+    ERROR:  error executing query: OCIDateTimeFromText failed to convert parameter
+    DETAIL:  ORA-01843: not a valid month
+    when now() or "current_timestamp" and friends or date/timestamp
+    parameters were used.
+    Report by Li Hailong.
+
 Version 1.4.0, released 2016-04-08
   Enhancements:
   - Add option "readonly" for IMPORT FOREIGN TABLE that sets the foreign table
