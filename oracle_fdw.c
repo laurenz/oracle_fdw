@@ -274,12 +274,12 @@ static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
 static bool optionIsTrue(const char *value);
+static char *deparseDate(Datum datum);
+static char *deparseTimestamp(Datum datum, bool hasTimezone);
 #ifdef WRITE_API
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
 static void addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
-static char *deparseDate(Datum datum);
-static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable, oracleSession *session);
 #endif  /* WRITE_API */
 static void transactionCallback(XactEvent event, void *arg);
@@ -4264,6 +4264,81 @@ optionIsTrue(const char *value)
 		return false;
 }
 
+/*
+ * deparseDate
+ * 		Render a PostgreSQL date so that Oracle can parse it.
+ */
+char *
+deparseDate(Datum datum)
+{
+	struct pg_tm datetime_tm;
+	StringInfoData s;
+
+	if (DATE_NOT_FINITE(DatumGetDateADT(datum)))
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+				errmsg("infinite date value cannot be stored in Oracle")));
+
+	/* get the parts */
+	(void)j2date(DatumGetDateADT(datum) + POSTGRES_EPOCH_JDATE,
+			&(datetime_tm.tm_year),
+			&(datetime_tm.tm_mon),
+			&(datetime_tm.tm_mday));
+
+	initStringInfo(&s);
+	appendStringInfo(&s, "%04d-%02d-%02d 00:00:00 %s",
+			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+			datetime_tm.tm_mon, datetime_tm.tm_mday,
+			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+
+	return s.data;
+}
+
+/*
+ * deparseTimestamp
+ * 		Render a PostgreSQL timestamp so that Oracle can parse it.
+ */
+char *
+deparseTimestamp(Datum datum, bool hasTimezone)
+{
+	struct pg_tm datetime_tm;
+	int32 tzoffset;
+	fsec_t datetime_fsec;
+	StringInfoData s;
+
+	/* this is sloppy, but DatumGetTimestampTz and DatumGetTimestamp are the same */
+	if (TIMESTAMP_NOT_FINITE(DatumGetTimestampTz(datum)))
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+				errmsg("infinite timestamp value cannot be stored in Oracle")));
+
+	/* get the parts */
+	tzoffset = 0;
+	(void)timestamp2tm(DatumGetTimestampTz(datum),
+				hasTimezone ? &tzoffset : NULL,
+				&datetime_tm,
+				&datetime_fsec,
+				NULL,
+				NULL);
+
+	initStringInfo(&s);
+	if (hasTimezone)
+		appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d%+03d:%02d %s",
+			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
+			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
+			-tzoffset / 3600, ((tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600) / 60,
+			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+	else
+		appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d %s",
+			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
+			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
+			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
+			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+
+	return s.data;
+}
+
 #ifdef WRITE_API
 /*
  * copyPlanData
@@ -4383,81 +4458,6 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 	param->colnum = colnum;
 	param->next = *paramList;
 	*paramList = param;
-}
-
-/*
- * deparseDate
- * 		Render a PostgreSQL date so that Oracle can parse it.
- */
-char *
-deparseDate(Datum datum)
-{
-	struct pg_tm datetime_tm;
-	StringInfoData s;
-
-	if (DATE_NOT_FINITE(DatumGetDateADT(datum)))
-		ereport(ERROR,
-				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-				errmsg("infinite date value cannot be stored in Oracle")));
-
-	/* get the parts */
-	(void)j2date(DatumGetDateADT(datum) + POSTGRES_EPOCH_JDATE,
-			&(datetime_tm.tm_year),
-			&(datetime_tm.tm_mon),
-			&(datetime_tm.tm_mday));
-
-	initStringInfo(&s);
-	appendStringInfo(&s, "%04d-%02d-%02d 00:00:00 %s",
-			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
-			datetime_tm.tm_mon, datetime_tm.tm_mday,
-			(datetime_tm.tm_year > 0) ? "AD" : "BC");
-
-	return s.data;
-}
-
-/*
- * deparseTimestamp
- * 		Render a PostgreSQL timestamp so that Oracle can parse it.
- */
-char *
-deparseTimestamp(Datum datum, bool hasTimezone)
-{
-	struct pg_tm datetime_tm;
-	int32 tzoffset;
-	fsec_t datetime_fsec;
-	StringInfoData s;
-
-	/* this is sloppy, but DatumGetTimestampTz and DatumGetTimestamp are the same */
-	if (TIMESTAMP_NOT_FINITE(DatumGetTimestampTz(datum)))
-		ereport(ERROR,
-				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-				errmsg("infinite timestamp value cannot be stored in Oracle")));
-
-	/* get the parts */
-	tzoffset = 0;
-	(void)timestamp2tm(DatumGetTimestampTz(datum),
-				hasTimezone ? &tzoffset : NULL,
-				&datetime_tm,
-				&datetime_fsec,
-				NULL,
-				NULL);
-
-	initStringInfo(&s);
-	if (hasTimezone)
-		appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d%+03d:%02d %s",
-			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
-			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
-			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
-			-tzoffset / 3600, ((tzoffset > 0) ? tzoffset % 3600 : -tzoffset % 3600) / 60,
-			(datetime_tm.tm_year > 0) ? "AD" : "BC");
-	else
-		appendStringInfo(&s, "%04d-%02d-%02d %02d:%02d:%02d.%06d %s",
-			datetime_tm.tm_year > 0 ? datetime_tm.tm_year : -datetime_tm.tm_year + 1,
-			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
-			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
-			(datetime_tm.tm_year > 0) ? "AD" : "BC");
-
-	return s.data;
 }
 
 /*
