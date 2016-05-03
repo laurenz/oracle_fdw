@@ -8,7 +8,7 @@ Version 1.5.0
     parameters were used.
     Report by Li Hailong.
   - IMPORT FOREIGN SCHEMA sometimes didn't import primary keys.
-    Report by "JMLessard", fix by "legrandlegrand".
+    Report by Jean-Marc Lessard, fix by "legrandlegrand".
 
 Version 1.4.0, released 2016-04-08
   Enhancements:
