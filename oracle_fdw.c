@@ -276,6 +276,7 @@ static long deserializeLong(Const *constant);
 static bool optionIsTrue(const char *value);
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
+static char *deparseInterval(Datum datum);
 #ifdef WRITE_API
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
@@ -3496,8 +3497,6 @@ static char
 	regproc typoutput;
 	HeapTuple tuple;
 	char *str, *p;
-	struct pg_tm tm;
-	fsec_t fsec;
 
 	/* get the type's output function */
 	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type));
@@ -3563,34 +3562,11 @@ static char
 			appendStringInfo(&result, "(CAST ('%s' AS TIMESTAMP WITH TIME ZONE))", str);
 			break;
 		case INTERVALOID:
-			if (interval2tm(*DatumGetIntervalP(datum), &tm, &fsec) != 0)
-			{
-				elog(ERROR, "could not convert interval to tm");
-			}
-
-			/* only translate intervals that can be translated to INTERVAL DAY TO SECOND */
-			if (tm.tm_year != 0 || tm.tm_mon != 0)
+			str = deparseInterval(datum);
+			if (str == NULL)
 				return NULL;
-
-			/* Oracle intervals have only one sign */
-			if (tm.tm_mday < 0 || tm.tm_hour < 0 || tm.tm_min < 0 || tm.tm_sec < 0 || fsec < 0)
-			{
-				str = "-";
-				/* all signs must match */
-				if (tm.tm_mday > 0 || tm.tm_hour > 0 || tm.tm_min > 0 || tm.tm_sec > 0 || fsec > 0)
-					return false;
-				tm.tm_mday = -tm.tm_mday;
-				tm.tm_hour = -tm.tm_hour;
-				tm.tm_min = -tm.tm_min;
-				tm.tm_sec = -tm.tm_sec;
-				fsec = -fsec;
-			}
-			else
-				str = "";
-
 			initStringInfo(&result);
-			appendStringInfo(&result, "INTERVAL '%s%d %02d:%02d:%02d.%06d' DAY(9) TO SECOND(6)", str, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
-
+			appendStringInfo(&result, "%s", str);
 			break;
 		default:
 			return NULL;
@@ -4357,6 +4333,49 @@ deparseTimestamp(Datum datum, bool hasTimezone)
 			datetime_tm.tm_mon, datetime_tm.tm_mday, datetime_tm.tm_hour,
 			datetime_tm.tm_min, datetime_tm.tm_sec, (int32)datetime_fsec,
 			(datetime_tm.tm_year > 0) ? "AD" : "BC");
+
+	return s.data;
+}
+
+/*
+ * deparsedeparseInterval
+ * 		Render a PostgreSQL timestamp so that Oracle can parse it.
+ */
+char 
+*deparseInterval(Datum datum)
+{
+	struct pg_tm tm;
+	fsec_t fsec;
+	StringInfoData s;
+	char *sign;
+
+	if (interval2tm(*DatumGetIntervalP(datum), &tm, &fsec) != 0)
+	{
+		elog(ERROR, "could not convert interval to tm");
+	}
+
+	/* only translate intervals that can be translated to INTERVAL DAY TO SECOND */
+	if (tm.tm_year != 0 || tm.tm_mon != 0)
+		return NULL;
+
+	/* Oracle intervals have only one sign */
+	if (tm.tm_mday < 0 || tm.tm_hour < 0 || tm.tm_min < 0 || tm.tm_sec < 0 || fsec < 0)
+	{
+		sign = "-";
+		/* all signs must match */
+		if (tm.tm_mday > 0 || tm.tm_hour > 0 || tm.tm_min > 0 || tm.tm_sec > 0 || fsec > 0)
+			return NULL;
+		tm.tm_mday = -tm.tm_mday;
+		tm.tm_hour = -tm.tm_hour;
+		tm.tm_min = -tm.tm_min;
+		tm.tm_sec = -tm.tm_sec;
+		fsec = -fsec;
+	}
+	else
+		sign = "";
+
+	initStringInfo(&s);
+	appendStringInfo(&s, "INTERVAL '%s%d %02d:%02d:%02d.%06d' DAY(9) TO SECOND(6)", sign, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
 
 	return s.data;
 }
