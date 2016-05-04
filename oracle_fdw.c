@@ -2461,12 +2461,20 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	Datum *values = (Datum *)palloc(tupDesc->natts * sizeof(Datum));
 	bool *nulls = (bool *)palloc(tupDesc->natts * sizeof(bool));
 	double rstate, rowstoskip = -1;
+	MemoryContext old_cxt, tmp_cxt;
 
 	elog(DEBUG1, "oracle_fdw: analyze foreign table %d", RelationGetRelid(relation));
 
 	*totalrows = 0;
 
-	 /* Prepare for sampling rows */
+	/* create a memory context for short-lived data in convertTuples() */
+	tmp_cxt = AllocSetContextCreate(CurrentMemoryContext,
+								"oracle_fdw temporary data",
+								ALLOCSET_SMALL_MINSIZE,
+								ALLOCSET_SMALL_INITSIZE,
+								ALLOCSET_SMALL_MAXSIZE);
+
+	/* Prepare for sampling rows */
 	rstate = anl_init_selection_state(targrows);
 
 	/* get connection options, connect and get the remote table description */
@@ -2544,8 +2552,14 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 		if (collected_rows < targrows)
 		{
 			/* the first "targrows" rows are added as samples */
+
+			/* use a temporary memory context during convertTuple */
+			old_cxt = MemoryContextSwitchTo(tmp_cxt);
 			convertTuple(fdw_state, values, nulls, true);
+			MemoryContextSwitchTo(old_cxt);
+
 			rows[collected_rows++] = heap_form_tuple(tupDesc, values, nulls);
+			MemoryContextReset(tmp_cxt);
 		}
 		else
 		{
@@ -2561,11 +2575,19 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 				int k = (int)(targrows * anl_random_fract());
 
 				heap_freetuple(rows[k]);
+
+				/* use a temporary memory context during convertTuple */
+				old_cxt = MemoryContextSwitchTo(tmp_cxt);
 				convertTuple(fdw_state, values, nulls, true);
+				MemoryContextSwitchTo(old_cxt);
+
 				rows[k] = heap_form_tuple(tupDesc, values, nulls);
+				MemoryContextReset(tmp_cxt);
 			}
 		}
 	}
+
+	MemoryContextDelete(tmp_cxt);
 
 	*totalrows = (double)fdw_state->rowcount;
 	*totaldeadrows = 0;

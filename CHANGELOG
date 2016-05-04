@@ -7,8 +7,11 @@ Version 1.5.0
     when now() or "current_timestamp" and friends or date/timestamp
     parameters were used.
     Report by Li Hailong.
-  - IMPORT FOREIGN SCHEMA sometimes didn't import primary keys.
+  - IMPORT FOREIGN SCHEMA sometimes didn't import primary keys
     Report by Jean-Marc Lessard, fix by "legrandlegrand".
+  - Fix memory leaks during ANALYZE
+    This caused out of memory errors when large tables were analyzed.
+    Report by Alessio Checcucci.
 
 Version 1.4.0, released 2016-04-08
   Enhancements:
