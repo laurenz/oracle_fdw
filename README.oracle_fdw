@@ -213,6 +213,19 @@ Foreign table options
   on tables that you do not wish to be changed, to be prepared for an upgrade
   to PostgreSQL 9.3 or later.
 
+- sample_percent (optional, defaults to 100)
+
+  This option only influences ANALYZE processing and can be useful to ANALYZE
+  very large tables in a reasonable time.
+
+  The value must be between 0.000001 and 100 and defines the percentage of
+  Oracle table blocks that will be randomly selected to calculate PostgreSQL
+  table statistics.  This is accomplished using the "SAMPLE BLOCK (x)"
+  clause in Oracle, and the results are not very accurate.
+
+  ANALYZE will fail with ORA-00933 for tables defined with Oracle queries and
+  may fail with ORA-01446 for tables defined with complex Oracle views.
+
 Column options (from PostgreSQL 9.2 on)
 ---------------------------------------
 

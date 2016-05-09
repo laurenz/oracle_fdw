@@ -135,6 +135,7 @@ struct OracleFdwOption
 #define OPT_MAX_LONG "max_long"
 #define OPT_READONLY "readonly"
 #define OPT_KEY "key"
+#define OPT_SAMPLE "sample_percent"
 
 #define DEFAULT_MAX_LONG 32767
 
@@ -155,7 +156,8 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_TABLE, ForeignTableRelationId, true},
 	{OPT_PLAN_COSTS, ForeignTableRelationId, false},
 	{OPT_MAX_LONG, ForeignTableRelationId, false},
-	{OPT_READONLY, ForeignTableRelationId, false}
+	{OPT_READONLY, ForeignTableRelationId, false},
+	{OPT_SAMPLE, ForeignTableRelationId, false}
 #ifndef OLD_FDW_API
 	,{OPT_KEY, AttributeRelationId, false}
 #endif	/* OLD_FDW_API */
@@ -255,7 +257,7 @@ static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid server
 /*
  * Helper functions
  */
-static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs);
+static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs, double *sample_percent);
 static void oracleGetOptions(Oid foreigntableid, List **options);
 static char *createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
@@ -388,7 +390,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 					errhint("Valid options in this context are: %s", buf.data)));
 		}
 
-		/* check valid values for plan_costs */
+		/* check valid values for "plan_costs" and "key" */
 		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0
 				|| strcmp(def->defname, OPT_READONLY) == 0
 #ifndef OLD_FDW_API
@@ -432,6 +434,22 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are integers between 1 and 1073741823.")));
+		}
+
+		/* check valid values for "sample_percent" */
+		if (strcmp(def->defname, OPT_SAMPLE) == 0)
+		{
+			char *val = ((Value *) (def->arg))->val.str;
+			char *endptr;
+			double sample_percent;
+
+			errno = 0;
+			sample_percent = strtod(val, &endptr);
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || sample_percent < 0.000001 || sample_percent > 100.0)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are numbers between 0.000001 and 100.")));
 		}
 	}
 
@@ -659,7 +677,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
 	/* get connection options, connect and get the remote table description */
-	fdwState = getFdwState(foreigntableid, &plan_costs);
+	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
 	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
@@ -748,7 +766,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	}
 
 	/* get connection options, connect and get the remote table description */
-	fdwState = getFdwState(foreigntableid, &plan_costs);
+	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
 
 	if (need_keys)
 	{
@@ -1282,7 +1300,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 		bool plan_costs;
 
 		/* if no, we have to construct it ourselves */
-		fdwState = getFdwState(rte->relid, &plan_costs);
+		fdwState = getFdwState(rte->relid, &plan_costs, NULL);
 	}
 
 	initStringInfo(&sql);
@@ -2120,15 +2138,17 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
  * 		Construct an OracleFdwState from the options of the foreign table.
  * 		Establish an Oracle connection and get a description of the
  * 		remote table.
+ * 		"plan_costs" and "sample_percent" are set from the foreign table options.
+ * 		"sample_percent" can be NULL, in that case it is not set.
  */
 struct OracleFdwState
-*getFdwState(Oid foreigntableid, bool *plan_costs)
+*getFdwState(Oid foreigntableid, bool *plan_costs, double *sample_percent)
 {
 	struct OracleFdwState *fdwState = palloc(sizeof(struct OracleFdwState));
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL;
+	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL, *sample = NULL;
 	long max_long;
 
 	fdwState->nls_lang = NULL;
@@ -2164,6 +2184,8 @@ struct OracleFdwState
 			plancosts = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
 			maxlong = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_SAMPLE) == 0)
+			sample = ((Value *) (def->arg))->val.str;
 	}
 
 	/* convert "max_long" option to number or use default */
@@ -2171,6 +2193,15 @@ struct OracleFdwState
 		max_long = DEFAULT_MAX_LONG;
 	else
 		max_long = strtol(maxlong, NULL, 0);
+
+	/* convert "sample_percent" to double */
+	if (sample_percent != NULL)
+	{
+		if (sample == NULL)
+			*sample_percent = 100.0;
+		else
+			*sample_percent = strtod(sample, NULL);
+	}
 
 	/* check if options are ok */
 	if (table == NULL)
@@ -2461,7 +2492,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	TupleDesc tupDesc = RelationGetDescr(relation);
 	Datum *values = (Datum *)palloc(tupDesc->natts * sizeof(Datum));
 	bool *nulls = (bool *)palloc(tupDesc->natts * sizeof(bool));
-	double rstate, rowstoskip = -1;
+	double rstate, rowstoskip = -1, sample_percent;
 	MemoryContext old_cxt, tmp_cxt;
 
 	elog(DEBUG1, "oracle_fdw: analyze foreign table %d", RelationGetRelid(relation));
@@ -2479,7 +2510,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	rstate = anl_init_selection_state(targrows);
 
 	/* get connection options, connect and get the remote table description */
-	fdw_state = getFdwState(RelationGetRelid(relation), &plan_costs);
+	fdw_state = getFdwState(RelationGetRelid(relation), &plan_costs, &sample_percent);
 	fdw_state ->paramList = NULL;
 	fdw_state->pushdown_clauses = NULL;
 	fdw_state->rowcount = 0;
@@ -2524,7 +2555,13 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	if (first_column)
 		appendStringInfo(&query, "NULL");
 
+	/* append Oracle table name */
 	appendStringInfo(&query, " FROM %s", fdw_state->oraTable->name);
+
+	/* append SAMPLE clause if appropriate */
+	if (sample_percent < 100.0)
+		appendStringInfo(&query, " SAMPLE BLOCK (%f)", sample_percent);
+
 	fdw_state->query = query.data;
 	elog(DEBUG1, "oracle_fdw: remote query is %s", fdw_state->query);
 
@@ -2590,7 +2627,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 	MemoryContextDelete(tmp_cxt);
 
-	*totalrows = (double)fdw_state->rowcount;
+	*totalrows = (double)fdw_state->rowcount / sample_percent * 100.0;
 	*totaldeadrows = 0;
 
 	/* report report */
