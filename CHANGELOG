@@ -12,6 +12,9 @@ Version 1.5.0
   - Fix memory leaks during ANALYZE
     This caused out of memory errors when large tables were analyzed.
     Report by Alessio Checcucci.
+  - IMPORT FOREIGN SCHEMA should not tolerate missing remote schema
+    It used to cause a warning, but the SQL standard requires an error.
+    Report by Jean-Marc Lessard.
 
 Version 1.4.0, released 2016-04-08
   Enhancements:

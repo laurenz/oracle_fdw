@@ -1974,8 +1974,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		if (rc == -1)
 		{
 			/* remote schema does not exist, issue a warning */
-			ereport(WARNING,
-					(errcode(ERRCODE_WARNING),
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_SCHEMA_NOT_FOUND),
 					errmsg("remote schema \"%s\" does not exist", stmt->remote_schema),
 					errhint("Enclose the schema name in double quotes to prevent case folding.")));
 
