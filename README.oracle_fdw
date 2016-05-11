@@ -416,7 +416,8 @@ result in good (and much faster) row count estimates even if the table option
 "plan_costs" is turned off as long as the statistics are accurate.
 
 Keep in mind that analyzing an Oracle foreign table will result in a full
-sequential table scan.
+sequential table scan.  You can use the table option "sample_percent" to
+speed this up by using only a sample of the Oracle table.
 
 PostGIS support
 ---------------
