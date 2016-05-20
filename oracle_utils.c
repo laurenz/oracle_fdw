@@ -412,9 +412,14 @@ oracleSession
 				(user[0] == '\0' ? OCI_CRED_EXT : OCI_CRED_RDBMS), OCI_DEFAULT),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
-			oracleError_sd(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
-				"session for foreign table \"%s\" cannot be authenticated", tablename,
-				oraMessage);
+			if (tablename)
+				oracleError_sd(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+					"connection for foreign table \"%s\" cannot be authenticated", tablename,
+					oraMessage);
+			else
+				oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+					"cannot authenticate connection to foreign Oracle server",
+					oraMessage);
 		}
 
 		/* set session handle in service handle */
