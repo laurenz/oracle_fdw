@@ -755,7 +755,7 @@ Bug 6039623 can cause oracle_fdw to crash with a segmentation violation
 when larger amounts of data are selected from an Oracle table via an Oracle
 database link.
 It can occur with any Oracle server version below 12.1, and the only remedy
-is to install patch 10096945 which is included in the 11.2.0.3 Patch Set.
+is to install patch 10096945 which is included in the 11.2.0.4 Patch Set.
 
 Bug 2728408 can cause "ORA-8177 cannot serialize access for this transaction"
 even if no modification of remote data is attempted.
