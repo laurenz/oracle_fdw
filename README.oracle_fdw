@@ -221,7 +221,7 @@ Foreign table options
   The value must be between 0.000001 and 100 and defines the percentage of
   Oracle table blocks that will be randomly selected to calculate PostgreSQL
   table statistics.  This is accomplished using the "SAMPLE BLOCK (x)"
-  clause in Oracle, and the results are not very accurate.
+  clause in Oracle.
 
   ANALYZE will fail with ORA-00933 for tables defined with Oracle queries and
   may fail with ORA-01446 for tables defined with complex Oracle views.
