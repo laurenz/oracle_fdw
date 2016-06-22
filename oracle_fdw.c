@@ -1553,7 +1553,20 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				else
 					appendStringInfo(&sql, " AND");
 
-				appendStringInfo(&sql, " %s = %s", fdwState->oraTable->cols[i]->name, paramName);
+				switch (fdwState->oraTable->cols[i]->pgtype)
+				{
+					case DATEOID:
+						appendStringInfo(&sql, " %s = CAST (%s AS DATE)", fdwState->oraTable->cols[i]->name, paramName);
+						break;
+					case TIMESTAMPOID:
+						appendStringInfo(&sql, " %s = CAST (%s AS TIMESTAMP)", fdwState->oraTable->cols[i]->name, paramName);
+						break;
+					case TIMESTAMPTZOID:
+						appendStringInfo(&sql, " %s = CAST (%s AS TIMESTAMP WITH TIME ZONE)", fdwState->oraTable->cols[i]->name, paramName);
+						break;
+					default:
+						appendStringInfo(&sql, " %s = %s", fdwState->oraTable->cols[i]->name, paramName);
+				}
 			}
 		}
 	}
