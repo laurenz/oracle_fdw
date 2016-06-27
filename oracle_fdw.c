@@ -136,8 +136,10 @@ struct OracleFdwOption
 #define OPT_READONLY "readonly"
 #define OPT_KEY "key"
 #define OPT_SAMPLE "sample_percent"
+#define OPT_PREFETCH "prefetch"
 
 #define DEFAULT_MAX_LONG 32767
+#define DEFAULT_PREFETCH 200
 
 /*
  * Options for case folding for names in IMPORT FOREIGN TABLE.
@@ -157,7 +159,8 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_PLAN_COSTS, ForeignTableRelationId, false},
 	{OPT_MAX_LONG, ForeignTableRelationId, false},
 	{OPT_READONLY, ForeignTableRelationId, false},
-	{OPT_SAMPLE, ForeignTableRelationId, false}
+	{OPT_SAMPLE, ForeignTableRelationId, false},
+	{OPT_PREFETCH, ForeignTableRelationId, false}
 #ifndef OLD_FDW_API
 	,{OPT_KEY, AttributeRelationId, false}
 #endif	/* OLD_FDW_API */
@@ -199,6 +202,7 @@ struct OracleFdwState {
 	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
 	MemoryContext temp_cxt;        /* short-lived memory for data modification */
+	unsigned int prefetch;         /* number of rows to prefetch */
 };
 
 /*
@@ -451,6 +455,19 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are numbers between 0.000001 and 100.")));
 		}
+
+ 		/* check valid values for "prefetch" */
+ 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
+ 		{
+ 			char *val = ((Value *) (def->arg))->val.str;
+ 			char *endptr;
+ 			unsigned long prefetch = strtol(val, &endptr, 0);
+ 			if (val[0] == '\0' || *endptr != '\0' || prefetch < 0 || prefetch > 10240 )
+ 				ereport(ERROR,
+ 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+ 						errmsg("invalid value for option \"%s\"", def->defname),
+ 						errhint("Valid values in this context are integers between 0 and 10240.")));
+ 		}
 	}
 
 	/* check that all required options have been given */
@@ -1120,7 +1137,7 @@ oracleIterateForeignScan(ForeignScanState *node)
 
 		/* execute the Oracle statement and fetch the first row */
 		elog(DEBUG1, "oracle_fdw: execute query in foreign table scan on %d%s", RelationGetRelid(node->ss.ss_currentRelation), paramInfo);
-		oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable);
+		oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->prefetch);
 		have_result = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 	}
 
@@ -1662,7 +1679,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 			GetCurrentTransactionNestLevel()
 		);
 
-	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable);
+	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 0);
 
 	/* get the type output functions for the parameters */
 	output_funcs = (regproc *)palloc0(fdw_state->oraTable->ncols * sizeof(regproc *));
@@ -2161,7 +2178,7 @@ struct OracleFdwState
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL, *sample = NULL;
+	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
 	long max_long;
 
 	fdwState->nls_lang = NULL;
@@ -2199,6 +2216,8 @@ struct OracleFdwState
 			maxlong = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_SAMPLE) == 0)
 			sample = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_PREFETCH) == 0)
+			fetch = ((Value *) (def->arg))->val.str;
 	}
 
 	/* convert "max_long" option to number or use default */
@@ -2215,6 +2234,12 @@ struct OracleFdwState
 		else
 			*sample_percent = strtod(sample, NULL);
 	}
+
+	/* convert "prefetch" to number (or use default) */
+	if (fetch == NULL)
+		fdwState->prefetch = DEFAULT_PREFETCH;
+	else
+		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
 
 	/* check if options are ok */
 	if (table == NULL)
@@ -2592,7 +2617,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	/* loop through query results */
 	while(oracleIsStatementOpen(fdw_state->session)
 			? oracleFetchNext(fdw_state->session)
-			: (oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable),
+			: (oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->prefetch),
 				oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList)))
 	{
 		/* allow user to interrupt ANALYZE */
@@ -4075,7 +4100,9 @@ List
 	result = lappend(result, serializeString(fdwState->nls_lang));
 	/* query */
 	result = lappend(result, serializeString(fdwState->query));
-	/* Oracle table data */
+	/* Oracle prefetch count */
+	result = lappend(result, serializeInt((int)fdwState->prefetch));
+	/* Oracle table name */
 	result = lappend(result, serializeString(fdwState->oraTable->name));
 	/* PostgreSQL table name */
 	result = lappend(result, serializeString(fdwState->oraTable->pgname));
@@ -4194,6 +4221,10 @@ struct OracleFdwState
 
 	/* query */
 	state->query = deserializeString(lfirst(cell));
+	cell = lnext(cell);
+
+	/* Oracle prefetch count */
+	state->prefetch = (unsigned int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 	cell = lnext(cell);
 
 	/* table data */

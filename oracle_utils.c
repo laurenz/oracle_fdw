@@ -23,10 +23,6 @@
 
 #include "oracle_fdw.h"
 
-/* number of rows and memory limit for prefetch */
-#define PREFETCH_ROWS 200
-#define PREFETCH_MEMORY 24576
-
 /* number of bytes to read per LOB chunk */
 #define LOB_CHUNK_SIZE 8132
 
@@ -1392,7 +1388,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	OCIBind *bndhp;
 	sb2 ind1, ind2, ind3;
 	ub2 len1, len2;
-	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
+	ub4 prefetch_rows = 200;
 
 	/* make sure there is no statement handle stored in session */
 	if (session->stmthp != NULL)
@@ -1413,15 +1409,6 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
-			oraMessage);
-	}
-	if (checkerr(
-		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_memory, 0,
-			OCI_ATTR_PREFETCH_MEMORY, session->envp->errhp),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error describing query: OCIAttrSet failed to set prefetch memory in statement handle",
 			oraMessage);
 	}
 
@@ -1638,14 +1625,14 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
  * 		- Set the prefetch options.
  */
 void
-oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable)
+oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, unsigned int prefetch)
 {
 	int i, col_pos, is_select;
 	OCIDefine *defnhp;
 	static char dummy[4];
 	static sb4 dummy_size = 4;
 	static sb2 dummy_null;
-	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
+	ub4 prefetch_rows = prefetch;
 
 	/* figure out if the query is FOR UPDATE */
 	is_select = (strncmp(query, "SELECT", 6) == 0);
@@ -1792,15 +1779,6 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error executing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
-			oraMessage);
-	}
-	if (checkerr(
-		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_memory, 0,
-			OCI_ATTR_PREFETCH_MEMORY, session->envp->errhp),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error executing query: OCIAttrSet failed to set prefetch memory in statement handle",
 			oraMessage);
 	}
 }
@@ -2294,7 +2272,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 		*defnhp_scale = NULL, *defnhp_isnull = NULL, *defnhp_key = NULL, *defnhp_count = NULL;
 	ub2 len_tabname, len_colname, len_typename, len_typeowner,
 		len_charlen, len_precision, len_scale, len_isnull, len_key, len_count;
-	ub4 prefetch_rows = PREFETCH_ROWS, prefetch_memory = PREFETCH_MEMORY;
+	ub4 prefetch_rows = 200;
 	sword result;
 
 	/* return a pointer to the static variables */
@@ -2381,15 +2359,6 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error importing foreign schema: OCIAttrSet failed to set number of prefetched rows in statement handle",
-				oraMessage);
-		}
-		if (checkerr(
-			OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_memory, 0,
-				OCI_ATTR_PREFETCH_MEMORY, session->envp->errhp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error importing foreign schema: OCIAttrSet failed to set prefetch memory in statement handle",
 				oraMessage);
 		}
 

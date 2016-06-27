@@ -226,6 +226,16 @@ Foreign table options
   ANALYZE will fail with ORA-00933 for tables defined with Oracle queries and
   may fail with ORA-01446 for tables defined with complex Oracle views.
 
+- prefetch (optional, defaults to 200)
+
+  Sets the number of rows that will be fetched with a single round-trip between
+  PostgreSQL and Oracle during a foreign table scan.  This is implemented using
+  Oracle row prefetching.  The value must be between 0 and 10240, where a value
+  of zero disables prefetching.
+
+  Higher values can speed up performance, but will use more memory on the
+  PostgreSQL server.
+
 Column options (from PostgreSQL 9.2 on)
 ---------------------------------------
 
@@ -625,8 +635,8 @@ ACTION to the backend process number.  This can help identifying the Oracle
 session and allows you to trace it with DBMS_MONITOR.SERV_MOD_ACT_TRACE_ENABLE.
 
 oracle_fdw uses Oracle's result prefetching to avoid unnecessary client-server
-round-trips. The prefetch counter is set to 200, the memory limit to 24KB.
-These limits can be changed in oracle_utils.c.
+round-trips.  The prefetch row count can be configured with the "prefetch"
+table option and is set to 200 by default.
 
 Rather than using a PLAN_TABLE to explain an Oracle query (which would require
 such a table to be created in the Oracle database), oracle_fdw uses execution
@@ -750,12 +760,6 @@ Oracle bugs
 -----------
 
 This is a list of Oracle bugs that have affected oracle_fdw in the past.
-
-Bug 6039623 can cause oracle_fdw to crash with a segmentation violation
-when larger amounts of data are selected from an Oracle table via an Oracle
-database link.
-It can occur with any Oracle server version below 12.1, and the only remedy
-is to install patch 10096945 which is included in the 11.2.0.4 Patch Set.
 
 Bug 2728408 can cause "ORA-8177 cannot serialize access for this transaction"
 even if no modification of remote data is attempted.
