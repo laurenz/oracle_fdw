@@ -23,6 +23,12 @@ Version 1.5.0
   - IMPORT FOREIGN SCHEMA should not tolerate missing remote schema
     It used to cause a warning, but the SQL standard requires an error.
     Report by Jean-Marc Lessard.
+  - Fix crash when UPDATEing non-existent columns
+    If a foreign table has more columns than the underlying Oracle table,
+    these additional columns are treated as containing NULLs.
+    However, oracle_fdw crashed on an attempt to change such a column with
+    an UPDATE statement, which should not happen.
+    Reported by Fabien Nicollet.
 
 Version 1.4.0, released 2016-04-08
   Enhancements:

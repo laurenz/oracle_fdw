@@ -1508,8 +1508,10 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 			foreach(cell, targetAttrs)
 			{
 				/* find the corresponding oraTable entry */
-				while (fdwState->oraTable->cols[i]->pgattnum < lfirst_int(cell))
+				while (i < fdwState->oraTable->ncols && fdwState->oraTable->cols[i]->pgattnum < lfirst_int(cell))
 					++i;
+				if (i == fdwState->oraTable->ncols)
+					break;
 
 				/* ignore columns that don't occur in the foreign table */
 				if (fdwState->oraTable->cols[i]->pgtype == 0)
@@ -1537,6 +1539,13 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 				appendStringInfo(&sql, "%s = %s", fdwState->oraTable->cols[i]->name, paramName);
 			}
+
+			/* throw a meaningful error if nothing is updated */
+			if (firstcol)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+						errmsg("no Oracle column modified by UPDATE"),
+						errdetail("The UPDATE statement only changes colums that do not exist in the Oracle table.")));
 
 			break;
 		case CMD_DELETE:
