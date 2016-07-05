@@ -173,6 +173,10 @@ SELECT id, c FROM typetest1 ORDER BY id;
   4 | short     
 (3 rows)
 
+-- try to update the nonexistant column (should cause an error)
+UPDATE longy SET x = NULL WHERE id = 1;
+ERROR:  no Oracle column modified by UPDATE
+DETAIL:  The UPDATE statement only changes colums that do not exist in the Oracle table.
 /*
  * Test EXPLAIN support.
  */
@@ -194,6 +198,14 @@ EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
    Oracle plan: SELECT STATEMENT
    Oracle plan:   TABLE ACCESS FULL TYPETEST1
 (5 rows)
+
+-- this should fetch all columns from the foreign table
+EXPLAIN (COSTS off) SELECT typetest1 FROM typetest1;
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Foreign Scan on typetest1
+   Oracle query: SELECT /*3c5d536e25c7d7f6297539601175c2ff*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1"
+(2 rows)
 
 /*
  * Test parameters.
@@ -281,3 +293,36 @@ SELECT * FROM qtest ORDER BY id;
 (4 rows)
 
 DELETE FROM qtest WHERE id = 5;
+/*
+ * Test triggers on foreign tables.
+ */
+-- trigger function
+CREATE FUNCTION shorttrig() RETURNS trigger LANGUAGE plpgsql AS
+$$BEGIN
+   RAISE WARNING 'trigger % % OLD row: id = %, c = %', TG_WHEN, TG_OP, OLD.id, OLD.c;
+   RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
+   RETURN NEW;
+END;$$;
+-- test BEFORE trigger
+CREATE TRIGGER shorttrig BEFORE UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
+BEGIN;
+UPDATE shorty SET id = id - 1;
+WARNING:  trigger BEFORE UPDATE OLD row: id = 1, c = fixed chau
+WARNING:  trigger BEFORE UPDATE NEW row: id = 0, c = fixed chau
+WARNING:  trigger BEFORE UPDATE OLD row: id = 3, c = ab    
+WARNING:  trigger BEFORE UPDATE NEW row: id = 2, c = ab    
+WARNING:  trigger BEFORE UPDATE OLD row: id = 4, c = short     
+WARNING:  trigger BEFORE UPDATE NEW row: id = 3, c = short     
+ROLLBACK;
+-- test AFTER trigger
+DROP TRIGGER shorttrig ON shorty;
+CREATE TRIGGER shorttrig AFTER UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
+BEGIN;
+UPDATE shorty SET id = id - 1;
+WARNING:  trigger AFTER UPDATE OLD row: id = 1, c = fixed chau
+WARNING:  trigger AFTER UPDATE NEW row: id = 0, c = fixed chau
+WARNING:  trigger AFTER UPDATE OLD row: id = 3, c = ab    
+WARNING:  trigger AFTER UPDATE NEW row: id = 2, c = ab    
+WARNING:  trigger AFTER UPDATE OLD row: id = 4, c = short     
+WARNING:  trigger AFTER UPDATE NEW row: id = 3, c = short     
+ROLLBACK;

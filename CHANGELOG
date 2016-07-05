@@ -29,6 +29,10 @@ Version 1.5.0
     However, oracle_fdw crashed on an attempt to change such a column with
     an UPDATE statement, which should not happen.
     Reported by Fabien Nicollet.
+  - Fetch all columns from Oracle when the whole row is referenced
+    This problem could lead to wrong NULL values in trigger functions or when
+    the whole column is used in an expression.
+    Reported by Fabien Nicollet.
 
 Version 1.4.0, released 2016-04-08
   Enhancements:

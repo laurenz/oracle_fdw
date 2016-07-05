@@ -163,6 +163,8 @@ ROLLBACK TO one;
 COMMIT;
 -- see if the correct data are in the table
 SELECT id, c FROM typetest1 ORDER BY id;
+-- try to update the nonexistant column (should cause an error)
+UPDATE longy SET x = NULL WHERE id = 1;
 
 /*
  * Test EXPLAIN support.
@@ -170,6 +172,8 @@ SELECT id, c FROM typetest1 ORDER BY id;
 
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
+-- this should fetch all columns from the foreign table
+EXPLAIN (COSTS off) SELECT typetest1 FROM typetest1;
 
 /*
  * Test parameters.
@@ -214,3 +218,28 @@ ALTER FOREIGN TABLE qtest OPTIONS (SET table '(SELECT id, SUBSTR(vc, 1, 3), num 
 -- SELECT and DELETE should also work with derived columns
 SELECT * FROM qtest ORDER BY id;
 DELETE FROM qtest WHERE id = 5;
+
+/*
+ * Test triggers on foreign tables.
+ */
+
+-- trigger function
+CREATE FUNCTION shorttrig() RETURNS trigger LANGUAGE plpgsql AS
+$$BEGIN
+   RAISE WARNING 'trigger % % OLD row: id = %, c = %', TG_WHEN, TG_OP, OLD.id, OLD.c;
+   RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
+   RETURN NEW;
+END;$$;
+
+-- test BEFORE trigger
+CREATE TRIGGER shorttrig BEFORE UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
+BEGIN;
+UPDATE shorty SET id = id - 1;
+ROLLBACK;
+
+-- test AFTER trigger
+DROP TRIGGER shorttrig ON shorty;
+CREATE TRIGGER shorttrig AFTER UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
+BEGIN;
+UPDATE shorty SET id = id - 1;
+ROLLBACK;

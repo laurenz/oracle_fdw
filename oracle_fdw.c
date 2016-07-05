@@ -3691,8 +3691,16 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 			variable = (Var *)expr;
 
 			/* ignore system columns */
-			if (variable->varattno < 1)
+			if (variable->varattno < 0)
 				break;
+
+			/* if this is a wholerow reference, we need all columns */
+			if (variable->varattno == 0) {
+				for (index=0; index<oraTable->ncols; ++index)
+					if (oraTable->cols[index]->pgname)
+						oraTable->cols[index]->used = 1;
+				break;
+			}
 
 			/* get oraTable column index corresponding to this column (-1 if none) */
 			index = oraTable->ncols - 1;
