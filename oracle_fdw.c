@@ -270,6 +270,7 @@ static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows
 #endif  /* OLD_FDW_API */
 static char *getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
 static char *datumToString(Datum datum, Oid type);
+static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
 static char *guessNlsLang(char *nls_lang);
@@ -1494,7 +1495,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				else
 					appendStringInfo(&sql, ", ");
 
-				appendStringInfo(&sql, "%s", paramName);
+				appendAsType(&sql, paramName, fdwState->oraTable->cols[i]->pgtype);
 			}
 
 			appendStringInfo(&sql, ")");
@@ -1537,7 +1538,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				else
 					appendStringInfo(&sql, ", ");
 
-				appendStringInfo(&sql, "%s = %s", fdwState->oraTable->cols[i]->name, paramName);
+				appendStringInfo(&sql, "%s = ", fdwState->oraTable->cols[i]->name);
+				appendAsType(&sql, paramName, fdwState->oraTable->cols[i]->pgtype);
 			}
 
 			/* throw a meaningful error if nothing is updated */
@@ -1579,20 +1581,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				else
 					appendStringInfo(&sql, " AND");
 
-				switch (fdwState->oraTable->cols[i]->pgtype)
-				{
-					case DATEOID:
-						appendStringInfo(&sql, " %s = CAST (%s AS DATE)", fdwState->oraTable->cols[i]->name, paramName);
-						break;
-					case TIMESTAMPOID:
-						appendStringInfo(&sql, " %s = CAST (%s AS TIMESTAMP)", fdwState->oraTable->cols[i]->name, paramName);
-						break;
-					case TIMESTAMPTZOID:
-						appendStringInfo(&sql, " %s = CAST (%s AS TIMESTAMP WITH TIME ZONE)", fdwState->oraTable->cols[i]->name, paramName);
-						break;
-					default:
-						appendStringInfo(&sql, " %s = %s", fdwState->oraTable->cols[i]->name, paramName);
-				}
+				appendStringInfo(&sql, " %s = ", fdwState->oraTable->cols[i]->name);
+				appendAsType(&sql, paramName, fdwState->oraTable->cols[i]->pgtype);
 			}
 		}
 	}
@@ -2705,7 +2695,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 char *
 getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
 {
-	char *opername, *left, *right, *arg, oprkind;
+	char *opername, *left, *right, *arg, oprkind, parname[10];
 	Const *constant;
 	OpExpr *oper;
 	ScalarArrayOpExpr *arrayoper;
@@ -2784,16 +2774,9 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			}
 
 			/* parameters will be called :p1, :p2 etc. */
+			snprintf(parname, 10, ":p%d", index);
 			initStringInfo(&result);
-			if (param->paramtype == DATEOID || param->paramtype == TIMESTAMPOID || param->paramtype == TIMESTAMPTZOID)
-				appendStringInfo(&result, "(CAST (");
-			appendStringInfo(&result, ":p%d", index);
-			if (param->paramtype == DATEOID)
-				appendStringInfo(&result, " AS DATE))");
-			else if (param->paramtype == TIMESTAMPOID)
-				appendStringInfo(&result, " AS TIMESTAMP))");
-			else if (param->paramtype == TIMESTAMPTZOID)
-				appendStringInfo(&result, " AS TIMESTAMP WITH TIME ZONE))");
+			appendAsType(&result, parname, param->paramtype);
 
 			break;
 #endif  /* OLD_FDW_API */
@@ -3657,6 +3640,29 @@ static char
 	}
 
 	return result.data;
+}
+
+/*
+ * appendAsType
+ * 		Append "s" to "dest", adding appropriate casts for datetime "type".
+ */
+void
+appendAsType(StringInfoData *dest, const char *s, Oid type)
+{
+	switch (type)
+	{
+		case DATEOID:
+			appendStringInfo(dest, "CAST (%s AS DATE)", s);
+			break;
+		case TIMESTAMPOID:
+			appendStringInfo(dest, "CAST (%s AS TIMESTAMP)", s);
+			break;
+		case TIMESTAMPTZOID:
+			appendStringInfo(dest, "CAST (%s AS TIMESTAMP WITH TIME ZONE)", s);
+			break;
+		default:
+			appendStringInfo(dest, "%s", s);
+	}
 }
 
 /*

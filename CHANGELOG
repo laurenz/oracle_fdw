@@ -15,6 +15,11 @@ Version 1.5.0
     when now() or "current_timestamp" and friends or date/timestamp
     parameters were used.
     Report by Li Hailong.
+  - Fix errors when updating date/timestamp columns
+    This bug was also introduced in 1.3.0 and caused errors like
+    ORA-01856: BC/B.C. or AD/A.D. required
+    if the Oracle and PostgreSQL types were different.
+    Report by Stephane Tachoires.
   - IMPORT FOREIGN SCHEMA sometimes didn't import primary keys
     Report by Jean-Marc Lessard, fix by PAscal Lemoy.
   - Fix memory leaks during ANALYZE

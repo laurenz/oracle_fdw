@@ -177,6 +177,16 @@ SELECT id, c FROM typetest1 ORDER BY id;
 UPDATE longy SET x = NULL WHERE id = 1;
 ERROR:  no Oracle column modified by UPDATE
 DETAIL:  The UPDATE statement only changes colums that do not exist in the Oracle table.
+-- check that UPDATES work with "date" in Oracle and "timestamp" in PostgreSQL
+BEGIN;
+ALTER FOREIGN TABLE typetest1 ALTER COLUMN d TYPE timestamp(0) without time zone;
+UPDATE typetest1 SET d = '1968-10-10 12:00:00' WHERE id = 1 RETURNING d;
+            d             
+--------------------------
+ Thu Oct 10 12:00:00 1968
+(1 row)
+
+ROLLBACK;
 /*
  * Test EXPLAIN support.
  */
@@ -243,10 +253,10 @@ EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 (1 row)
 
 EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-                                                                                       QUERY PLAN                                                                                        
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                     QUERY PLAN                                                                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*b0e9418f248c91fc812822f073879c9e*/ "ID", "D", "TS" FROM "TYPETEST1" WHERE ("D" < (CAST (:p1 AS DATE))) AND ("TS" < (CAST (:p2 AS TIMESTAMP))) AND ("ID" = :p3)
+   Oracle query: SELECT /*4ac5b13e4be30910cb8c569a1648ec0e*/ "ID", "D", "TS" FROM "TYPETEST1" WHERE ("D" < CAST (:p1 AS DATE)) AND ("TS" < CAST (:p2 AS TIMESTAMP)) AND ("ID" = :p3)
 (2 rows)
 
 EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
@@ -306,23 +316,15 @@ END;$$;
 -- test BEFORE trigger
 CREATE TRIGGER shorttrig BEFORE UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
 BEGIN;
-UPDATE shorty SET id = id - 1;
-WARNING:  trigger BEFORE UPDATE OLD row: id = 1, c = fixed chau
-WARNING:  trigger BEFORE UPDATE NEW row: id = 0, c = fixed chau
-WARNING:  trigger BEFORE UPDATE OLD row: id = 3, c = ab    
-WARNING:  trigger BEFORE UPDATE NEW row: id = 2, c = ab    
+UPDATE shorty SET id = id + 1 WHERE id = 4;
 WARNING:  trigger BEFORE UPDATE OLD row: id = 4, c = short     
-WARNING:  trigger BEFORE UPDATE NEW row: id = 3, c = short     
+WARNING:  trigger BEFORE UPDATE NEW row: id = 5, c = short     
 ROLLBACK;
 -- test AFTER trigger
 DROP TRIGGER shorttrig ON shorty;
 CREATE TRIGGER shorttrig AFTER UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
 BEGIN;
-UPDATE shorty SET id = id - 1;
-WARNING:  trigger AFTER UPDATE OLD row: id = 1, c = fixed chau
-WARNING:  trigger AFTER UPDATE NEW row: id = 0, c = fixed chau
-WARNING:  trigger AFTER UPDATE OLD row: id = 3, c = ab    
-WARNING:  trigger AFTER UPDATE NEW row: id = 2, c = ab    
+UPDATE shorty SET id = id + 1 WHERE id = 4;
 WARNING:  trigger AFTER UPDATE OLD row: id = 4, c = short     
-WARNING:  trigger AFTER UPDATE NEW row: id = 3, c = short     
+WARNING:  trigger AFTER UPDATE NEW row: id = 5, c = short     
 ROLLBACK;

@@ -165,6 +165,11 @@ COMMIT;
 SELECT id, c FROM typetest1 ORDER BY id;
 -- try to update the nonexistant column (should cause an error)
 UPDATE longy SET x = NULL WHERE id = 1;
+-- check that UPDATES work with "date" in Oracle and "timestamp" in PostgreSQL
+BEGIN;
+ALTER FOREIGN TABLE typetest1 ALTER COLUMN d TYPE timestamp(0) without time zone;
+UPDATE typetest1 SET d = '1968-10-10 12:00:00' WHERE id = 1 RETURNING d;
+ROLLBACK;
 
 /*
  * Test EXPLAIN support.
@@ -234,12 +239,12 @@ END;$$;
 -- test BEFORE trigger
 CREATE TRIGGER shorttrig BEFORE UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
 BEGIN;
-UPDATE shorty SET id = id - 1;
+UPDATE shorty SET id = id + 1 WHERE id = 4;
 ROLLBACK;
 
 -- test AFTER trigger
 DROP TRIGGER shorttrig ON shorty;
 CREATE TRIGGER shorttrig AFTER UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
 BEGIN;
-UPDATE shorty SET id = id - 1;
+UPDATE shorty SET id = id + 1 WHERE id = 4;
 ROLLBACK;
