@@ -202,6 +202,8 @@ struct OracleFdwState {
 	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
 	MemoryContext temp_cxt;        /* short-lived memory for data modification */
+/* for sort-pushdown */
+	List *usable_pathkeys; 
 	unsigned int prefetch;         /* number of rows to prefetch */
 };
 
@@ -263,7 +265,7 @@ static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid server
  */
 static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs, double *sample_percent);
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses);
+static char *createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses, List *usable_pathkeys);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
@@ -298,6 +300,11 @@ static void errorContextCallback(void *arg);
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase);
 #endif  /* IMPORT_API */
+
+
+static void appendOrderByClause(StringInfo buf, RelOptInfo *baserel, List *pathkeys, oracleSession *session, struct oraTable *oraTable, List **params);
+static Expr * find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
+
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -698,7 +705,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
+	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses), usable_pathkeys);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -764,6 +771,8 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	int i;
 	double ntuples = -1;
 	Relation rel;
+    ListCell   *lc;
+    List       *usable_pathkeys = NIL;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
@@ -815,9 +824,48 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 				fdwState->oraTable->cols[i]->used = 1;
 	}
 
+    /*
+     * Determine whether we can potentially push query pathkeys to the remote
+     * side, avoiding a local sort.
+     */
+    foreach(lc, root->query_pathkeys)
+    {
+        PathKey    *pathkey = (PathKey *) lfirst(lc);
+        EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
+        Expr       *em_expr;
+        char *sort_clause;
+//        bool first_sortkey = true;
+
+        /*
+         * getOracleWhereClause would detect volatile expressions as well, but
+         * ec_has_volatile saves some cycles.
+         */
+        if (!pathkey_ec->ec_has_volatile &&
+            (em_expr = find_em_expr_for_rel(pathkey_ec, baserel)) &&
+            (sort_clause = getOracleWhereClause(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params)))){
+
+            usable_pathkeys = lappend(usable_pathkeys, pathkey);
+            fdwState->usable_pathkeys = usable_pathkeys;
+        }
+        else
+        {
+            /*
+             * The planner and executor don't have any clever strategy for
+             * taking data sorted by a prefix of the query's pathkeys and
+             * getting it to be sorted by all of those pathekeys.  We'll just
+             * end up resorting the entire data set.  So, unless we can push
+             * down all of the query pathkeys, forget it.
+             */
+            list_free(usable_pathkeys);
+            usable_pathkeys = NIL;
+            break;
+        }
+    }
+
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, for_update, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses));
-	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+	fdwState->query = createQuery(fdwState->session, baserel, for_update, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses), usable_pathkeys);
+
+elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
 	for (i=0; i<fdwState->oraTable->ncols; ++i)
@@ -896,24 +944,44 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 
-	add_path(baserel,
-		(Path *)create_foreignscan_path(
-					root,
-					baserel,
+	ForeignPath *path;
+
+	if( fdwState->usable_pathkeys == NULL) {
+		path = create_foreignscan_path(root,
+						baserel,
+						NULL,
+						baserel->rows,
+						fdwState->startup_cost,
+						fdwState->total_cost,
+						NIL, /* no pathkeys */
+						NULL, /*no outer rel either */
+						NULL,  /* no extra plan */
+						NIL); /* no fdw_private list */
+		add_path(baserel, (Path *) path);
+	}
+	else
+	{
+	/* Create a path with useful pathkeys. */
+		/* TODO estimate cost */
+		add_path(baserel,
+			(Path *)create_foreignscan_path(
+						root,
+						baserel,
 #if PG_VERSION_NUM >= 90600
-					NULL,  /* default pathtarget */
+						NULL,  /* default pathtarget */
 #endif  /* PG_VERSION_NUM */
-					baserel->rows,
-					fdwState->startup_cost,
-					fdwState->total_cost,
-					NIL,
-					NULL,
+						baserel->rows,
+						fdwState->startup_cost,
+						fdwState->total_cost,
+						fdwState->usable_pathkeys,
+						NULL,
 #if PG_VERSION_NUM >= 90500
-					NULL,  /* no extra plan */
+						NULL,  /* no extra plan */
 #endif  /* PG_VERSION_NUM */
-					NIL
+						NIL
 				)
-	);
+		);
+	}
 }
 
 /*
@@ -2381,7 +2449,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		As a side effect, we also mark the used columns in oraTable.
  */
 char
-*createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses)
+*createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses, List *usable_pathkeys)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
@@ -2463,6 +2531,11 @@ char
 		else
 			(*pushdown_clauses)[++clause_count] = false;
 	}
+
+    /* Append Order By clause if usable_pathkeys is not NIL */
+    if(usable_pathkeys != NIL){
+        appendOrderByClause(&query, foreignrel, usable_pathkeys, session, oraTable, params);
+    }
 
 	/* append FOR UPDATE if if the scan is for a modification */
 	if (modify)
@@ -5373,3 +5446,77 @@ oracleDebug2(const char *message)
 {
 	elog(DEBUG2, "%s", message);
 }
+
+
+/*
+ * Deparse ORDER BY clause according to the given pathkeys for given base
+ * relation. From given pathkeys expressions belonging entirely to the given
+ * base relation are obtained and deparsed.
+ */
+static void
+appendOrderByClause(StringInfo buf, RelOptInfo *baserel,
+					List *pathkeys, oracleSession *session, struct oraTable *oraTable, List **params)
+{
+	ListCell			*lcell;
+	char				*delim = " ";
+	char				*expr;
+
+	appendStringInfo(buf, " ORDER BY");
+	foreach(lcell, pathkeys)
+	{
+		PathKey				*pathkey = lfirst(lcell);
+		Expr				*em_expr;
+
+		em_expr = find_em_expr_for_rel(pathkey->pk_eclass, baserel);
+		Assert(em_expr != NULL);
+
+		expr = getOracleWhereClause(session, baserel, em_expr, oraTable, params);
+
+		if (expr) {
+			appendStringInfoString(buf, delim);
+			appendStringInfoString(buf, expr);
+			if (pathkey->pk_strategy == BTLessStrategyNumber)
+				appendStringInfoString(buf, " ASC");
+			else
+				appendStringInfoString(buf, " DESC");
+
+/* When sending ORDER BY, always include NULLS FIRST/LAST.*/
+			if (pathkey->pk_nulls_first)
+				appendStringInfoString(buf, " NULLS FIRST");
+            else
+                appendStringInfoString(buf, " NULLS LAST");
+
+			delim = ", ";
+		}
+	}
+}
+
+/*
+ * Find an equivalence class member expression, all of whose Vars, come from
+ * the indicated relation.
+ */
+static Expr *
+find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
+{
+	ListCell   *lc_em;
+
+	foreach(lc_em, ec->ec_members)
+	{
+		EquivalenceMember *em = lfirst(lc_em);
+
+		if (bms_equal(em->em_relids, rel->relids))
+		{
+			/*
+			 * If there is more than one equivalence member whose Vars are
+			 * taken entirely from this relation, we'll be content to choose
+			 * any one of those.
+			 */
+			return em->em_expr;
+		}
+	}
+
+	/* We didn't find any suitable equivalence class expression */
+	return NULL;
+}
+
+
