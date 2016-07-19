@@ -3,9 +3,12 @@ Version 1.5.0
   - Add table option "sample_percent" to ANALYZE very large tables
     This can speed up ANALYZE significantly.
     Idea by PAscal Lemoy.
-  - Introduce a table option "prefetch" for the Oracle row prefetch count.
+  - Introduce a table option "prefetch" for the Oracle row prefetch count
     This can speed up foreign table scans.
     Per discussion with by PAscal Lemoy and Maurizio De Giorgi.
+  - Push down arbitrary IN and NOT IN expressions
+    Up to now, only lists with constants were considered.
+    Per request from Volkmar Bühringer.
 
   Bugfixes:
   - Fix errors with now() and date/timestamp parameters in queries

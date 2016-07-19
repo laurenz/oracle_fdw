@@ -187,6 +187,25 @@ UPDATE typetest1 SET d = '1968-10-10 12:00:00' WHERE id = 1 RETURNING d;
 (1 row)
 
 ROLLBACK;
+-- test if "IN" or "= ANY" expressions are pushed down correctly
+SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
+ id 
+----
+  1
+  4
+(2 rows)
+
+EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id
+   InitPlan 1 (returns $0)
+     ->  Result
+   ->  Foreign Scan on typetest1
+         Oracle query: SELECT /*4159dbca2b3b28328e31550d16f121e2*/ "ID", "VC" FROM "TYPETEST1" WHERE ("VC" IN ('short', :p1))
+(6 rows)
+
 /*
  * Test EXPLAIN support.
  */

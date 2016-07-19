@@ -2706,6 +2706,9 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 	Param *param;
 	Var *variable;
 	FuncExpr *func;
+	Expr *rightexpr;
+	ArrayExpr *array;
+	ArrayCoerceExpr *arraycoerce;
 	regproc typoutput;
 	HeapTuple tuple;
 	ListCell *cell;
@@ -3056,49 +3059,95 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (left == NULL)
 				return NULL;
 
-			/* only push down IN expressions with constant second (=last) argument */
-			if (((Expr *)llast(arrayoper->args))->type != T_Const)
-				return NULL;
-
 			/* begin to compose result */
 			initStringInfo(&result);
 			appendStringInfo(&result, "(%s %s (", left, arrayoper->useOr ? "IN" : "NOT IN");
 
-			/* the second (=last) argument must be a Const of ArrayType */
-			constant = (Const *)llast(arrayoper->args);
-
-			/* using NULL in place of an array or value list is valid in Oracle and PostgreSQL */
-			if (constant->constisnull)
-				appendStringInfo(&result, "NULL");
-			else
+			/* the second (=last) argument can be Const, ArrayExpr or ArrayCoerceExpr */
+			rightexpr = (Expr *)llast(arrayoper->args);
+			switch (rightexpr->type)
 			{
-				/* loop through the array elements */
-				iterator = array_create_iterator(DatumGetArrayTypeP(constant->constvalue), 0);
-				first_arg = true;
-				while (array_iterate(iterator, &datum, &isNull))
-				{
-					char *c;
+				case T_Const:
+					/* the second (=last) argument is a Const of ArrayType */
+					constant = (Const *)rightexpr;
 
-					if (isNull)
-						c = "NULL";
+					/* using NULL in place of an array or value list is valid in Oracle and PostgreSQL */
+					if (constant->constisnull)
+						appendStringInfo(&result, "NULL");
 					else
 					{
-						c = datumToString(datum, leftargtype);
-						if (c == NULL)
+						/* loop through the array elements */
+						iterator = array_create_iterator(DatumGetArrayTypeP(constant->constvalue), 0);
+						first_arg = true;
+						while (array_iterate(iterator, &datum, &isNull))
 						{
-							array_free_iterator(iterator);
-							return NULL;
+							char *c;
+
+							if (isNull)
+								c = "NULL";
+							else
+							{
+								c = datumToString(datum, leftargtype);
+								if (c == NULL)
+								{
+									array_free_iterator(iterator);
+									return NULL;
+								}
+							}
+
+							/* append the argument */
+							appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", c);
+							first_arg = false;
 						}
+						array_free_iterator(iterator);
+
+						/* don't push down empty arrays, since the semantics for NOT x = ANY(<empty array>) differ */
+						if (first_arg)
+							return NULL;
 					}
 
-					/* append the argument */
-					appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", c);
-					first_arg = false;
-				}
-				array_free_iterator(iterator);
+					break;
 
-				/* don't push down empty arrays, since the semantics for NOT x = ANY(<empty array>) differ */
-				if (first_arg)
+				case T_ArrayCoerceExpr:
+					/* the second (=last) argument is an ArrayCoerceExpr */
+					arraycoerce = (ArrayCoerceExpr *)rightexpr;
+
+					/* if the conversion requires a function, don't push it down */
+					if (arraycoerce->elemfuncid != InvalidOid)
+						return NULL;
+
+					/* the actual array is here */
+					rightexpr = arraycoerce->arg;
+
+					/* fall through ! */
+
+				case T_ArrayExpr:
+					/* the second (=last) argument is an ArrayExpr */
+					array = (ArrayExpr *)rightexpr;
+
+					/* loop the array arguments */
+					first_arg = true;
+					foreach(cell, array->elements)
+					{
+						/* convert the argument to a string */
+						char *element = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+
+						/* if any element cannot be converted, give up */
+						if (element == NULL)
+							return NULL;
+
+						/* append the argument */
+						appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", element);
+						first_arg = false;
+					}
+
+					/* don't push down empty arrays, since the semantics for NOT x = ANY(<empty array>) differ */
+					if (first_arg)
+						return NULL;
+
+					break;
+
+				default:
 					return NULL;
 			}
 
