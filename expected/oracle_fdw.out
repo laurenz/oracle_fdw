@@ -359,6 +359,19 @@ EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY nvc;
    Oracle plan:     TABLE ACCESS FULL TYPETEST1
 (6 rows)
 
+EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY lc;
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+   Sort Key: typetest1.lc
+   ->  Foreign Scan on public.typetest1
+         Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+         Oracle query: SELECT /*3c5d536e25c7d7f6297539601175c2ff*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1"
+         Oracle plan: SELECT STATEMENT
+         Oracle plan:   TABLE ACCESS FULL TYPETEST1
+(8 rows)
+
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY r;
                                                                                           QUERY PLAN                                                                                          
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -378,6 +391,45 @@ EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY u;
  Sort
    Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
    Sort Key: typetest1.u
+   ->  Foreign Scan on public.typetest1
+         Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+         Oracle query: SELECT /*3c5d536e25c7d7f6297539601175c2ff*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1"
+         Oracle plan: SELECT STATEMENT
+         Oracle plan:   TABLE ACCESS FULL TYPETEST1
+(8 rows)
+
+EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY lb;
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+   Sort Key: typetest1.lb
+   ->  Foreign Scan on public.typetest1
+         Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+         Oracle query: SELECT /*3c5d536e25c7d7f6297539601175c2ff*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1"
+         Oracle plan: SELECT STATEMENT
+         Oracle plan:   TABLE ACCESS FULL TYPETEST1
+(8 rows)
+
+EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY lr;
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+   Sort Key: typetest1.lr
+   ->  Foreign Scan on public.typetest1
+         Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+         Oracle query: SELECT /*3c5d536e25c7d7f6297539601175c2ff*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1"
+         Oracle plan: SELECT STATEMENT
+         Oracle plan:   TABLE ACCESS FULL TYPETEST1
+(8 rows)
+
+EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM typetest1 ORDER BY b;
+                                                                                          QUERY PLAN                                                                                          
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
+   Sort Key: typetest1.b
    ->  Foreign Scan on public.typetest1
          Output: id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym
          Oracle query: SELECT /*3c5d536e25c7d7f6297539601175c2ff*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1"

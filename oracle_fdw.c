@@ -202,8 +202,7 @@ struct OracleFdwState {
 	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
 	MemoryContext temp_cxt;        /* short-lived memory for data modification */
-/* for sort-pushdown */
-	List *usable_pathkeys; 
+	List *usable_pathkeys;         /* for sort-pushdown */
 	unsigned int prefetch;         /* number of rows to prefetch */
 };
 
@@ -265,12 +264,12 @@ static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid server
  */
 static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs, double *sample_percent);
 static void oracleGetOptions(Oid foreigntableid, List **options);
-static char *createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses, List *usable_pathkeys);
+static char *createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool modify, List *query_pathkeys);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 #endif  /* OLD_FDW_API */
-static char *getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
+static char *getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool isSort);
 static char *datumToString(Datum datum, Oid type);
 static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
@@ -302,7 +301,6 @@ static char *fold_case(char *name, fold_t foldcase);
 #endif  /* IMPORT_API */
 
 
-static void appendOrderByClause(StringInfo buf, RelOptInfo *baserel, List *pathkeys, oracleSession *session, struct oraTable *oraTable, List **params);
 static Expr * find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
 
 
@@ -705,7 +703,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses), usable_pathkeys);
+	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses), NIL);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -771,8 +769,6 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	int i;
 	double ntuples = -1;
 	Relation rel;
-    ListCell   *lc;
-    List       *usable_pathkeys = NIL;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
@@ -824,48 +820,9 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 				fdwState->oraTable->cols[i]->used = 1;
 	}
 
-    /*
-     * Determine whether we can potentially push query pathkeys to the remote
-     * side, avoiding a local sort.
-     */
-    foreach(lc, root->query_pathkeys)
-    {
-        PathKey    *pathkey = (PathKey *) lfirst(lc);
-        EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
-        Expr       *em_expr;
-        char *sort_clause;
-//        bool first_sortkey = true;
-
-        /*
-         * getOracleWhereClause would detect volatile expressions as well, but
-         * ec_has_volatile saves some cycles.
-         */
-        if (!pathkey_ec->ec_has_volatile &&
-            (em_expr = find_em_expr_for_rel(pathkey_ec, baserel)) &&
-            (sort_clause = getOracleWhereClause(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params)))){
-
-            usable_pathkeys = lappend(usable_pathkeys, pathkey);
-            fdwState->usable_pathkeys = usable_pathkeys;
-        }
-        else
-        {
-            /*
-             * The planner and executor don't have any clever strategy for
-             * taking data sorted by a prefix of the query's pathkeys and
-             * getting it to be sorted by all of those pathekeys.  We'll just
-             * end up resorting the entire data set.  So, unless we can push
-             * down all of the query pathkeys, forget it.
-             */
-            list_free(usable_pathkeys);
-            usable_pathkeys = NIL;
-            break;
-        }
-    }
-
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, for_update, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses), usable_pathkeys);
-
-elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+	fdwState->query = createQuery(fdwState, baserel, for_update, root->query_pathkeys);
+	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
 	for (i=0; i<fdwState->oraTable->ncols; ++i)
@@ -944,44 +901,26 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 
-	ForeignPath *path;
-
-	if( fdwState->usable_pathkeys == NULL) {
-		path = create_foreignscan_path(root,
-						baserel,
-						NULL,
-						baserel->rows,
-						fdwState->startup_cost,
-						fdwState->total_cost,
-						NIL, /* no pathkeys */
-						NULL, /*no outer rel either */
-						NULL,  /* no extra plan */
-						NIL); /* no fdw_private list */
-		add_path(baserel, (Path *) path);
-	}
-	else
-	{
 	/* Create a path with useful pathkeys. */
-		/* TODO estimate cost */
-		add_path(baserel,
-			(Path *)create_foreignscan_path(
-						root,
-						baserel,
+	/* TODO estimate cost */
+	add_path(baserel,
+		(Path *)create_foreignscan_path(
+					root,
+					baserel,
 #if PG_VERSION_NUM >= 90600
-						NULL,  /* default pathtarget */
+					NULL,  /* default pathtarget */
 #endif  /* PG_VERSION_NUM */
-						baserel->rows,
-						fdwState->startup_cost,
-						fdwState->total_cost,
-						fdwState->usable_pathkeys,
-						NULL,
+					baserel->rows,
+					fdwState->startup_cost,
+					fdwState->total_cost,
+					fdwState->usable_pathkeys,
+					NULL,
 #if PG_VERSION_NUM >= 90500
-						NULL,  /* no extra plan */
+					NULL,  /* no extra plan */
 #endif  /* PG_VERSION_NUM */
-						NIL
-				)
-		);
-	}
+					NIL
+			)
+	);
 }
 
 /*
@@ -2256,6 +2195,7 @@ struct OracleFdwState
 	fdwState->paramList = NULL;
 	fdwState->pushdown_clauses = NULL;
 	fdwState->temp_cxt = NULL;
+	fdwState->usable_pathkeys = NIL;
 
 	/*
 	 * Get all relevant options from the foreign table, the user mapping,
@@ -2449,7 +2389,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * 		As a side effect, we also mark the used columns in oraTable.
  */
 char
-*createQuery(oracleSession *session, RelOptInfo *foreignrel, bool modify, struct oraTable *oraTable, List **params, bool **pushdown_clauses, List *usable_pathkeys)
+*createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool modify, List *query_pathkeys)
 {
 	ListCell *cell;
 	bool first_col = true, in_quote = false;
@@ -2458,6 +2398,9 @@ char
 	StringInfoData query, result;
 	List *columnlist,
 		*conditions = foreignrel->baserestrictinfo;
+	List *usable_pathkeys = NIL;
+	char *delim = " ";
+	StringInfoData orderedquery;
 
 #if PG_VERSION_NUM < 90600
 	columnlist = foreignrel->reltargetlist;
@@ -2470,41 +2413,41 @@ char
 	/* examine each SELECT list entry for Var nodes */
 	foreach(cell, columnlist)
 	{
-		getUsedColumns((Expr *)lfirst(cell), oraTable);
+		getUsedColumns((Expr *)lfirst(cell), fdwState->oraTable);
 	}
 
 	/* examine each condition for Var nodes */
 	foreach(cell, conditions)
 	{
-		getUsedColumns((Expr *)lfirst(cell), oraTable);
+		getUsedColumns((Expr *)lfirst(cell), fdwState->oraTable);
 	}
 
 	/* construct SELECT list */
 	initStringInfo(&query);
-	for (i=0; i<oraTable->ncols; ++i)
+	for (i=0; i<fdwState->oraTable->ncols; ++i)
 	{
-		if (oraTable->cols[i]->used)
+		if (fdwState->oraTable->cols[i]->used)
 		{
 			if (first_col)
 			{
 				first_col = false;
-				appendStringInfo(&query, "%s", oraTable->cols[i]->name);
+				appendStringInfo(&query, "%s", fdwState->oraTable->cols[i]->name);
 			}
 			else
 			{
-				appendStringInfo(&query, ", %s", oraTable->cols[i]->name);
+				appendStringInfo(&query, ", %s", fdwState->oraTable->cols[i]->name);
 			}
 		}
 	}
 	/* dummy column if there is no result column we need from Oracle */
 	if (first_col)
 		appendStringInfo(&query, "'1'");
-	appendStringInfo(&query, " FROM %s", oraTable->name);
+	appendStringInfo(&query, " FROM %s", fdwState->oraTable->name);
 
 	/* allocate enough space for pushdown_clauses */
 	if (conditions != NIL)
 	{
-		*pushdown_clauses = (bool *)palloc(sizeof(bool) * list_length(conditions));
+		fdwState->pushdown_clauses = (bool *)palloc(sizeof(bool) * list_length(conditions));
 	}
 
 	/* append WHERE clauses */
@@ -2512,7 +2455,7 @@ char
 	foreach(cell, conditions)
 	{
 		/* try to convert each condition to Oracle SQL */
-		where = getOracleWhereClause(session, foreignrel, ((RestrictInfo *)lfirst(cell))->clause, oraTable, params);
+		where = getOracleWhereClause(fdwState->session, foreignrel, ((RestrictInfo *)lfirst(cell))->clause, fdwState->oraTable, &(fdwState->params), false);
 		if (where != NULL) {
 			/* append new WHERE clause to query string */
 			if (first_col)
@@ -2526,16 +2469,72 @@ char
 			}
 			pfree(where);
 
-			(*pushdown_clauses)[++clause_count] = true;
+			fdwState->pushdown_clauses[++clause_count] = true;
 		}
 		else
-			(*pushdown_clauses)[++clause_count] = false;
+			fdwState->pushdown_clauses[++clause_count] = false;
 	}
 
-    /* Append Order By clause if usable_pathkeys is not NIL */
-    if(usable_pathkeys != NIL){
-        appendOrderByClause(&query, foreignrel, usable_pathkeys, session, oraTable, params);
-    }
+	/* Append Order By clause */
+	initStringInfo(&orderedquery);
+
+	appendStringInfo(&orderedquery, " ORDER BY");
+
+	/*
+	 * Determine whether we can potentially push query pathkeys to the remote
+	 * side, avoiding a local sort.
+	 */
+	foreach(cell, query_pathkeys)
+	{
+		PathKey *pathkey = (PathKey *) lfirst(cell);
+		EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
+		Expr *em_expr;
+		char *sort_clause;
+
+		/*
+		 * getOracleWhereClause would detect volatile expressions as well, but
+		 * ec_has_volatile saves some cycles.
+		 */
+		if (!pathkey_ec->ec_has_volatile &&
+			(em_expr = find_em_expr_for_rel(pathkey_ec, foreignrel)) &&
+			(sort_clause = getOracleWhereClause(fdwState->session, foreignrel, em_expr, fdwState->oraTable, &(fdwState->params), true))){
+	elog(DEBUG1, "sort_clause: %s\n", sort_clause);
+
+			usable_pathkeys = lappend(usable_pathkeys, pathkey);
+
+			appendStringInfoString(&orderedquery, delim);
+			appendStringInfoString(&orderedquery, sort_clause);
+
+			if (pathkey->pk_strategy == BTLessStrategyNumber)
+				appendStringInfoString(&orderedquery, " ASC");
+			else
+				appendStringInfoString(&orderedquery, " DESC");
+
+			if (pathkey->pk_nulls_first)
+				appendStringInfoString(&orderedquery, " NULLS FIRST");
+			else
+				appendStringInfoString(&orderedquery, " NULLS LAST");
+
+				delim = ", ";
+		}
+		else
+		{
+			/*
+			 * The planner and executor don't have any clever strategy for
+			 * taking data sorted by a prefix of the query's pathkeys and
+			 * getting it to be sorted by all of those pathekeys.  We'll just
+			 * end up resorting the entire data set.  So, unless we can push
+			 * down all of the query pathkeys, forget it.
+			 */
+			list_free(usable_pathkeys);
+			usable_pathkeys = NIL;
+			break;
+		}
+	}
+	if(usable_pathkeys != NIL){
+		fdwState->usable_pathkeys = usable_pathkeys;
+		appendStringInfoString(&query, orderedquery.data);
+	}
 
 	/* append FOR UPDATE if if the scan is for a modification */
 	if (modify)
@@ -2553,7 +2552,7 @@ char
 
 	/* remove all parameters that do not actually occur in the query */
 	index = 0;
-	foreach(cell, *params)
+	foreach(cell, fdwState->params)
 	{
 		++index;
 		snprintf(parname, 10, ":p%d", index);
@@ -2766,7 +2765,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
  * 		will be stored in paramList.
  */
 char *
-getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
+getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool isSort)
 {
 	char *opername, *left, *right, *arg, oprkind, parname[10];
 	Const *constant;
@@ -2884,21 +2883,34 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					break;
 				}
 
-				/*
-				 * Don't try to convert a column reference if the type is
-				 * converted from a non-string type in Oracle to a string type
-				 * in PostgreSQL because functions and operators won't work the same.
-				 */
 				oratype = oraTable->cols[index]->oratype;
-				if ((variable->vartype == TEXTOID
-						|| variable->vartype == BPCHAROID
-						|| variable->vartype == VARCHAROID)
-						&& oratype != ORA_TYPE_VARCHAR2
-						&& oratype != ORA_TYPE_CHAR
-						&& oratype != ORA_TYPE_NVARCHAR2
-						&& oratype != ORA_TYPE_NCHAR
-						&& oratype != ORA_TYPE_CLOB)
-					return NULL;
+				if(!isSort){
+					/*
+					 * Don't try to convert a column reference if the type is
+					 * converted from a non-string type in Oracle to a string type
+					 * in PostgreSQL because functions and operators won't work the same.
+					 */
+					if ((variable->vartype == TEXTOID
+							|| variable->vartype == BPCHAROID
+							|| variable->vartype == VARCHAROID)
+							&& oratype != ORA_TYPE_VARCHAR2
+							&& oratype != ORA_TYPE_CHAR
+							&& oratype != ORA_TYPE_NVARCHAR2
+							&& oratype != ORA_TYPE_NCHAR
+							&& oratype != ORA_TYPE_CLOB)
+						return NULL;
+				}
+				else
+				{
+					/*
+					 * if getOracleWhereClause is called from createQuery for sort-pushdown,
+					 * check oratype and vartype whether can sort-pushdown.
+					 * BOOLOID and ORA_TYPE_CLOB can not sort-pushdown, therefore return NULL.
+					 */
+					if(variable->vartype == BOOLOID
+							|| oratype == ORA_TYPE_CLOB)
+						return NULL;
+				}
 
 				initStringInfo(&result);
 
@@ -3006,7 +3018,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				left = getOracleWhereClause(session, foreignrel, linitial(oper->args), oraTable, params);
+				left = getOracleWhereClause(session, foreignrel, linitial(oper->args), oraTable, params, isSort);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -3016,7 +3028,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					right = getOracleWhereClause(session, foreignrel, lsecond(oper->args), oraTable, params);
+					right = getOracleWhereClause(session, foreignrel, lsecond(oper->args), oraTable, params, isSort);
 					if (right == NULL)
 					{
 						pfree(left);
@@ -3125,7 +3137,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(leftargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(arrayoper->args), oraTable, params);
+			left = getOracleWhereClause(session, foreignrel, linitial(arrayoper->args), oraTable, params, isSort);
 			if (left == NULL)
 				return NULL;
 
@@ -3192,12 +3204,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params);
+			left = getOracleWhereClause(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params, isSort);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
+			right = getOracleWhereClause(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params, isSort);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -3221,12 +3233,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params);
+			left = getOracleWhereClause(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params, isSort);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
+			right = getOracleWhereClause(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params, isSort);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -3240,7 +3252,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			arg = getOracleWhereClause(session, foreignrel, linitial(boolexpr->args), oraTable, params);
+			arg = getOracleWhereClause(session, foreignrel, linitial(boolexpr->args), oraTable, params, isSort);
 			if (arg == NULL)
 				return NULL;
 
@@ -3251,7 +3263,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			for_each_cell(cell, lnext(list_head(boolexpr->args)))
 			{
-				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params, isSort);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3266,10 +3278,10 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			break;
 		case T_RelabelType:
-			return getOracleWhereClause(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params);
+			return getOracleWhereClause(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params, isSort);
 			break;
 		case T_CoerceToDomain:
-			return getOracleWhereClause(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params);
+			return getOracleWhereClause(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params, isSort);
 			break;
 		case T_CaseExpr:
 			caseexpr = (CaseExpr *)expr;
@@ -3283,7 +3295,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* for the form "CASE arg WHEN ...", add first expression */
 			if (caseexpr->arg != NULL)
 			{
-				arg = getOracleWhereClause(session, foreignrel, caseexpr->arg, oraTable, params);
+				arg = getOracleWhereClause(session, foreignrel, caseexpr->arg, oraTable, params, isSort);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3304,12 +3316,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (caseexpr->arg == NULL)
 				{
 					/* for CASE WHEN ..., use the whole expression */
-					arg = getOracleWhereClause(session, foreignrel, whenclause->expr, oraTable, params);
+					arg = getOracleWhereClause(session, foreignrel, whenclause->expr, oraTable, params, isSort);
 				}
 				else
 				{
 					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					arg = getOracleWhereClause(session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
+					arg = getOracleWhereClause(session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params, isSort);
 				}
 
 				if (arg == NULL)
@@ -3324,7 +3336,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				}
 
 				/* THEN */
-				arg = getOracleWhereClause(session, foreignrel, whenclause->result, oraTable, params);
+				arg = getOracleWhereClause(session, foreignrel, whenclause->result, oraTable, params, isSort);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3340,7 +3352,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				arg = getOracleWhereClause(session, foreignrel, caseexpr->defresult, oraTable, params);
+				arg = getOracleWhereClause(session, foreignrel, caseexpr->defresult, oraTable, params, isSort);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3368,7 +3380,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			first_arg = true;
 			foreach(cell, coalesceexpr->args)
 			{
-				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params, isSort);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3391,7 +3403,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			break;
 		case T_NullTest:
-			arg = getOracleWhereClause(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params);
+			arg = getOracleWhereClause(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params, isSort);
 			if (arg == NULL)
 				return NULL;
 
@@ -3408,7 +3420,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
-				return getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params);
+				return getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params, isSort);
 
 			/* get function name and schema */
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->funcid));
@@ -3488,7 +3500,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				first_arg = true;
 				foreach(cell, func->args)
 				{
-					arg = getOracleWhereClause(session, foreignrel, lfirst(cell), oraTable, params);
+					arg = getOracleWhereClause(session, foreignrel, lfirst(cell), oraTable, params, isSort);
 					if (arg == NULL)
 					{
 						pfree(result.data);
@@ -3513,7 +3525,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				left = getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params);
+				left = getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params, isSort);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -3533,7 +3545,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					right = getOracleWhereClause(session, foreignrel, lsecond(func->args), oraTable, params);
+					right = getOracleWhereClause(session, foreignrel, lsecond(func->args), oraTable, params, isSort);
 					if (right == NULL)
 					{
 						pfree(opername);
@@ -5445,50 +5457,6 @@ void
 oracleDebug2(const char *message)
 {
 	elog(DEBUG2, "%s", message);
-}
-
-
-/*
- * Deparse ORDER BY clause according to the given pathkeys for given base
- * relation. From given pathkeys expressions belonging entirely to the given
- * base relation are obtained and deparsed.
- */
-static void
-appendOrderByClause(StringInfo buf, RelOptInfo *baserel,
-					List *pathkeys, oracleSession *session, struct oraTable *oraTable, List **params)
-{
-	ListCell			*lcell;
-	char				*delim = " ";
-	char				*expr;
-
-	appendStringInfo(buf, " ORDER BY");
-	foreach(lcell, pathkeys)
-	{
-		PathKey				*pathkey = lfirst(lcell);
-		Expr				*em_expr;
-
-		em_expr = find_em_expr_for_rel(pathkey->pk_eclass, baserel);
-		Assert(em_expr != NULL);
-
-		expr = getOracleWhereClause(session, baserel, em_expr, oraTable, params);
-
-		if (expr) {
-			appendStringInfoString(buf, delim);
-			appendStringInfoString(buf, expr);
-			if (pathkey->pk_strategy == BTLessStrategyNumber)
-				appendStringInfoString(buf, " ASC");
-			else
-				appendStringInfoString(buf, " DESC");
-
-/* When sending ORDER BY, always include NULLS FIRST/LAST.*/
-			if (pathkey->pk_nulls_first)
-				appendStringInfoString(buf, " NULLS FIRST");
-            else
-                appendStringInfoString(buf, " NULLS LAST");
-
-			delim = ", ";
-		}
-	}
 }
 
 /*
