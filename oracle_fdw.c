@@ -268,10 +268,10 @@ static char *createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
+static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 #endif  /* OLD_FDW_API */
 static char *getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool isSort);
 static char *datumToString(Datum datum, Oid type);
-static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
 static char *guessNlsLang(char *nls_lang);
@@ -299,10 +299,7 @@ static void errorContextCallback(void *arg);
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase);
 #endif  /* IMPORT_API */
-
-
-static Expr * find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
-
+static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -703,7 +700,7 @@ oraclePlanForeignScan(Oid foreigntableid,
 	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState->session, baserel, false, fdwState->oraTable, &(fdwState->params), &(fdwState->pushdown_clauses), NIL);
+	fdwState->query = createQuery(fdwState, baserel, false, NIL);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
@@ -901,8 +898,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 
-	/* Create a path with useful pathkeys. */
-	/* TODO estimate cost */
+	/* add the only path */
 	add_path(baserel,
 		(Path *)create_foreignscan_path(
 					root,
@@ -2398,7 +2394,6 @@ char
 	StringInfoData query, result;
 	List *columnlist,
 		*conditions = foreignrel->baserestrictinfo;
-	List *usable_pathkeys = NIL;
 	char *delim = " ";
 	StringInfoData orderedquery;
 
@@ -2475,9 +2470,8 @@ char
 			fdwState->pushdown_clauses[++clause_count] = false;
 	}
 
-	/* Append Order By clause */
+	/* construct ORDER BY clause */
 	initStringInfo(&orderedquery);
-
 	appendStringInfo(&orderedquery, " ORDER BY");
 
 	/*
@@ -2486,7 +2480,7 @@ char
 	 */
 	foreach(cell, query_pathkeys)
 	{
-		PathKey *pathkey = (PathKey *) lfirst(cell);
+		PathKey *pathkey = (PathKey *)lfirst(cell);
 		EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
 		Expr *em_expr;
 		char *sort_clause;
@@ -2498,12 +2492,12 @@ char
 		if (!pathkey_ec->ec_has_volatile &&
 			(em_expr = find_em_expr_for_rel(pathkey_ec, foreignrel)) &&
 			(sort_clause = getOracleWhereClause(fdwState->session, foreignrel, em_expr, fdwState->oraTable, &(fdwState->params), true))){
-	elog(DEBUG1, "sort_clause: %s\n", sort_clause);
 
-			usable_pathkeys = lappend(usable_pathkeys, pathkey);
+			fdwState->usable_pathkeys = lappend(fdwState->usable_pathkeys, pathkey);
 
 			appendStringInfoString(&orderedquery, delim);
 			appendStringInfoString(&orderedquery, sort_clause);
+			delim = ", ";
 
 			if (pathkey->pk_strategy == BTLessStrategyNumber)
 				appendStringInfoString(&orderedquery, " ASC");
@@ -2515,7 +2509,6 @@ char
 			else
 				appendStringInfoString(&orderedquery, " NULLS LAST");
 
-				delim = ", ";
 		}
 		else
 		{
@@ -2526,15 +2519,15 @@ char
 			 * end up resorting the entire data set.  So, unless we can push
 			 * down all of the query pathkeys, forget it.
 			 */
-			list_free(usable_pathkeys);
-			usable_pathkeys = NIL;
+			list_free(fdwState->usable_pathkeys);
+			fdwState->usable_pathkeys = NIL;
 			break;
 		}
 	}
-	if(usable_pathkeys != NIL){
-		fdwState->usable_pathkeys = usable_pathkeys;
+
+	/* append ORDER BY clause if all columns can be pushed down */
+	if (fdwState->usable_pathkeys != NIL)
 		appendStringInfoString(&query, orderedquery.data);
-	}
 
 	/* append FOR UPDATE if if the scan is for a modification */
 	if (modify)
@@ -2745,6 +2738,29 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 	return collected_rows;
 }
+
+/*
+ * appendAsType
+ * 		Append "s" to "dest", adding appropriate casts for datetime "type".
+ */
+void
+appendAsType(StringInfoData *dest, const char *s, Oid type)
+{
+	switch (type)
+	{
+		case DATEOID:
+			appendStringInfo(dest, "CAST (%s AS DATE)", s);
+			break;
+		case TIMESTAMPOID:
+			appendStringInfo(dest, "CAST (%s AS TIMESTAMP)", s);
+			break;
+		case TIMESTAMPTZOID:
+			appendStringInfo(dest, "CAST (%s AS TIMESTAMP WITH TIME ZONE)", s);
+			break;
+		default:
+			appendStringInfo(dest, "%s", s);
+	}
+}
 #endif  /* OLD_FDW_API */
 
 /*
@@ -2767,7 +2783,10 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 char *
 getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool isSort)
 {
-	char *opername, *left, *right, *arg, oprkind, parname[10];
+	char *opername, *left, *right, *arg, oprkind;
+#ifndef OLD_FDW_API
+	char parname[10];
+#endif
 	Const *constant;
 	OpExpr *oper;
 	ScalarArrayOpExpr *arrayoper;
@@ -2886,34 +2905,21 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					break;
 				}
 
+				/*
+				 * Don't try to convert a column reference if the type is
+				 * converted from a non-string type in Oracle to a string type
+				 * in PostgreSQL because functions and operators won't work the same.
+				 */
 				oratype = oraTable->cols[index]->oratype;
-				if(!isSort){
-					/*
-					 * Don't try to convert a column reference if the type is
-					 * converted from a non-string type in Oracle to a string type
-					 * in PostgreSQL because functions and operators won't work the same.
-					 */
-					if ((variable->vartype == TEXTOID
-							|| variable->vartype == BPCHAROID
-							|| variable->vartype == VARCHAROID)
-							&& oratype != ORA_TYPE_VARCHAR2
-							&& oratype != ORA_TYPE_CHAR
-							&& oratype != ORA_TYPE_NVARCHAR2
-							&& oratype != ORA_TYPE_NCHAR
-							&& oratype != ORA_TYPE_CLOB)
-						return NULL;
-				}
-				else
-				{
-					/*
-					 * if getOracleWhereClause is called from createQuery for sort-pushdown,
-					 * check oratype and vartype whether can sort-pushdown.
-					 * BOOLOID and ORA_TYPE_CLOB can not sort-pushdown, therefore return NULL.
-					 */
-					if(variable->vartype == BOOLOID
-							|| oratype == ORA_TYPE_CLOB)
-						return NULL;
-				}
+				if ((variable->vartype == TEXTOID
+						|| variable->vartype == BPCHAROID
+						|| variable->vartype == VARCHAROID)
+						&& oratype != ORA_TYPE_VARCHAR2
+						&& oratype != ORA_TYPE_CHAR
+						&& oratype != ORA_TYPE_NVARCHAR2
+						&& oratype != ORA_TYPE_NCHAR
+						&& oratype != ORA_TYPE_CLOB)
+					return NULL;
 
 				initStringInfo(&result);
 
@@ -3215,7 +3221,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					foreach(cell, array->elements)
 					{
 						/* convert the argument to a string */
-						char *element = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+						char *element = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params, isSort);
 
 						/* if any element cannot be converted, give up */
 						if (element == NULL)
@@ -3774,29 +3780,6 @@ static char
 	}
 
 	return result.data;
-}
-
-/*
- * appendAsType
- * 		Append "s" to "dest", adding appropriate casts for datetime "type".
- */
-void
-appendAsType(StringInfoData *dest, const char *s, Oid type)
-{
-	switch (type)
-	{
-		case DATEOID:
-			appendStringInfo(dest, "CAST (%s AS DATE)", s);
-			break;
-		case TIMESTAMPOID:
-			appendStringInfo(dest, "CAST (%s AS TIMESTAMP)", s);
-			break;
-		case TIMESTAMPTZOID:
-			appendStringInfo(dest, "CAST (%s AS TIMESTAMP WITH TIME ZONE)", s);
-			break;
-		default:
-			appendStringInfo(dest, "%s", s);
-	}
 }
 
 /*
@@ -5341,6 +5324,35 @@ fold_case(char *name, fold_t foldcase)
 #endif  /* IMPORT_API */
 
 /*
+ * find_em_expr_for_rel
+ * 		Find an equivalence class member expression, all of whose Vars come from
+ * 		the indicated relation.
+ */
+Expr *
+find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
+{
+	ListCell   *lc_em;
+
+	foreach(lc_em, ec->ec_members)
+	{
+		EquivalenceMember *em = lfirst(lc_em);
+
+		if (bms_equal(em->em_relids, rel->relids))
+		{
+			/*
+			 * If there is more than one equivalence member whose Vars are
+			 * taken entirely from this relation, we'll be content to choose
+			 * any one of those.
+			 */
+			return em->em_expr;
+		}
+	}
+
+	/* We didn't find any suitable equivalence class expression */
+	return NULL;
+}
+
+/*
  * oracleGetShareFileName
  * 		Returns the (palloc'ed) absolute path of a file in the "share" directory.
  */
@@ -5507,33 +5519,3 @@ oracleDebug2(const char *message)
 {
 	elog(DEBUG2, "%s", message);
 }
-
-/*
- * Find an equivalence class member expression, all of whose Vars, come from
- * the indicated relation.
- */
-static Expr *
-find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
-{
-	ListCell   *lc_em;
-
-	foreach(lc_em, ec->ec_members)
-	{
-		EquivalenceMember *em = lfirst(lc_em);
-
-		if (bms_equal(em->em_relids, rel->relids))
-		{
-			/*
-			 * If there is more than one equivalence member whose Vars are
-			 * taken entirely from this relation, we'll be content to choose
-			 * any one of those.
-			 */
-			return em->em_expr;
-		}
-	}
-
-	/* We didn't find any suitable equivalence class expression */
-	return NULL;
-}
-
-
