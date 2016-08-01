@@ -270,7 +270,7 @@ static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 #endif  /* OLD_FDW_API */
-static char *getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
+static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
 static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
@@ -2378,10 +2378,12 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  * createQuery
  * 		Construct a query string for Oracle that
  * 		a) contains only the necessary columns in the SELECT list
- * 		b) has all the WHERE clauses that can safely be translated to Oracle.
- * 		Untranslatable WHERE clauses are omitted and left for PostgreSQL to check.
- * 		In "pushdown_clauses" an array is stored that contains "true" for all clauses
- * 		that will be pushed down and "false" for those that are filtered locally.
+ * 		b) has all the WHERE and ORDER BY clauses that can safely be translated to Oracle.
+ * 		Untranslatable clauses are omitted and left for PostgreSQL to check.
+ * 		"query_pathkeys" contains the desired sort order of the scan results
+ * 		which will be translated to ORDER BY clauses if possible.
+ * 		In "fdwState->pushdown_clauses" an array is stored that contains "true" for all
+ * 		clauses that will be pushed down and "false" for those that are filtered locally.
  * 		As a side effect, we also mark the used columns in oraTable.
  */
 char
@@ -2450,7 +2452,7 @@ char
 	foreach(cell, conditions)
 	{
 		/* try to convert each condition to Oracle SQL */
-		where = getOracleWhereClause(fdwState->session, foreignrel, ((RestrictInfo *)lfirst(cell))->clause, fdwState->oraTable, &(fdwState->params));
+		where = deparseExpr(fdwState->session, foreignrel, ((RestrictInfo *)lfirst(cell))->clause, fdwState->oraTable, &(fdwState->params));
 		if (where != NULL) {
 			/* append new WHERE clause to query string */
 			if (first_col)
@@ -2488,7 +2490,7 @@ char
 		bool can_pushdown;
 
 		/*
-		 * getOracleWhereClause would detect volatile expressions as well, but
+		 * deparseExpr would detect volatile expressions as well, but
 		 * ec_has_volatile saves some cycles.
 		 */
 		can_pushdown = !pathkey_ec->ec_has_volatile
@@ -2506,7 +2508,7 @@ char
 		}
 
 		if (can_pushdown &&
-			(sort_clause = getOracleWhereClause(fdwState->session, foreignrel, em_expr, fdwState->oraTable, &(fdwState->params)))){
+			(sort_clause = deparseExpr(fdwState->session, foreignrel, em_expr, fdwState->oraTable, &(fdwState->params)))){
 
 			fdwState->usable_pathkeys = lappend(fdwState->usable_pathkeys, pathkey);
 
@@ -2779,7 +2781,7 @@ appendAsType(StringInfoData *dest, const char *s, Oid type)
 #endif  /* OLD_FDW_API */
 
 /*
- * This macro is used by getOracleWhereClause to identify PostgreSQL
+ * This macro is used by deparseExpr to identify PostgreSQL
  * types that can be translated to Oracle SQL.
  */
 #define canHandleType(x) ((x) == TEXTOID || (x) == CHAROID || (x) == BPCHAROID \
@@ -2789,14 +2791,14 @@ appendAsType(StringInfoData *dest, const char *s, Oid type)
 			|| (x) == INTERVALOID)
 
 /*
- * getOracleWhereClause
- * 		Create an Oracle SQL WHERE clause from the expression and store in in "where".
+ * deparseExpr
+ * 		Create and return an Oracle SQL string from "expr".
  * 		Returns NULL if that is not possible, else a palloc'ed string.
  * 		As a side effect, all Params incorporated in the WHERE clause
- * 		will be stored in paramList.
+ * 		will be stored in "params".
  */
 char *
-getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
+deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
 {
 	char *opername, *left, *right, *arg, oprkind;
 #ifndef OLD_FDW_API
@@ -3042,7 +3044,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				left = getOracleWhereClause(session, foreignrel, linitial(oper->args), oraTable, params);
+				left = deparseExpr(session, foreignrel, linitial(oper->args), oraTable, params);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -3052,7 +3054,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					right = getOracleWhereClause(session, foreignrel, lsecond(oper->args), oraTable, params);
+					right = deparseExpr(session, foreignrel, lsecond(oper->args), oraTable, params);
 					if (right == NULL)
 					{
 						pfree(left);
@@ -3161,7 +3163,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(leftargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(arrayoper->args), oraTable, params);
+			left = deparseExpr(session, foreignrel, linitial(arrayoper->args), oraTable, params);
 			if (left == NULL)
 				return NULL;
 
@@ -3236,7 +3238,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					foreach(cell, array->elements)
 					{
 						/* convert the argument to a string */
-						char *element = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+						char *element = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
 
 						/* if any element cannot be converted, give up */
 						if (element == NULL)
@@ -3274,12 +3276,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params);
+			left = deparseExpr(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
+			right = deparseExpr(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -3303,12 +3305,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			if (! canHandleType(rightargtype))
 				return NULL;
 
-			left = getOracleWhereClause(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params);
+			left = deparseExpr(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params);
 			if (left == NULL)
 			{
 				return NULL;
 			}
-			right = getOracleWhereClause(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
+			right = deparseExpr(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
 			if (right == NULL)
 			{
 				pfree(left);
@@ -3322,7 +3324,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			arg = getOracleWhereClause(session, foreignrel, linitial(boolexpr->args), oraTable, params);
+			arg = deparseExpr(session, foreignrel, linitial(boolexpr->args), oraTable, params);
 			if (arg == NULL)
 				return NULL;
 
@@ -3333,7 +3335,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			for_each_cell(cell, lnext(list_head(boolexpr->args)))
 			{
-				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3348,10 +3350,10 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			break;
 		case T_RelabelType:
-			return getOracleWhereClause(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params);
+			return deparseExpr(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params);
 			break;
 		case T_CoerceToDomain:
-			return getOracleWhereClause(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params);
+			return deparseExpr(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params);
 			break;
 		case T_CaseExpr:
 			caseexpr = (CaseExpr *)expr;
@@ -3365,7 +3367,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* for the form "CASE arg WHEN ...", add first expression */
 			if (caseexpr->arg != NULL)
 			{
-				arg = getOracleWhereClause(session, foreignrel, caseexpr->arg, oraTable, params);
+				arg = deparseExpr(session, foreignrel, caseexpr->arg, oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3386,12 +3388,12 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				if (caseexpr->arg == NULL)
 				{
 					/* for CASE WHEN ..., use the whole expression */
-					arg = getOracleWhereClause(session, foreignrel, whenclause->expr, oraTable, params);
+					arg = deparseExpr(session, foreignrel, whenclause->expr, oraTable, params);
 				}
 				else
 				{
 					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					arg = getOracleWhereClause(session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
+					arg = deparseExpr(session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
 				}
 
 				if (arg == NULL)
@@ -3406,7 +3408,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				}
 
 				/* THEN */
-				arg = getOracleWhereClause(session, foreignrel, whenclause->result, oraTable, params);
+				arg = deparseExpr(session, foreignrel, whenclause->result, oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3422,7 +3424,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				arg = getOracleWhereClause(session, foreignrel, caseexpr->defresult, oraTable, params);
+				arg = deparseExpr(session, foreignrel, caseexpr->defresult, oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3450,7 +3452,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			first_arg = true;
 			foreach(cell, coalesceexpr->args)
 			{
-				arg = getOracleWhereClause(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
 				if (arg == NULL)
 				{
 					pfree(result.data);
@@ -3473,7 +3475,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			break;
 		case T_NullTest:
-			arg = getOracleWhereClause(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params);
+			arg = deparseExpr(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params);
 			if (arg == NULL)
 				return NULL;
 
@@ -3490,7 +3492,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
-				return getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params);
+				return deparseExpr(session, foreignrel, linitial(func->args), oraTable, params);
 
 			/* get function name and schema */
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->funcid));
@@ -3570,7 +3572,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 				first_arg = true;
 				foreach(cell, func->args)
 				{
-					arg = getOracleWhereClause(session, foreignrel, lfirst(cell), oraTable, params);
+					arg = deparseExpr(session, foreignrel, lfirst(cell), oraTable, params);
 					if (arg == NULL)
 					{
 						pfree(result.data);
@@ -3595,7 +3597,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				left = getOracleWhereClause(session, foreignrel, linitial(func->args), oraTable, params);
+				left = deparseExpr(session, foreignrel, linitial(func->args), oraTable, params);
 				if (left == NULL)
 				{
 					pfree(opername);
@@ -3615,7 +3617,7 @@ getOracleWhereClause(oracleSession *session, RelOptInfo *foreignrel, Expr *expr,
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					right = getOracleWhereClause(session, foreignrel, lsecond(func->args), oraTable, params);
+					right = deparseExpr(session, foreignrel, lsecond(func->args), oraTable, params);
 					if (right == NULL)
 					{
 						pfree(opername);
