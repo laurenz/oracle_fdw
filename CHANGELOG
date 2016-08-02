@@ -13,7 +13,7 @@ Version 1.5.0
     Only expressions of numeric, date and timestamp datatypes are pushed
     down, since the string collations in PostgreSQL and Oracle cannot be
     guaranteed to be the same.
-    Courtesy of NTT Communications, patch by Tatsuro Yamada.
+    Courtesy of NTT OSS Center, patch by Tatsuro Yamada.
 
   Bugfixes:
   - Fix errors with now() and date/timestamp parameters in queries
