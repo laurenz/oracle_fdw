@@ -2484,7 +2484,7 @@ char
 	{
 		PathKey *pathkey = (PathKey *)lfirst(cell);
 		EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
-		Expr *em_expr;
+		Expr *em_expr = NULL;
 		char *sort_clause;
 		Oid em_type;
 		bool can_pushdown;
@@ -2494,7 +2494,7 @@ char
 		 * ec_has_volatile saves some cycles.
 		 */
 		can_pushdown = !pathkey_ec->ec_has_volatile
-				&& (em_expr = find_em_expr_for_rel(pathkey_ec, foreignrel));
+				&& ((em_expr = find_em_expr_for_rel(pathkey_ec, foreignrel)) != NULL);
 
 		if (can_pushdown)
 		{
@@ -2508,7 +2508,7 @@ char
 		}
 
 		if (can_pushdown &&
-			(sort_clause = deparseExpr(fdwState->session, foreignrel, em_expr, fdwState->oraTable, &(fdwState->params)))){
+			((sort_clause = deparseExpr(fdwState->session, foreignrel, em_expr, fdwState->oraTable, &(fdwState->params))) != NULL)){
 
 			fdwState->usable_pathkeys = lappend(fdwState->usable_pathkeys, pathkey);
 
