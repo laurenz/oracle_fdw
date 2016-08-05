@@ -793,13 +793,5 @@ option is to open an issue on GitHub:
 https://github.com/laurenz/oracle_fdw/issues
 This requires a GitHub account.
 
-You can send an e-mail to oracle-fdw-general@lists.pgfoundry.org
-This requires that you subscribe here:
-http://lists.pgfoundry.org/mailman/listinfo/oracle-fdw-general
-There is a mail archive here:
-http://lists.pgfoundry.org/pipermail/oracle-fdw-general/
-
-There is the option to open an issue on GitHub:
-
 I will also answer e-mail sent to me at laurenz.albe@wien.gv.at, but that way
 you exclude others from helping you or benefiting from your experience.
