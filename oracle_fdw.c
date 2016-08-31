@@ -2817,6 +2817,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	Expr *rightexpr;
 	ArrayExpr *array;
 	ArrayCoerceExpr *arraycoerce;
+	SQLValueFunction *sqlvalfunc;
 	regproc typoutput;
 	HeapTuple tuple;
 	ListCell *cell;
@@ -3701,6 +3702,30 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 
 			break;
+#if PG_VERSION_NUM >= 100000
+		case T_SQLValueFunction:
+			sqlvalfunc = (SQLValueFunction *)expr;
+
+			switch (sqlvalfunc->op)
+			{
+				case SVFOP_CURRENT_DATE:
+					initStringInfo(&result);
+					appendStringInfo(&result, "TRUNC(CAST (CAST(:now AS TIMESTAMP WITH TIME ZONE) AS DATE))");
+					break;
+				case SVFOP_CURRENT_TIMESTAMP:
+					initStringInfo(&result);
+					appendStringInfo(&result, "(CAST (:now AS TIMESTAMP WITH TIME ZONE))");
+					break;
+				case SVFOP_LOCALTIMESTAMP:
+					initStringInfo(&result);
+					appendStringInfo(&result, "(CAST (CAST (:now AS TIMESTAMP WITH TIME ZONE) AS TIMESTAMP))");
+					break;
+				default:
+					return NULL;  /* don't push down other functions */
+			}
+
+			break;
+#endif
 		default:
 			/* we cannot translate this to Oracle */
 			return NULL;
@@ -4025,6 +4050,10 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 		case T_PlaceHolderVar:
 			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable);
 			break;
+#if PG_VERSION_NUM >= 100000
+		case T_SQLValueFunction:
+			break;  /* contains no column references */
+#endif
 		default:
 			/*
 			 * We must be able to handle all node types that can
