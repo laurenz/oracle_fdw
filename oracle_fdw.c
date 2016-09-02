@@ -2817,7 +2817,9 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	Expr *rightexpr;
 	ArrayExpr *array;
 	ArrayCoerceExpr *arraycoerce;
+#if PG_VERSION_NUM >= 100000
 	SQLValueFunction *sqlvalfunc;
+#endif
 	regproc typoutput;
 	HeapTuple tuple;
 	ListCell *cell;
