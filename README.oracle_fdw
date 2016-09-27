@@ -5,36 +5,29 @@ oracle_fdw is a PostgreSQL extension that provides a Foreign Data Wrapper for
 easy and efficient access to Oracle databases, including pushdown of WHERE
 conditions and required columns as well as comprehensive EXPLAIN support.
 
-oracle_fdw was written by Laurenz Albe <laurenz.albe@wien.gv.at>
-
 This README contains the following sections:
 
 1. [Cookbook](#1-cookbook)
-
 2. [Objects created by the extension](#2-objects-created-by-the-extension)
-
 3. [Options](#3-options)
-
 4. [Usage](#4-usage)
-
 5. [Installation Requirements](#5-installation-requirements)
-
 6. [Installation](#6-installation)
-
 7. [Internals](#7-internals)
-
 8. [Problems](#8-problems)
-
 9. [Support](#9-support)
+
+oracle_fdw was written by Laurenz Albe (laurenz.albe@wien.gv.at)
 
 1. Cookbook
 ===========
 
-This is a simple example how to use oracle_fdw.
-More detailed information will be provided in the sections [Options](#3-options) and
-[Usage](#4-usage).  You should also read the [PostgreSQL documentation on foreign
-data](https://www.postgresql.org/docs/current/static/ddl-foreign-data.html)
-and the commands used in the example.
+This is a simple example how to use oracle_fdw.  
+More detailed information will be provided in the sections
+[Options](#3-options) and [Usage](#4-usage).  You should also read the
+[PostgreSQL documentation on foreign data]
+(https://www.postgresql.org/docs/current/static/ddl-foreign-data.html)
+and the commands referenced there.
 
 For the sake of this example, let's assume you can connect as operating system
 user `postgres` (or whoever starts the PostgreSQL server) with the following
@@ -66,9 +59,9 @@ Then configure oracle_fdw as PostgreSQL superuser like this:
 
 
 (You can use other naming methods or local connections, see the description of
-option **dbserver** below.)
+the option **dbserver** below.)
 
-Then you can connect to PostgreSQL as ``pguser`` and define:
+Then you can connect to PostgreSQL as `pguser` and define:
 
     pgdb=> CREATE USER MAPPING FOR pguser SERVER oradb
               OPTIONS (user 'orauser', password 'orapwd');
@@ -92,35 +85,33 @@ Now you can use the table like a regular PostgreSQL table.
 ===================================
 
     FUNCTION oracle_fdw_handler() RETURNS fdw_handler
- 
- Oracle foreign data wrapper handler
-
     FUNCTION oracle_fdw_validator(text[], oid) RETURNS void
-
- Oracle foreign data wrapper options validator
 
 These functions are the handler and the validator function necessary to create
 a foreign data wrapper.
 
-The extension automatically creates a foreign data wrapper named `oracle_fdw`.
-Normally that's all you need and you can proceed to define foreign servers.
+    FOREIGN DATA WRAPPER oracle_fdw
+      HANDLER oracle_fdw_handler
+      VALIDATOR oracle_fdw_validator
+
+The extension automatically creates a foreign data wrapper named
+`oracle_fdw`.  
+Normally that's all you need, and you can proceed to define foreign servers.
 You can create additional Oracle foreign data wrappers, for example if you
 need to set the **nls_lang** option (you can alter the existing `oracle_fdw`
 wrapper, but all modifications will be lost after a dump/restore).
 
     FUNCTION oracle_close_connections() RETURNS void
 
- closes all open Oracle connections
-
 This function can be used to close all open Oracle connections in this session.
-See the [Usage](#4-usage) section as it might be useful.
+See the [Usage](#4-usage) section for further description.
 
     FUNCTION oracle_diag(name DEFAULT NULL) RETURNS text
 
-This function is useful for diagnostic purposes only.
+This function is useful for diagnostic purposes only.  
 It will return the versions of oracle_fdw, PostgreSQL server and Oracle client.
 If called with no argument or NULL, it will additionally return the values of
-some environment variables used for establishing Oracle connections.
+some environment variables used for establishing Oracle connections.  
 If called with the name of a foreign server, it will additionally return
 the Oracle server version.
 
@@ -133,12 +124,12 @@ Foreign data wrapper options
 (Caution: If you modify the default foreign data wrapper `oracle_fdw`,
 any changes will be lost upon dump/restore.  Create a new foreign data wrapper
 if you want the options to be persistent.  The SQL script shipped with the
-software contains a `CREATE FOREIGN DATA WRAPPER` statement you can use.)
+software contains a CREATE FOREIGN DATA WRAPPER statement you can use.)
 
 - **nls_lang** (optional)
 
-  Sets the NLS_LANG environment variable for Oracle to this value.
-  NLS_LANG is in the form language_territory.charset (for example
+  Sets the NLS_LANG environment variable for Oracle to this value.  
+  NLS_LANG is in the form "language_territory.charset" (for example
   AMERICAN_AMERICA.AL32UTF8).  This must match your database encoding.
   When this value is not set, oracle_fdw will automatically do the right
   thing if it can and issue a warning if it cannot. Set this only if you
@@ -149,9 +140,9 @@ Foreign server options
 
 - **dbserver** (required)
 
-  The Oracle database connection string for the remote database.
+  The Oracle database connection string for the remote database.  
   This can be in any of the forms that Oracle supports as long as your
-  Oracle client is configured accordingly.
+  Oracle client is configured accordingly.  
   Set this to an empty string for local ("BEQUEATH") connections.
 
 User mapping options
@@ -159,10 +150,10 @@ User mapping options
 
 - **user** (required)
 
-  The Oracle user name for the session.
-  Set this to an empty string for "external authentication" if you don't
+  The Oracle user name for the session.  
+  Set this to an empty string for *external authentication* if you don't
   want to store Oracle credentials in the PostgreSQL database (one simple way
-  is to use an "external password store").
+  is to use an *external password store*).
 
 - **password** (required)
 
@@ -181,10 +172,10 @@ Foreign table options
 
       OPTIONS (table '(SELECT col FROM tab WHERE val = ''string'')')
 
-  Do not set the "schema" option in this case.
+  Do not set the **schema** option in this case.  
   INSERT, UPDATE and DELETE will work on foreign tables defined on simple
   queries; if you want to avoid that (or confusing Oracle error messages
-  for more complicated queries), use the table option "readonly".
+  for more complicated queries), use the table option **readonly**.
 
 - **schema** (optional)
 
@@ -195,12 +186,13 @@ Foreign table options
 
 - **plan_costs** (deprecated, optional, defaults to "off")
 
-  This option will not work with Oracle 9i or older (see [Problems](#8-problems)).
+  This option will not work with Oracle 9i or older
+  (see [Problems](#8-problems)).
 
   If set to yes/on/true, Oracle's cost estimates will be used.  The problem is
   that Oracle gives good estimates for the result size, but not for the cost
   of the execution (the only estimate you can get is "execution time" in second
-  granularity).
+  granularity).  
   Since this cost estimate is almost useless but expensive to collect,
   oracle_fdw by default does not bother to get Oracle's cost estimates and
   estimates the cost to 10000+10*(row count) regardless of the actual query.
@@ -209,7 +201,7 @@ Foreign table options
   foreign table (see ANALYZE below) and keep this option disabled.
 
   Turn this on only if a) query execution is expensive and b) it has a positive
-  influence on PostgreSQL query planning.
+  influence on PostgreSQL query planning.  
   This option is deprecated and will be removed in a future release.
 
 - **max_long** (optional, defaults to "32767")
@@ -217,8 +209,8 @@ Foreign table options
   The maximal length of any LONG or LONG RAW columns in the Oracle table.
   Possible values are integers between 1 and 1073741823 (the maximal size of a
   `bytea` in PostgreSQL).  This amount of memory will be allocated at least
-  twice, so large values will consume a lot of memory.
-  If `max_long` is less than the length of the longest value retrieved,
+  twice, so large values will consume a lot of memory.  
+  If **max_long** is less than the length of the longest value retrieved,
   you will receive the error message `ORA-01406: fetched column value was
   truncated`.
 
@@ -231,7 +223,7 @@ Foreign table options
   on tables that you do not wish to be changed, to be prepared for an upgrade
   to PostgreSQL 9.3 or later.
 
-- **sample_percent** (optional, defaults to 100)
+- **sample_percent** (optional, defaults to "100")
 
   This option only influences ANALYZE processing and can be useful to
   ANALYZE very large tables in a reasonable time.
@@ -241,10 +233,10 @@ Foreign table options
   table statistics.  This is accomplished using the `SAMPLE BLOCK (x)`
   clause in Oracle.
 
-  ANALYZE will fail with `ORA-00933` for tables defined with Oracle queries and
-  may fail with `ORA-01446` for tables defined with complex Oracle views.
+  ANALYZE will fail with ORA-00933 for tables defined with Oracle queries and
+  may fail with ORA-01446 for tables defined with complex Oracle views.
 
-- **prefetch** (optional, defaults to 200)
+- **prefetch** (optional, defaults to "200")
 
   Sets the number of rows that will be fetched with a single round-trip between
   PostgreSQL and Oracle during a foreign table scan.  This is implemented using
@@ -260,7 +252,7 @@ Column options (from PostgreSQL 9.2 on)
 - **key** (optional, defaults to "false")
 
   If set to yes/on/true, the corresponding column on the foreign Oracle table
-  is considered a primary key column.
+  is considered a primary key column.  
   For UPDATE and DELETE to work, you must set this option on all columns
   that belong to the table's primary key.
 
@@ -273,7 +265,7 @@ Oracle permissions
 The Oracle user will obviously need CREATE SESSION privilege and the right
 to select from the table or view in question.
 
-For EXPLAIN VERBOSE (and query planning if `plan_costs` is turned on),
+For EXPLAIN VERBOSE (and query planning if **plan_costs** is turned on),
 the user will also need SELECT privileges on V$SQL and V$SQL_PLAN.
 
 Connections
@@ -283,10 +275,10 @@ oracle_fdw caches Oracle connections because it is expensive to create an
 Oracle session for each individual query.  All connections are automatically
 closed when the PostgreSQL session ends.
 
-The function `oracle_close_connections()` can be used to close all cached Oracle
-connections.  This can be useful for long-running sessions that don't access
-foreign tables all the time and want to avoid blocking the resources needed
-by an open Oracle connection.
+The function `oracle_close_connections()` can be used to close all cached
+Oracle connections.  This can be useful for long-running sessions that don't
+access foreign tables all the time and want to avoid blocking the resources
+needed by an open Oracle connection.  
 You cannot call this function inside a transaction that modifies Oracle data.
 
 Columns
@@ -320,7 +312,7 @@ column or the maximal integer value), you will receive a runtime error.
 These conversions are automatically handled by oracle_fdw:
 
     Oracle type                    | Possible PostgreSQL types
-    -------------------------------+---------------------------------------------
+    -------------------------------+-------------------------------------------
     CHAR                           | char, varchar, text
     NCHAR                          | char, varchar, text
     VARCHAR                        | char, varchar, text
@@ -332,12 +324,16 @@ These conversions are automatically handled by oracle_fdw:
     BLOB                           | bytea
     BFILE                          | bytea (read-only)
     LONG RAW                       | bytea
-    NUMBER                         | numeric, float4, float8, char, varchar, text
+    NUMBER                         | numeric, float4, float8, char, varchar,
+                                   |   text
     NUMBER(n,m) with m<=0          | numeric, float4, float8, int2, int4, int8,
                                    |   boolean, char, varchar, text
-    FLOAT                          | numeric, float4, float8, char, varchar, text
-    BINARY_FLOAT                   | numeric, float4, float8, char, varchar, text
-    BINARY_DOUBLE                  | numeric, float4, float8, char, varchar, text
+    FLOAT                          | numeric, float4, float8, char, varchar,
+                                   |   text
+    BINARY_FLOAT                   | numeric, float4, float8, char, varchar,
+                                   |   text
+    BINARY_DOUBLE                  | numeric, float4, float8, char, varchar,
+                                   |   text
     DATE                           | date, timestamp, timestamptz, char,
                                    |   varchar, text
     TIMESTAMP                      | date, timestamp, timestamptz, char,
@@ -350,7 +346,7 @@ These conversions are automatically handled by oracle_fdw:
     INTERVAL DAY TO SECOND         | interval, char, varchar, text
     MDSYS.SDO_GEOMETRY             | geometry (see "PostGIS support" below)
 
-If a NUMBER is converted to a boolean, `0` means `false`, everything else `true`.
+If a NUMBER is converted to a boolean, 0 means `false`, everything else `true`.
 
 NCLOB is currently not supported because Oracle cannot automatically convert
 it to the client encoding.
@@ -361,11 +357,11 @@ Oracle or PostgreSQL.
 WHERE conditions and ORDER BY clauses
 -------------------------------------
 
-PostgreSQL will use all applicaple parts of the WHERE clause as a filter
+PostgreSQL will use all applicable parts of the WHERE clause as a filter
 for the scan.  The Oracle query that oracle_fdw constructs will contain a WHERE
 clause corresponding to these filter criteria whenever such a condition can
-safely be translated to Oracle SQL.  This feature, also known as **push-down
-of WHERE clauses**, can greatly reduce the number of rows retrieved from Oracle
+safely be translated to Oracle SQL.  This feature, also known as *push-down
+of WHERE clauses*, can greatly reduce the number of rows retrieved from Oracle
 and may enable Oracle's optimizer to choose a good plan for accessing the
 required tables.
 
@@ -390,12 +386,12 @@ Modifying foreign data
 From PostgreSQL 9.3 on, oracle_fdw supports INSERT, UPDATE and DELETE on
 foreign tables.  This is allowed by default (also in databases upgraded
 from an earlier PostgreSQL release) and can be disabled by setting the
-`readonly` table option.
+**readonly** table option.
 
 For UPDATE and DELETE to work, the columns corresponding to the primary
-key columns of the Oracle table must have the `key` column option set.
+key columns of the Oracle table must have the **key** column option set.
 These columns are used to identify a foreign table row, so make sure that
-the option is set on **all** columns that belong to the primary key.
+the option is set on *all* columns that belong to the primary key.
 
 If you omit a foreign table column during INSERT, that column is set to
 the value defined in the DEFAULT clause on the PostgreSQL foreign table
@@ -429,7 +425,7 @@ data modifying statements lead to a serialization failure:
 
 This can happen if concurrent transactions modify the table and gets more
 likely in long running transactions.  Such errors can be identified by their
-`SQLSTATE (40001)`. An application using oracle_fdw should retry transactions
+SQLSTATE (40001). An application using oracle_fdw should retry transactions
 that fail with this error.
 
 EXPLAIN
@@ -443,7 +439,7 @@ ANALYZE
 -------
 
 From PostgreSQL version 9.2 on, you can use ANALYZE to gather statistics
-on a foreign table.  This is supported by oracle_fdw.
+on a foreign table.  This is supported by oracle_fdw.  
 Statistics will be used for query planning, and for many queries will
 result in good (and much faster) row count estimates even if the table option
 **plan_costs** is turned off as long as the statistics are accurate.
@@ -472,7 +468,7 @@ Support for IMPORT FOREIGN SCHEMA
 ---------------------------------
 
 From PostgreSQL 9.5 on, IMPORT FOREIGN SCHEMA is supported to bulk import
-table definitions for all tables in an Oracle schema.
+table definitions for all tables in an Oracle schema.  
 In addition to the documentation of IMPORT FOREIGN SCHEMA, consider the
 following:
 
@@ -481,15 +477,16 @@ following:
   but not synonyms.
 
 - There are two supported options for IMPORT FOREIGN SCHEMA:
-  - `case`: controls case folding for table and column names during import.
+  - **case**: controls case folding for table and column names during import.  
     The possible values are:
-    - **keep**: leave the names as they are in Oracle, usually in upper case.
-    - **lower**: translate all table and column names to lower case.
-    - **smart**: only translate names that are all upper case in Oracle
+    - `keep`: leave the names as they are in Oracle, usually in upper case.
+    - `lower`: translate all table and column names to lower case.
+    - `smart`: only translate names that are all upper case in Oracle
                (this is the default).
-  - `readonly` (boolean): controls if imported tables can be modified.
+  - **readonly** (boolean): controls if imported tables can be modified.  
     If set to `true`, all imported tables are created with the foreign
-    table option `readonly` set to `true` (see the [Options](#3-options) section).
+    table option **readonly** set to `true` (see the [Options](#3-options)
+    section).  
     The default is `false`.
 
 - The Oracle schema name must be written exactly as it is in Oracle, so
@@ -506,11 +503,11 @@ following:
 oracle_fdw should compile and run on any platform supported by PostgreSQL and
 Oracle client, although I could only test it on Linux and Windows.
 
-PostgreSQL 9.1 or better is required.
-Support for ANALYZE is available from PostgreSQL 9.2 on.
+PostgreSQL 9.1 or better is required.  
+Support for ANALYZE is available from PostgreSQL 9.2 on.  
 Support for INSERT, UPDATE and DELETE is available from PostgreSQL 9.3 on.
 
-Oracle client version 10.1 or better is required.
+Oracle client version 10.1 or better is required.  
 oracle_fdw can be built and used with Oracle Instant Client as well as with
 Oracle Client and Server installations installed with Universal Installer.
 Binaries compiled with Oracle Client 10 can be used with later client versions
@@ -519,14 +516,14 @@ without recompilation or relink.
 The supported Oracle server versions depend on the used client version (see the
 Oracle Client/Server Interoperability Matrix in support document 207303.1).
 For maximum coverage use Oracle Client 10.2.0.5, as this will allow you to
-connect to every server version from 8.1.7 to 12.1.0 except 9.0.1.
+connect to every server version from 8.1.7 to 12.1.0 except 9.0.1.  
 PostgreSQL and Oracle need to have the same architecture, for example you
 cannot have 32-bit software for the one and 64-bit software for the other.
 
 It is advisable to use the latest Patch Set on both Oracle client and server,
-particularly with desupported Oracle versions.
+particularly with desupported Oracle versions.  
 For a list of Oracle bugs that are known to affect oracle_fdw's usability,
-see the [Problems](#8-problems) section.
+see the [Problems](#8-problems) section.  
 Consult the oracle_fdw Wiki (https://github.com/laurenz/oracle_fdw/wiki)
 for tips about Oracle installation and configuration and share your own
 knowledge there.
@@ -541,21 +538,21 @@ Building oracle_fdw:
 --------------------
 
 oracle_fdw has been written as a PostgreSQL extension and uses the Extension
-Building Infrastructure "PGXS".  It should be easy to install.
+Building Infrastructure PGXS.  It should be easy to install.
 
 You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
-installed with packages, install the development package).
+installed with packages, install the development package).  
 You need to install Oracle's C header files as well (SDK package for Instant
 Client).
 
 Make sure that PostgreSQL is configured `--without-ldap` (at least the server).
 See the [Problems](#8-problems) section.
 
-Make sure that `pg_config` is in the `PATH` (test with `pg_config --pgxs`).
+Make sure that `pg_config` is in the PATH (test with `pg_config --pgxs`).  
 Set the environment variable ORACLE_HOME to the location of the Oracle
 installation.
 
-Unpack the source code of oracle_fdw and change into the directory.
+Unpack the source code of oracle_fdw and change into the directory.  
 Then the software installation should be as simple as:
 
     $ make
@@ -606,44 +603,44 @@ on an exotic platform, you don't have to do this.
 
 For the regression tests to work, you must have a PostgreSQL cluster
 (9.3 or better) and an Oracle server (10.1 or better with Locator or Spatial)
-running, and the oracle_fdw binaries must be installed.
+running, and the oracle_fdw binaries must be installed.  
 The regression tests will create a database called `contrib_regression` and
 run a number of tests.  For the PostGIS regression tests to succeed,
 the PostGIS binaries must be installed.
 
 The Oracle database must be prepared as follows:
 - A user `scott` with password `tiger` must exist (unless you want to edit
-  the regression test scripts).  The user needs `CREATE SESSION` and `CREATE TABLE`
+  the regression test scripts).  The user needs CREATE SESSION and CREATE TABLE
   system privileges and enough quota on its default tablespace, as well as
-  `SELECT` privileges on `V$SQL` and `V$SQL_PLAN`.
+  SELECT privileges on V$SQL and V$SQL_PLAN.
 - Two tables must be created as follows:
   
-      CREATE TABLE scott.typetest1 (
-         id  NUMBER(5)
-            CONSTRAINT typetest1_pkey PRIMARY KEY,
-         c   CHAR(10 CHAR),
-         nc  NCHAR(10),
-         vc  VARCHAR2(10 CHAR),
-         nvc NVARCHAR2(10),
-         lc  CLOB,
-         r   RAW(10),
-         u   RAW(16),
-         lb  BLOB,
-         lr  LONG RAW,
-         b   NUMBER(1),
-         num NUMBER(7,5),
-         fl  BINARY_FLOAT,
-         db  BINARY_DOUBLE,
-         d   DATE,
-         ts  TIMESTAMP WITH TIME ZONE,
-         ids INTERVAL DAY TO SECOND,
-         iym INTERVAL YEAR TO MONTH
-      ) SEGMENT CREATION IMMEDIATE;
+        CREATE TABLE scott.typetest1 (
+           id  NUMBER(5)
+              CONSTRAINT typetest1_pkey PRIMARY KEY,
+           c   CHAR(10 CHAR),
+           nc  NCHAR(10),
+           vc  VARCHAR2(10 CHAR),
+           nvc NVARCHAR2(10),
+           lc  CLOB,
+           r   RAW(10),
+           u   RAW(16),
+           lb  BLOB,
+           lr  LONG RAW,
+           b   NUMBER(1),
+           num NUMBER(7,5),
+           fl  BINARY_FLOAT,
+           db  BINARY_DOUBLE,
+           d   DATE,
+           ts  TIMESTAMP WITH TIME ZONE,
+           ids INTERVAL DAY TO SECOND,
+           iym INTERVAL YEAR TO MONTH
+        ) SEGMENT CREATION IMMEDIATE;
 
-      CREATE TABLE scott.gis (
-         id  NUMBER(5) PRIMARY KEY,
-         g   MDSYS.SDO_GEOMETRY
-      ) SEGMENT CREATION IMMEDIATE;
+        CREATE TABLE scott.gis (
+           id  NUMBER(5) PRIMARY KEY,
+           g   MDSYS.SDO_GEOMETRY
+        ) SEGMENT CREATION IMMEDIATE;
 
 Set the environment for the PostgreSQL server so that it can establish an
 Oracle connection without connect string:
@@ -658,26 +655,26 @@ The regression tests are run as follows:
 7. Internals
 ============
 
-oracle_fdw sets the `MODULE` of the Oracle session to `postgres` and the
+oracle_fdw sets the MODULE of the Oracle session to `postgres` and the
 ACTION to the backend process number.  This can help identifying the Oracle
 session and allows you to trace it with DBMS_MONITOR.SERV_MOD_ACT_TRACE_ENABLE.
 
-`oracle_fdw` uses Oracle's result prefetching to avoid unnecessary client-server
-round-trips.  The prefetch row count can be configured with the `prefetch`
+oracle_fdw uses Oracle's result prefetching to avoid unnecessary client-server
+round-trips.  The prefetch row count can be configured with the **prefetch**
 table option and is set to 200 by default.
 
 Rather than using a PLAN_TABLE to explain an Oracle query (which would require
-such a table to be created in the Oracle database), `oracle_fdw` uses execution
-plans stored in the library cache.  For that, an Oracle query is **explicitly
-described**, which forces Oracle to parse the query.  The hard part is to find
+such a table to be created in the Oracle database), oracle_fdw uses execution
+plans stored in the library cache.  For that, an Oracle query is *explicitly
+described*, which forces Oracle to parse the query.  The hard part is to find
 the SQL_ID and CHILD_NUMBER of the statement in V$SQL because the SQL_TEXT
 column contains only the first 1000 bytes of the query.
-Therefore, `oracle_fdw` adds a comment to the query that contains an MD5 hash
+Therefore, oracle_fdw adds a comment to the query that contains an MD5 hash
 of the query text.  This is used to search in V$SQL.
 The actual execution plan or cost information is retrieved from V$SQL_PLAN.
 
-oracle_fdw uses transaction isolation level **serializable** on the Oracle side,
-which corresponds to PostgreSQL's repeatable read.  This is necessary because
+oracle_fdw uses transaction isolation level SERIALIZABLE on the Oracle side,
+which corresponds to PostgreSQL's REPEATABLE READ.  This is necessary because
 a single PostgreSQL statement can lead to multiple Oracle queries (e.g. during
 a nested loop join) and the results need to be consistent.
 
@@ -686,8 +683,8 @@ commits, so that a completed PostgreSQL transaction guarantees that the Oracle
 transaction has completed.  However, there is a small chance that the
 PostgreSQL transaction cannot complete even though the Oracle transaction
 is committed.  This cannot be avoided without using two-phase transactions
-and a transaction manager, which is clearly beyond what a foreign data wrapper
-can reasonably provide.
+and a transaction manager, which is beyond what a foreign data wrapper
+can reasonably provide.  
 Prepared statements involving Oracle are not supported for the same reason.
 
 8. Problems
@@ -697,8 +694,8 @@ Encoding
 --------
 
 Characters stored in an Oracle database that cannot be converted to the
-PostgreSQL database encoding will silently be replaced by "replacement
-characters", typically a normal or inverted question mark, by Oracle.
+PostgreSQL database encoding will silently be replaced by *replacement
+characters*, typically a normal or inverted question mark, by Oracle.
 You will get no warning or error messages.
 
 If you use a PostgreSQL database encoding that Oracle does not know
@@ -710,7 +707,7 @@ will be replaced by replacement characters as described above.
 You can set the **nls_lang** option of the foreign data wrapper to force a
 certain Oracle encoding, but the resulting characters will most likely be
 incorrect and lead to PostgreSQL error messages.  This is probably only
-useful for `SQL_ASCII` encoding if you know what you are doing.
+useful for SQL_ASCII encoding if you know what you are doing.
 See the [Options](#3-options) section.
 
 Planning
@@ -719,7 +716,7 @@ Planning
 Oracle's planner does not give good cost estimates (you can only get the
 estimated execution time in second granularity, and it is never less than
 one).  So by default, oracle_fdw does not use these estimates.
-See the description of the "plan_costs" option above.
+See the description of the **plan_costs** option above.
 
 Even without that, the current implementation of oracle_fdw requires
 calls to the Oracle server for every foreign table during query planning.
@@ -731,7 +728,7 @@ Limited functionality in old Oracle versions
 --------------------------------------------
 
 The definition of the Oracle system catalogs V$SQL and V$SQL_PLAN has
-changed with Oracle 10.1.  Using EXPLAIN VERBOSE or the `plan_costs` option
+changed with Oracle 10.1.  Using EXPLAIN VERBOSE or the **plan_costs** option
 with such Oracle server versions will result in errors like:
 
     ERROR:  error describing query: OCIStmtExecute failed to execute
@@ -752,7 +749,7 @@ name collision when the PostgreSQL server was configured `--with-ldap`.
 The name collision will not be detected, because oracle_fdw is loaded at
 runtime, but trouble will happen if anybody calls an LDAP function.
 Typically, OpenLDAP is loaded first, so if Oracle calls an LDAP function
-(for example if you use "directory naming" name resolution), the backend
+(for example if you use *directory naming* name resolution), the backend
 will crash.  This can lead to messages like the following (seen on Linux)
 in the PostgreSQL server log:
 
@@ -760,11 +757,11 @@ in the PostgreSQL server log:
      Assertion `( (ld)->ld_options.ldo_valid == 0x2 )' failed.
 
 The best thing is to configure PostgreSQL `--without-ldap`.  This is the only
-safe way to avoid this problem.
+safe way to avoid this problem.  
 Even when PostgreSQL is built `--with-ldap`, it may work as long as you don't
-use any **LDAP** client functionality in Oracle.
+use any LDAP client functionality in Oracle.  
 On some platforms, you can force Oracle's client shared library to be loaded
-before the PostgreSQL server is started (`LD_PRELOAD` on Linux).  Then Oracle's
+before the PostgreSQL server is started (LD_PRELOAD on Linux).  Then Oracle's
 LDAP functions should get used.  In that case, Oracle may be able to use
 LDAP functionality, but using LDAP from PostgreSQL will crash the backend.
 
@@ -776,7 +773,7 @@ Serialization errors
 In Oracle 11.2 or above, inserting the first row into a newly created
 Oracle table with oracle_fdw will lead to a serialization error.
 
-This is because of an Oracle feature called "deferred segment creation" which
+This is because of an Oracle feature called *deferred segment creation* which
 defers allocation of storage space for a new table until the first row
 is inserted.  This causes a serialization failure with serializable
 transactions (see document 1285464.1 in Oracle's knowledge base).
@@ -790,7 +787,7 @@ Oracle bugs
 This is a list of Oracle bugs that have affected oracle_fdw in the past.
 
 Bug 2728408 can cause `ORA-8177 cannot serialize access for this transaction`
-even if no modification of remote data is attempted.
+even if no modification of remote data is attempted.  
 It can occur with Oracle server 8.1.7.4 (install one-off patch 2728408) or
 Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 
@@ -808,8 +805,8 @@ If that causes an error, please also include the output of
     SELECT oracle_diag();
 
 If you have a problem or question or any kind of feedback, the preferred
-option is to open an issue on GitHub:
-https://github.com/laurenz/oracle_fdw/issues
+option is to open an issue on GitHub:  
+https://github.com/laurenz/oracle_fdw/issues  
 This requires a GitHub account.
 
 I will also answer e-mail sent to me at laurenz.albe@wien.gv.at, but that way
