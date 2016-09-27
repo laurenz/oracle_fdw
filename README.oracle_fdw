@@ -94,8 +94,7 @@ a foreign data wrapper.
       HANDLER oracle_fdw_handler
       VALIDATOR oracle_fdw_validator
 
-The extension automatically creates a foreign data wrapper named
-`oracle_fdw`.  
+The extension automatically creates a foreign data wrapper named `oracle_fdw`.  
 Normally that's all you need, and you can proceed to define foreign servers.
 You can create additional Oracle foreign data wrappers, for example if you
 need to set the **nls_lang** option (you can alter the existing `oracle_fdw`
@@ -311,40 +310,33 @@ column or the maximal integer value), you will receive a runtime error.
 
 These conversions are automatically handled by oracle_fdw:
 
-    Oracle type                    | Possible PostgreSQL types
-    -------------------------------+-------------------------------------------
-    CHAR                           | char, varchar, text
-    NCHAR                          | char, varchar, text
-    VARCHAR                        | char, varchar, text
-    VARCHAR2                       | char, varchar, text
-    NVARCHAR2                      | char, varchar, text
-    CLOB                           | char, varchar, text
-    LONG                           | char, varchar, text
-    RAW                            | uuid, bytea
-    BLOB                           | bytea
-    BFILE                          | bytea (read-only)
-    LONG RAW                       | bytea
-    NUMBER                         | numeric, float4, float8, char, varchar,
-                                   |   text
-    NUMBER(n,m) with m<=0          | numeric, float4, float8, int2, int4, int8,
-                                   |   boolean, char, varchar, text
-    FLOAT                          | numeric, float4, float8, char, varchar,
-                                   |   text
-    BINARY_FLOAT                   | numeric, float4, float8, char, varchar,
-                                   |   text
-    BINARY_DOUBLE                  | numeric, float4, float8, char, varchar,
-                                   |   text
-    DATE                           | date, timestamp, timestamptz, char,
-                                   |   varchar, text
-    TIMESTAMP                      | date, timestamp, timestamptz, char,
-                                   |   varchar, text
-    TIMESTAMP WITH TIME ZOME       | date, timestamp, timestamptz, char,
-                                   |   varchar, text
-    TIMESTAMP WITH LOCAL TIME ZOME | date, timestamp, timestamptz, char,
-                                   |   varchar, text
-    INTERVAL YEAR TO MONTH         | interval, char, varchar, text
-    INTERVAL DAY TO SECOND         | interval, char, varchar, text
-    MDSYS.SDO_GEOMETRY             | geometry (see "PostGIS support" below)
+    Oracle type              | Possible PostgreSQL types
+    -------------------------+--------------------------------------------------
+    CHAR                     | char, varchar, text
+    NCHAR                    | char, varchar, text
+    VARCHAR                  | char, varchar, text
+    VARCHAR2                 | char, varchar, text
+    NVARCHAR2                | char, varchar, text
+    CLOB                     | char, varchar, text
+    LONG                     | char, varchar, text
+    RAW                      | uuid, bytea
+    BLOB                     | bytea
+    BFILE                    | bytea (read-only)
+    LONG RAW                 | bytea
+    NUMBER                   | numeric, float4, float8, char, varchar, text
+    NUMBER(n,m) with m<=0    | numeric, float4, float8, int2, int4, int8,
+                             |    boolean, char, varchar, text
+    FLOAT                    | numeric, float4, float8, char, varchar, text
+    BINARY_FLOAT             | numeric, float4, float8, char, varchar, text
+    BINARY_DOUBLE            | numeric, float4, float8, char, varchar, text
+    DATE                     | date, timestamp, timestamptz, char, varchar, text
+    TIMESTAMP                | date, timestamp, timestamptz, char, varchar, text
+    TIMESTAMP WITH TIME ZOME | date, timestamp, timestamptz, char, varchar, text
+    TIMESTAMP WITH           | date, timestamp, timestamptz, char, varchar, text
+       LOCAL TIME ZONE       |
+    INTERVAL YEAR TO MONTH   | interval, char, varchar, text
+    INTERVAL DAY TO SECOND   | interval, char, varchar, text
+    MDSYS.SDO_GEOMETRY       | geometry (see "PostGIS support" below)
 
 If a NUMBER is converted to a boolean, 0 means `false`, everything else `true`.
 
