@@ -535,7 +535,9 @@ Building Infrastructure PGXS.  It should be easy to install.
 You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
 installed with packages, install the development package).  
 You need to install Oracle's C header files as well (SDK package for Instant
-Client).
+Client).  If you use the Instant Client ZIP files provided by Oracle and you
+are not on Windows, you will have to create a symbolic link from `libclntsh.so`
+to the actual shared library file yourself.
 
 Make sure that PostgreSQL is configured `--without-ldap` (at least the server).
 See the [Problems](#8-problems) section.
