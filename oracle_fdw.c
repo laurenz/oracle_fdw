@@ -32,7 +32,11 @@
 #include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
+#if PG_VERSION_NUM < 100000
 #include "libpq/md5.h"
+#else
+#include "common/md5.h"
+#endif  /* PG_VERSION_NUM */
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
