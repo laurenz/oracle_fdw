@@ -4243,10 +4243,16 @@ char
 			language = "SPANISH_SPAIN";
 		if (strncmp(lc_messages, "fr_", 3) == 0 || pg_strncasecmp(lc_messages, "french", 6) == 0)
 			language = "FRENCH_FRANCE";
+		if (strncmp(lc_messages, "in_", 3) == 0 || pg_strncasecmp(lc_messages, "indonesian", 10) == 0)
+			language = "INDONESIAN_INDONESIA";
+		if (strncmp(lc_messages, "it_", 3) == 0 || pg_strncasecmp(lc_messages, "italian", 7) == 0)
+			language = "ITALIAN_ITALY";
 		if (strncmp(lc_messages, "ja_", 3) == 0 || pg_strncasecmp(lc_messages, "japanese", 8) == 0)
 			language = "JAPANESE_JAPAN";
 		if (strncmp(lc_messages, "pt_", 3) == 0 || pg_strncasecmp(lc_messages, "portuguese", 10) == 0)
 			language = "BRAZILIAN PORTUGUESE_BRAZIL";
+		if (strncmp(lc_messages, "ru_", 3) == 0 || pg_strncasecmp(lc_messages, "russian", 7) == 0)
+			language = "RUSSIAN_RUSSIA";
 		if (strncmp(lc_messages, "tr_", 3) == 0 || pg_strncasecmp(lc_messages, "turkish", 7) == 0)
 			language = "TURKISH_TURKEY";
 		if (strncmp(lc_messages, "zh_CN", 5) == 0 || pg_strncasecmp(lc_messages, "chinese-simplified", 18) == 0)
