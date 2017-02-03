@@ -283,6 +283,12 @@ EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 (1 row)
 
 DEALLOCATE stmt;
+-- test NULL parameters
+SELECT id FROM typetest1 WHERE vc = (SELECT NULL::text);
+ id 
+----
+(0 rows)
+
 /*
  * Test current_timestamp.
  */

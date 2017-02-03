@@ -5080,7 +5080,7 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 
 		if (is_null)
 		{
-			param->value = NULL;
+			param->value = "(null)";
 		}
 		else
 		{

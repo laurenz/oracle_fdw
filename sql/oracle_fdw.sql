@@ -197,6 +197,8 @@ EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 DEALLOCATE stmt;
+-- test NULL parameters
+SELECT id FROM typetest1 WHERE vc = (SELECT NULL::text);
 
 /*
  * Test current_timestamp.
