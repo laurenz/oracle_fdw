@@ -5080,7 +5080,7 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 
 		if (is_null)
 		{
-			param->value = "(null)";
+			param->value = NULL;
 		}
 		else
 		{
@@ -5110,11 +5110,13 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 		if (first_param)
 		{
 			first_param = false;
-			appendStringInfo(&info, ", parameters %s=\"%s\"", param->name, param->value);
+			appendStringInfo(&info, ", parameters %s=\"%s\"", param->name,
+				(param->value ? param->value : "(null)"));
 		}
 		else
 		{
-			appendStringInfo(&info, ", %s=\"%s\"", param->name, param->value);
+			appendStringInfo(&info, ", %s=\"%s\"", param->name,
+				(param->value ? param->value : "(null)"));
 		}
 	}
 
