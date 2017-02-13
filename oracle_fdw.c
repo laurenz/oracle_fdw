@@ -5075,7 +5075,11 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 			 * Evaluate the expression.
 			 * This code path cannot be reached in 9.1
 			 */
-			datum = ExecEvalExpr((ExprState *)(param->node), econtext, &is_null, NULL);
+			datum = ExecEvalExpr((ExprState *)(param->node), econtext, &is_null
+#if PG_VERSION_NUM < 100000
+									, NULL
+#endif
+								);
 		}
 
 		if (is_null)
