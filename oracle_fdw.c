@@ -5569,9 +5569,16 @@ oracleError_i(oraError sqlstate, const char *message, int arg)
 void
 oracleError(oraError sqlstate, const char *message)
 {
-	ereport(ERROR,
-			(errcode(to_sqlstate(sqlstate)),
-			errmsg("%s", message)));
+	/* use errcode_for_file_access() if the message contains %m */
+	if (strstr(message, "%m")) {
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				errmsg(message, "")));
+	} else {
+		ereport(ERROR,
+				(errcode(to_sqlstate(sqlstate)),
+				errmsg("%s", message)));
+	}
 }
 
 /*
