@@ -1,3 +1,11 @@
+Version 1.5.1
+  Bugfixes:
+  - oracle_fdw crashed on Windows if queries use a NULL parameter or
+    an empty subselect.
+    Reprot by PAscal Lemoy.
+  - Reading "srid.map" sometimes caused errors even if everything was alright.
+    Report by Paul Dziemiela, analysis by Christian Ullrich.
+
 Version 1.5.0, released 2016-08-05
   Enhancements:
   - Add table option "sample_percent" to ANALYZE very large tables
