@@ -232,6 +232,7 @@ initSRIDMap()
 	/* from here on we must make sure that mapFile is closed if an error happens */
 	oracleFree(mapFileName);
 
+	clearerr(mapFile);
 	do
 	{
 		/* read the next line into "line" */
@@ -314,7 +315,7 @@ initSRIDMap()
 	} while (c != EOF);
 
 	/* check for errors */
-	save_errno = errno;
+	save_errno = ferror(mapFile);
 	(void)fclose(mapFile);
 	errno = save_errno;
 
