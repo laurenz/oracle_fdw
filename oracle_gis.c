@@ -216,9 +216,10 @@ initSRIDMap()
 
 	/* from here on we must make sure that srid_map is reset to NULL if an error occurs */
 
+	errno = 0;
 	if ((mapFile = fopen(mapFileName, "r")) == NULL)
 	{
-		/* if the file does not exists, treat it as if it were empty */
+		/* if the file does not exist, treat it as if it were empty */
 		if (errno == ENOENT)
 			return;
 
