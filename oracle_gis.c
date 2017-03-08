@@ -204,7 +204,7 @@ initSRIDMap()
 	FILE *mapFile;
 	char line[20];
 	unsigned long from, to;
-	int count = 0, i, save_errno, c;
+	int count = 0, i, save_errno, c, ferr;
 
 	mapFileName = oracleGetShareFileName(SRID_MAP_FILE);
 
@@ -314,12 +314,13 @@ initSRIDMap()
 		srid_map[count].from = 0;
 	} while (c != EOF);
 
-	/* check for errors */
-	save_errno = ferror(mapFile);
+	/* check for errors prior to closing mapping file */
+	ferr = ferror(mapFile);
+	save_errno = errno;
 	(void)fclose(mapFile);
 	errno = save_errno;
 
-	if (errno)
+	if (ferr)
 	{
 		free(srid_map);
 		srid_map = NULL;
