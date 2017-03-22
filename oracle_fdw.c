@@ -283,7 +283,10 @@ static Const *serializeLong(long i);
 static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
+#ifndef OLD_FDW_API
 static bool optionIsTrue(const char *value);
+static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
+#endif  /* OLD_FDW_API */
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static char *deparseInterval(Datum datum);
@@ -301,7 +304,6 @@ static void errorContextCallback(void *arg);
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase);
 #endif  /* IMPORT_API */
-static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -4476,6 +4478,7 @@ deserializeLong(Const *constant)
 		return (long)DatumGetInt64(constant->constvalue);
 }
 
+#ifndef OLD_FDW_API
 /*
  * optionIsTrue
  * 		Returns true if the string is "true", "on" or "yes".
@@ -4490,6 +4493,36 @@ optionIsTrue(const char *value)
 	else
 		return false;
 }
+
+/*
+ * find_em_expr_for_rel
+ * 		Find an equivalence class member expression, all of whose Vars come from
+ * 		the indicated relation.
+ */
+Expr *
+find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
+{
+	ListCell   *lc_em;
+
+	foreach(lc_em, ec->ec_members)
+	{
+		EquivalenceMember *em = lfirst(lc_em);
+
+		if (bms_equal(em->em_relids, rel->relids))
+		{
+			/*
+			 * If there is more than one equivalence member whose Vars are
+			 * taken entirely from this relation, we'll be content to choose
+			 * any one of those.
+			 */
+			return em->em_expr;
+		}
+	}
+
+	/* We didn't find any suitable equivalence class expression */
+	return NULL;
+}
+#endif  /* OLD_FDW_API */
 
 /*
  * deparseDate
@@ -5337,35 +5370,6 @@ fold_case(char *name, fold_t foldcase)
 	return NULL;  /* unreachable, but keeps compiler happy */
 }
 #endif  /* IMPORT_API */
-
-/*
- * find_em_expr_for_rel
- * 		Find an equivalence class member expression, all of whose Vars come from
- * 		the indicated relation.
- */
-Expr *
-find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
-{
-	ListCell   *lc_em;
-
-	foreach(lc_em, ec->ec_members)
-	{
-		EquivalenceMember *em = lfirst(lc_em);
-
-		if (bms_equal(em->em_relids, rel->relids))
-		{
-			/*
-			 * If there is more than one equivalence member whose Vars are
-			 * taken entirely from this relation, we'll be content to choose
-			 * any one of those.
-			 */
-			return em->em_expr;
-		}
-	}
-
-	/* We didn't find any suitable equivalence class expression */
-	return NULL;
-}
 
 /*
  * oracleGetShareFileName
