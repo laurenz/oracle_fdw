@@ -1124,52 +1124,6 @@ struct oraTable
 	return reply;
 }
 
-/*
- * oracleEstimate
- * 		Sets the estimates for startup_cost, total_cost, rows and width
- * 		as far as Oracle can tell.
- * 		startup_cost and total_cost will not be very good estimates.
- */
-void
-oracleEstimate(oracleSession *session, const char *query, double seq_page_cost, int block_size, double *startup_cost, double *total_cost, double *rows, int *width)
-{
-	double time, bytes;
-	dvoid *res[3];
-	sb4 res_size[3];
-	ub2 res_type[3], res_len[3];
-	sb2 res_ind[3];
-	const char * const desc_query = "SELECT time, cardinality, bytes FROM v$sql_plan WHERE sql_id = :sql_id AND child_number = :child_number AND id = 1";
-
-	res[0] = (dvoid *)&time;
-	res_size[0] = sizeof(double);
-	res_type[0] = SQLT_BDOUBLE;
-
-	res[1] = (dvoid *)rows;
-	res_size[1] = sizeof(double);
-	res_type[1] = SQLT_BDOUBLE;
-
-	res[2] = (dvoid *)&bytes;
-	res_size[2] = sizeof(double);
-	res_type[2] = SQLT_BDOUBLE;
-
-	oracleQueryPlan(session, query, desc_query, 3, res, res_size, res_type, res_len, res_ind);
-
-	/* close the statement */
-	oracleCloseStatement(session);
-
-	/* width now contains the total bytes estimated - divide by number of rows */
-	*width = (int)(bytes / *rows);
-
-	/*
-	 * Guess startup_cost and total_cost from Oracle's "time".
-	 * This is really shady as Oracle's time has a granularity of 1.
-	 * Assume that we can sequentially read 81920000 bytes per second.
-	 */
-
-	*total_cost = time * 81920000.0 / block_size * seq_page_cost;
-	*startup_cost = *total_cost;
-}
-
 #define EXPLAIN_LINE_SIZE 1000
 
 /*

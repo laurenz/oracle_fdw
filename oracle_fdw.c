@@ -135,7 +135,6 @@ struct OracleFdwOption
 #define OPT_PASSWORD "password"
 #define OPT_SCHEMA "schema"
 #define OPT_TABLE "table"
-#define OPT_PLAN_COSTS "plan_costs"
 #define OPT_MAX_LONG "max_long"
 #define OPT_READONLY "readonly"
 #define OPT_KEY "key"
@@ -160,7 +159,6 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_PASSWORD, UserMappingRelationId, true},
 	{OPT_SCHEMA, ForeignTableRelationId, false},
 	{OPT_TABLE, ForeignTableRelationId, true},
-	{OPT_PLAN_COSTS, ForeignTableRelationId, false},
 	{OPT_MAX_LONG, ForeignTableRelationId, false},
 	{OPT_READONLY, ForeignTableRelationId, false},
 	{OPT_SAMPLE, ForeignTableRelationId, false},
@@ -266,7 +264,7 @@ static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid server
 /*
  * Helper functions
  */
-static struct OracleFdwState *getFdwState(Oid foreigntableid, bool *plan_costs, double *sample_percent);
+static struct OracleFdwState *getFdwState(Oid foreigntableid, double *sample_percent);
 static void oracleGetOptions(Oid foreigntableid, List **options);
 static char *createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool modify, List *query_pathkeys);
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
@@ -401,9 +399,8 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 					errhint("Valid options in this context are: %s", buf.data)));
 		}
 
-		/* check valid values for "plan_costs" and "key" */
-		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0
-				|| strcmp(def->defname, OPT_READONLY) == 0
+		/* check valid values for "readonly" and "key" */
+		if (strcmp(def->defname, OPT_READONLY) == 0
 #ifndef OLD_FDW_API
 				|| strcmp(def->defname, OPT_KEY) == 0
 #endif	/* OLD_FDW_API */
@@ -695,17 +692,20 @@ oraclePlanForeignScan(Oid foreigntableid,
 	struct OracleFdwState *fdwState;
 	FdwPlan *fdwplan;
 	List *fdw_private;
-	bool plan_costs;
 	int i;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
 	/* get connection options, connect and get the remote table description */
-	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
+	fdwState = getFdwState(foreigntableid, NULL);
 
 	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
 	fdwState->query = createQuery(fdwState, baserel, false, NIL);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+
+	/* release Oracle session (will be cached) */
+	pfree(fdwState->session);
+	fdwState->session = NULL;
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
 	for (i=0; i<fdwState->oraTable->ncols; ++i)
@@ -718,30 +718,8 @@ oraclePlanForeignScan(Oid foreigntableid,
 				fdwState->oraTable->cols[i]->pgname
 			);
 
-	/* get Oracle's (bad) estimate only if plan_costs is set */
-	if (plan_costs)
-	{
-		/* get Oracle's cost estimates for the query */
-		oracleEstimate(
-			fdwState->session,
-			fdwState->query,
-			seq_page_cost,
-			BLCKSZ,
-			&(fdwState->startup_cost),
-			&(fdwState->total_cost),
-			&baserel->rows,
-			&baserel->width
-		);
-	}
-	else
-	{
-		/* otherwise, use a random "high" value */
-		fdwState->startup_cost = fdwState->total_cost = 10000.0;
-	}
-
-	/* release Oracle session (will be cached) */
-	pfree(fdwState->session);
-	fdwState->session = NULL;
+	/* use a random "high" value for cost */
+	fdwState->startup_cost = fdwState->total_cost = 10000.0;
 
 	/* "serialize" all necessary information in the private area */
 	fdw_private = serializePlanData(fdwState);
@@ -765,63 +743,18 @@ void
 oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 {
 	struct OracleFdwState *fdwState;
-	bool plan_costs, need_keys = false, for_update = false, has_trigger;
 	List *local_conditions = NIL;
 	int i;
 	double ntuples = -1;
-	Relation rel;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
 
-	/* check if the foreign scan is for an UPDATE or DELETE */
-	if (baserel->relid == root->parse->resultRelation &&
-			(root->parse->commandType == CMD_UPDATE ||
-			root->parse->commandType == CMD_DELETE))
-	{
-		/* we need the table's primary key columns */
-		need_keys = true;
-	}
+ 	/* get connection options, connect and get the remote table description */
+ 	fdwState = getFdwState(foreigntableid, NULL);
 
-	/* check if FOR [KEY] SHARE/UPDATE was specified */
-	if (need_keys || get_parse_rowmark(root->parse, baserel->relid))
-	{
-		/* we should add FOR UPDATE */
-		for_update = true;
-	}
-
-	/* get connection options, connect and get the remote table description */
-	fdwState = getFdwState(foreigntableid, &plan_costs, NULL);
-
-	if (need_keys)
-	{
-		/* we need to fetch all primary key columns */
-		for (i=0; i<fdwState->oraTable->ncols; ++i)
-			if (fdwState->oraTable->cols[i]->pkey)
-				fdwState->oraTable->cols[i]->used = 1;
-	}
-
-	/*
-	 * Core code already has some lock on each rel being planned, so we can
-	 * use NoLock here.
-	 */
-	rel = heap_open(foreigntableid, NoLock);
-
-	/* is there an AFTER trigger FOR EACH ROW? */
-	has_trigger = (baserel->relid == root->parse->resultRelation) && rel->trigdesc
-					&& ((root->parse->commandType == CMD_UPDATE && rel->trigdesc->trig_update_after_row)
-						|| (root->parse->commandType == CMD_DELETE && rel->trigdesc->trig_delete_after_row));
-
-	heap_close(rel, NoLock);
-
-	if (has_trigger)
-	{
-		/* we need to fetch and return all columns */
-		for (i=0; i<fdwState->oraTable->ncols; ++i)
-			if (fdwState->oraTable->cols[i]->pgname)
-				fdwState->oraTable->cols[i]->used = 1;
-	}
-
-	/* createQuery is moved to GetForeignPlan. */
+	/* release Oracle session (will be cached) */
+	pfree(fdwState->session);
+	fdwState->session = NULL;
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
 	for (i=0; i<fdwState->oraTable->ncols; ++i)
@@ -834,55 +767,20 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 				fdwState->oraTable->cols[i]->pgname
 			);
 
-	/* get Oracle's (bad) estimate only if plan_costs is set */
-	if (plan_costs)
-	{
+	/* use a random "high" value for cost */
+	fdwState->startup_cost = 10000.0;
 
-		fdwState->query = createQuery(fdwState, baserel, for_update, root->query_pathkeys);
-		elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+	/* if baserel->pages > 0, there was an ANALYZE; use the row count estimate */
+	if (baserel->pages > 0)
+		ntuples = baserel->tuples;
 
-		/* get Oracle's cost estimates for the query */
-		oracleEstimate(
-			fdwState->session,
-			fdwState->query,
-			seq_page_cost,
-			BLCKSZ,
-			&(fdwState->startup_cost),
-			&(fdwState->total_cost),
-			&ntuples,
-#if PG_VERSION_NUM < 90600
-			&baserel->width
-#else
-			&baserel->reltarget->width
-#endif
-		);
-
-		/* estimate selectivity only for conditions that are not pushed down */
-		for (i=list_length(baserel->baserestrictinfo)-1; i>=0; --i)
-			if (! fdwState->pushdown_clauses[i])
-				local_conditions = lcons(list_nth(baserel->baserestrictinfo, i), local_conditions);
-	}
-	else
-	{
-		/* otherwise, use a random "high" value for cost */
-		fdwState->startup_cost = 10000.0;
-
-		/* if baserel->pages > 0, there was an ANALYZE; use the row count estimate */
-		if (baserel->pages > 0)
-			ntuples = baserel->tuples;
-
-		/* estimale selectivity locally for all conditions */
-		local_conditions = baserel->baserestrictinfo;
-	}
-
-	/* release Oracle session (will be cached) */
-	pfree(fdwState->session);
-	fdwState->session = NULL;
+	/* estimale selectivity locally for all conditions */
+	local_conditions = baserel->baserestrictinfo;
 
 	/* apply statistics only if we have a reasonable row count estimate */
 	if (ntuples != -1)
 	{
-		/* estimate how clauses that are not pushed down will influence row count */
+		/* estimate how conditions will influence the row count */
 		ntuples = ntuples * clauselist_selectivity(root, local_conditions, 0, JOIN_INNER, NULL);
 		/* make sure that the estimate is not less that 1 */
 		ntuples = clamp_row_est(ntuples);
@@ -979,10 +877,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 
 	/* set order clause */
 	if(usable_pathkeys != NIL)
-	{
 		fdwState->order_clause = orderedquery.data;
-	}
-	elog(DEBUG1, "fdwState->order_clause: %s", fdwState->order_clause);
 
 	/* add the only path */
 	add_path(baserel,
@@ -1022,7 +917,8 @@ ForeignScan
 	List *fdw_private, *keep_clauses = NIL;
 	ListCell *cell1, *cell2;
 	int i;
-	bool need_keys = false, for_update = false;
+	bool need_keys = false, for_update = false, has_trigger;
+	Relation rel;
 
 	/* check if the foreign scan is for an UPDATE or DELETE */
 	if (baserel->relid == root->parse->resultRelation &&
@@ -1045,6 +941,27 @@ ForeignScan
 		/* we need to fetch all primary key columns */
 		for (i=0; i<fdwState->oraTable->ncols; ++i)
 			if (fdwState->oraTable->cols[i]->pkey)
+				fdwState->oraTable->cols[i]->used = 1;
+	}
+
+	/*
+	 * Core code already has some lock on each rel being planned, so we can
+	 * use NoLock here.
+	 */
+	rel = heap_open(foreigntableid, NoLock);
+
+	/* is there an AFTER trigger FOR EACH ROW? */
+	has_trigger = (baserel->relid == root->parse->resultRelation) && rel->trigdesc
+					&& ((root->parse->commandType == CMD_UPDATE && rel->trigdesc->trig_update_after_row)
+						|| (root->parse->commandType == CMD_DELETE && rel->trigdesc->trig_delete_after_row));
+
+	heap_close(rel, NoLock);
+
+	if (has_trigger)
+	{
+		/* we need to fetch and return all columns */
+		for (i=0; i<fdwState->oraTable->ncols; ++i)
+			if (fdwState->oraTable->cols[i]->pgname)
 				fdwState->oraTable->cols[i]->used = 1;
 	}
 
@@ -1433,10 +1350,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	}
 	else
 	{
-		bool plan_costs;
-
 		/* if no, we have to construct it ourselves */
-		fdwState = getFdwState(rte->relid, &plan_costs, NULL);
+		fdwState = getFdwState(rte->relid, NULL);
 	}
 
 	initStringInfo(&sql);
@@ -2285,17 +2200,17 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
  * 		Construct an OracleFdwState from the options of the foreign table.
  * 		Establish an Oracle connection and get a description of the
  * 		remote table.
- * 		"plan_costs" and "sample_percent" are set from the foreign table options.
+ * 		"sample_percent" is set from the foreign table options.
  * 		"sample_percent" can be NULL, in that case it is not set.
  */
 struct OracleFdwState
-*getFdwState(Oid foreigntableid, bool *plan_costs, double *sample_percent)
+*getFdwState(Oid foreigntableid, double *sample_percent)
 {
 	struct OracleFdwState *fdwState = palloc(sizeof(struct OracleFdwState));
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *plancosts = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
+	char *schema = NULL, *table = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
 	long max_long;
 
 	fdwState->nls_lang = NULL;
@@ -2328,8 +2243,6 @@ struct OracleFdwState
 			schema = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_TABLE) == 0)
 			table = ((Value *) (def->arg))->val.str;
-		if (strcmp(def->defname, OPT_PLAN_COSTS) == 0)
-			plancosts = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
 			maxlong = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_SAMPLE) == 0)
@@ -2387,9 +2300,6 @@ struct OracleFdwState
 
 	/* add PostgreSQL data to table description */
 	getColumnData(foreigntableid, fdwState->oraTable);
-
-	/* test if we should invoke Oracle's optimizer for cost planning */
-	*plan_costs = plancosts != NULL && optionIsTrue(plancosts);
 
 	return fdwState;
 }
@@ -2587,9 +2497,7 @@ char
 
 	/* append ORDER BY clause if all columns can be pushed down */
 	if (fdwState->order_clause)
-	{
 		appendStringInfo(&query, " ORDER BY%s", fdwState->order_clause);
-	}
 
 	/* append FOR UPDATE if if the scan is for a modification */
 	if (modify)
@@ -2651,7 +2559,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 {
 	int collected_rows = 0, i;
 	struct OracleFdwState *fdw_state;
-	bool plan_costs, first_column = true;
+	bool first_column = true;
 	StringInfoData query;
 	TupleDesc tupDesc = RelationGetDescr(relation);
 	Datum *values = (Datum *)palloc(tupDesc->natts * sizeof(Datum));
@@ -2674,7 +2582,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	rstate = anl_init_selection_state(targrows);
 
 	/* get connection options, connect and get the remote table description */
-	fdw_state = getFdwState(RelationGetRelid(relation), &plan_costs, &sample_percent);
+	fdw_state = getFdwState(RelationGetRelid(relation), &sample_percent);
 	fdw_state ->paramList = NULL;
 	fdw_state->pushdown_clauses = NULL;
 	fdw_state->rowcount = 0;
@@ -4378,7 +4286,7 @@ List
 		result = lappend(result, serializeInt((int)param->colnum));
 		/* don't serialize value, node and bindh */
 	}
-	/* don't serialize params, startup_cost, total_cost, pushdown_clauses, rowcount, columnindex and temp_cxt */
+	/* don't serialize params, startup_cost, total_cost, pushdown_clauses, rowcount, columnindex, temp_cxt and order_clause */
 
 	return result;
 }
@@ -4441,6 +4349,7 @@ struct OracleFdwState
 	state->columnindex = 0;
 	state->params = NULL;
 	state->temp_cxt = NULL;
+	state->order_clause = NULL;
 
 	/* dbserver */
 	state->dbserver = deserializeString(lfirst(cell));
@@ -4752,6 +4661,7 @@ struct OracleFdwState
 	copy->rowcount = 0;
 	copy->columnindex = 0;
 	copy->temp_cxt = NULL;
+	copy->order_clause = NULL;
 
 	return copy;
 }

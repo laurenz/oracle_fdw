@@ -1,4 +1,10 @@
-Version 1.5.1
+Version 2.0.0
+  Incompatible changes:
+  - Remove the deprecated option "plan_costs", since it is not very useful and
+    is a maintenance burden.  After an upgrade, tables with this option set
+    should be updated with:
+    ALTER FOREIGN TABLE ... OPTIONS (DROP plan_costs);
+
   Bugfixes:
   - oracle_fdw crashed on Windows if queries use a NULL parameter or
     an empty subselect.
