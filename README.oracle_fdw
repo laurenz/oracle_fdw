@@ -311,7 +311,7 @@ These conversions are automatically handled by oracle_fdw:
     BINARY_DOUBLE            | numeric, float4, float8, char, varchar, text
     DATE                     | date, timestamp, timestamptz, char, varchar, text
     TIMESTAMP                | date, timestamp, timestamptz, char, varchar, text
-    TIMESTAMP WITH TIME ZOME | date, timestamp, timestamptz, char, varchar, text
+    TIMESTAMP WITH TIME ZONE | date, timestamp, timestamptz, char, varchar, text
     TIMESTAMP WITH           | date, timestamp, timestamptz, char, varchar, text
        LOCAL TIME ZONE       |
     INTERVAL YEAR TO MONTH   | interval, char, varchar, text
