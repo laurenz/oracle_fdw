@@ -2018,7 +2018,7 @@ oracleFetchNext(oracleSession *session)
 
 	if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(err_code == 8177 ? FDW_SERIALIZATION_FAILURE : FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error fetching result: OCIStmtFetch2 failed to fetch next result row",
 			oraMessage);
 	}
