@@ -2896,8 +2896,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 						&& oratype != ORA_TYPE_VARCHAR2
 						&& oratype != ORA_TYPE_CHAR
 						&& oratype != ORA_TYPE_NVARCHAR2
-						&& oratype != ORA_TYPE_NCHAR
-						&& oratype != ORA_TYPE_CLOB)
+						&& oratype != ORA_TYPE_NCHAR)
 					return NULL;
 
 				initStringInfo(&result);

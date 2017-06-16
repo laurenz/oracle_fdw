@@ -365,19 +365,19 @@ EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY id, vc;
 (4 rows)
 
 -- push down complicated expressions
-EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(lc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
                                                                                                                                                            QUERY PLAN                                                                                                                                                           
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  LockRows
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*6039b1544e0e30ab6cb82a321ce9834c*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1" ORDER BY length("LC") ASC NULLS LAST, CASE WHEN ("VC" IS NULL) THEN 0 ELSE 1 END ASC NULLS LAST, "TS" DESC NULLS FIRST FOR UPDATE
+         Oracle query: SELECT /*94048e32478dc945f3dd7d9872ace030*/ "ID", "C", "NC", "VC", "NVC", "LC", "R", "U", "LB", "LR", "B", "NUM", "FL", "DB", "D", "TS", "IDS", "IYM" FROM "TYPETEST1" ORDER BY length("VC") ASC NULLS LAST, CASE WHEN ("VC" IS NULL) THEN 0 ELSE 1 END ASC NULLS LAST, "TS" DESC NULLS FIRST FOR UPDATE
 (3 rows)
 
-SELECT id FROM typetest1 ORDER BY length(lc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
  id 
 ----
   4
-  1
   3
+  1
 (3 rows)
 

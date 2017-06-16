@@ -261,5 +261,5 @@ ROLLBACK;
 -- don't push down string data types
 EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY id, vc;
 -- push down complicated expressions
-EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(lc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
-SELECT id FROM typetest1 ORDER BY length(lc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;

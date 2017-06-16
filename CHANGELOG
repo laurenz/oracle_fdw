@@ -8,9 +8,13 @@ Version 2.0.0
   Bugfixes:
   - oracle_fdw crashed on Windows if queries use a NULL parameter or
     an empty subselect.
-    Reprot by PAscal Lemoy.
+    Report by PAscal Lemoy.
   - Reading "srid.map" sometimes caused errors even if everything was alright.
     Report by Paul Dziemiela, analysis by Christian Ullrich.
+  - Don't push down expressions with CLOB column references.
+    Because of Oracle's inability to use CLOB in SQL expressions,
+    this could lead to errors like
+       ORA-00932: inconsistent datatypes: expected - got CLOB
 
 Version 1.5.0, released 2016-08-05
   Enhancements:
