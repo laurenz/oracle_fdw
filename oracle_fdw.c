@@ -1071,7 +1071,11 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 
 #ifndef OLD_FDW_API
 	/* create an ExprState tree for the parameter expressions */
+#if PG_VERSION_NUM < 100000
 	exec_exprs = (List *)ExecInitExpr((Expr *)fsplan->fdw_exprs, (PlanState *)node);
+#else
+	exec_exprs = (List *)ExecInitExprList(fsplan->fdw_exprs, (PlanState *)node);
+#endif  /* PG_VERSION_NUM */
 
 	/* create the list of parameters */
 	index = 0;
