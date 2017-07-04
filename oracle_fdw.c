@@ -2556,7 +2556,7 @@ char
 #ifndef OLD_FDW_API
 /*
  * acquireSampleRowsFunc
- * 		Perform a sequential scan on the Oracle table and return a sampe of rows.
+ * 		Perform a sequential scan on the Oracle table and return a sample of rows.
  * 		All LOB values are truncated to WIDTH_THRESHOLD+1 because anything
  * 		exceeding this is not used by compute_scalar_stats().
  */
