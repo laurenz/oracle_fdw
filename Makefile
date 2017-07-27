@@ -3,7 +3,7 @@ OBJS = oracle_fdw.o oracle_utils.o oracle_gis.o
 EXTENSION = oracle_fdw
 DATA = oracle_fdw--1.1.sql oracle_fdw--1.0--1.1.sql
 DOCS = README.oracle_fdw
-REGRESS = oracle_fdw oracle_gis oracle_import
+REGRESS = oracle_fdw oracle_gis oracle_import oracle_fdw_join
 
 # add include and library paths for both Instant Client and regular Client
 PG_CPPFLAGS = -I$(ORACLE_HOME)/sdk/include -I$(ORACLE_HOME)/oci/include -I$(ORACLE_HOME)/rdbms/public -I/usr/include/oracle/12.2/client -I/usr/include/oracle/12.2/client64 -I/usr/include/oracle/12.1/client -I/usr/include/oracle/12.1/client64 -I/usr/include/oracle/11.2/client -I/usr/include/oracle/11.2/client64 -I/usr/include/oracle/11.1/client -I/usr/include/oracle/11.1/client64 -I/usr/include/oracle/10.2.0.5/client -I/usr/include/oracle/10.2.0.5/client64 -I/usr/include/oracle/10.2.0.4/client -I/usr/include/oracle/10.2.0.4/client64 -I/usr/include/oracle/10.2.0.3/client -I/usr/include/oracle/10.2.0.3/client64
