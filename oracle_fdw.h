@@ -112,7 +112,7 @@ struct oraColumn
 	unsigned short val_len;  /* actual length of val */
 	unsigned int val_len4;   /* actual length of val - for bind callbacks */
 	short val_null;          /* indicator for NULL value */
-	int varno;               /* index of this column's relation for join-pushdown */
+	int varno;               /* range table index of this column's relation */
 };
 
 struct oraTable
