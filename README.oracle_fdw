@@ -352,6 +352,25 @@ The expressions `now()`, `transaction_timestamp()`, `current_timestamp`,
 The output of EXPLAIN will show the Oracle query used, so you can see which
 conditions were translated to Oracle and how.
 
+Joins between foreign tables
+----------------------------
+
+From PostgreSQL 9.6 on, oracle_fdw can push down joins to the Oracle server,
+that is, a join between two foreign tables will lead to a single Oracle query
+that performs the join on the Oracle side.
+
+There are some restrictions when this can happen:
+
+- Both tables must be defined on the same foreign server.
+- The join must be an inner join.
+- Joins between three or more tables won't be pushed down.
+- The join must be in a SELECT statement.
+- oracle_fdw must be able to push down all join conditions and WHERE clauses.
+- Cross joins without join conditions are not pushed down.
+
+It is important that table statistics for both foreign tables have been
+collected with ANALYZE for PostgreSQL to determine the best join strategy.
+
 Modifying foreign data
 ----------------------
 
