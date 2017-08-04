@@ -367,6 +367,7 @@ There are some restrictions when this can happen:
 - The join must be in a SELECT statement.
 - oracle_fdw must be able to push down all join conditions and WHERE clauses.
 - Cross joins without join conditions are not pushed down.
+- If a join is pushed down, ORDER BY clauses will not be pushed down.
 
 It is important that table statistics for both foreign tables have been
 collected with ANALYZE for PostgreSQL to determine the best join strategy.
