@@ -7,12 +7,12 @@ ANALYZE typetest1;
 /*
  * Cases that should be pushed down.
  */
-SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
+SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c ORDER BY t1.id, t2.id;
  id | id 
 ----+----
-  4 |  4
   1 |  1
   3 |  3
+  4 |  4
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
@@ -22,7 +22,7 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1
    Oracle query: SELECT /*e4c88236bdfe66c8af8d114b6f7fa761*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."C" = r2."C"))
 (2 rows)
 
-SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2);
+SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2) ORDER BY t1.id, t2.id;
  length | length 
 --------+--------
       5 |     22
@@ -36,13 +36,8 @@ EXPLAIN (COSTS off) SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN t
 (2 rows)
 
 /* ORDER BY does not get pushed down */
-SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id;
- id | id 
-----+----
-  1 |  1
-  3 |  3
-(2 rows)
-
+SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id ORDER BY t1.id, t2.id;
+ERROR:  syntax error at or near "ORDER" at character 128
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id;
                                                                                      QUERY PLAN                                                                                      
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -53,12 +48,12 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USIN
 (4 rows)
 
 /* natural join */
-SELECT id FROM typetest1 NATURAL JOIN shorty;
+SELECT id FROM typetest1 NATURAL JOIN shorty ORDER BY id;
  id 
 ----
-  4
   1
   3
+  4
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT id FROM typetest1 NATURAL JOIN shorty;
