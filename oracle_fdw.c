@@ -3017,6 +3017,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		Var *var = (Var *) lfirst(lc);
 		struct oraColumn *col = NULL;
 		struct oraColumn *newcol;
+		int used_flag = 0;
 
 		Assert(IsA(var, Var));
 		/* Find appropriate entry from children's oraTable. */
@@ -3043,16 +3044,20 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 				}
 			}
 		}
-		if (!col)
-			elog(ERROR, "oracle_fdw internal error: cannot find join column in base table");
 
 		newcol = (struct oraColumn*) palloc0(sizeof(struct oraColumn));
-		memcpy(newcol, col, sizeof(struct oraColumn));
-		newcol->used = 1;
+		if (col)
+		{
+			memcpy(newcol, col, sizeof(struct oraColumn));
+			used_flag = 1;
+		}
+		newcol->used = used_flag;
 		/* pgattnum should be the index in SELECT clause of join query. */
 		newcol->pgattnum = fdwState->oraTable->ncols + 1;
+
 		fdwState->oraTable->cols[fdwState->oraTable->ncols++] = newcol;
 	}
+
 	fdwState->oraTable->npgcols = fdwState->oraTable->ncols;
 
 	return true;
