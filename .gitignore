@@ -18,6 +18,9 @@
 # Regression test results
 results
 
+# dependency tracking
+.deps
+
 # other version control systems
 CVS
 .svn

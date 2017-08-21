@@ -3051,6 +3051,12 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			memcpy(newcol, col, sizeof(struct oraColumn));
 			used_flag = 1;
 		}
+		else
+			/* non-existing column, print a warning */
+			ereport(WARNING,
+					(errcode(ERRCODE_WARNING),
+					errmsg("column does not exist in foreign Oracle table, will be replaced by NULL")));
+
 		newcol->used = used_flag;
 		/* pgattnum should be the index in SELECT clause of join query. */
 		newcol->pgattnum = fdwState->oraTable->ncols + 1;

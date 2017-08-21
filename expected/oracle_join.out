@@ -65,6 +65,7 @@ EXPLAIN (COSTS off) SELECT id FROM typetest1 NATURAL JOIN shorty;
 
 /* table with column that does not exist in Oracle (should become NULL) */
 SELECT t1.id, t2.x FROM typetest1 t1 JOIN longy t2 ON t1.c = t2.c ORDER BY t1.id, t2.x;
+WARNING:  column does not exist in foreign Oracle table, will be replaced by NULL
  id | x 
 ----+---
   1 |  
@@ -73,6 +74,7 @@ SELECT t1.id, t2.x FROM typetest1 t1 JOIN longy t2 ON t1.c = t2.c ORDER BY t1.id
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT t1.id, t2.x FROM typetest1 t1 JOIN longy t2 ON t1.c = t2.c;
+WARNING:  column does not exist in foreign Oracle table, will be replaced by NULL
                                                                 QUERY PLAN                                                                
 ------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan
