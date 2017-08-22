@@ -2889,6 +2889,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	ListCell   *lc;
 	List       *otherclauses;
 
+	char *tabname;  /* for warning messages */
+
 	/* we only support pushing down INNER joins */
 	if (jointype != JOIN_INNER)
 		return false;
@@ -3011,6 +3013,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * Here we assume that children are foreign table, not foreign join.
 	 * We need capability to track relid chain through join tree to support N-way join.
 	 */
+	tabname = "?";
 	foreach(lc, joinrel->reltarget->exprs)
 	{
 		int i;
@@ -3025,10 +3028,15 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		{
 			struct oraColumn *tmp = oraTable_o->cols[i];
 
-			if (tmp->varno == var->varno && tmp->pgattnum == var->varattno)
+			if (tmp->varno == var->varno)
 			{
-				col = tmp;
-				break;
+				tabname = oraTable_o->pgname;
+
+				if (tmp->pgattnum == var->varattno)
+				{
+					col = tmp;
+					break;
+				}
 			}
 		}
 		if (!col)
@@ -3037,10 +3045,15 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			{
 				struct oraColumn *tmp = oraTable_i->cols[i];
 
-				if (tmp->varno == var->varno && tmp->pgattnum == var->varattno)
+				if (tmp->varno == var->varno)
 				{
-					col = tmp;
-					break;
+					tabname = oraTable_i->pgname;
+
+					if (tmp->pgattnum == var->varattno)
+					{
+						col = tmp;
+						break;
+					}
 				}
 			}
 		}
@@ -3055,7 +3068,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			/* non-existing column, print a warning */
 			ereport(WARNING,
 					(errcode(ERRCODE_WARNING),
-					errmsg("column does not exist in foreign Oracle table, will be replaced by NULL")));
+					errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", var->varattno, tabname)));
 
 		newcol->used = used_flag;
 		/* pgattnum should be the index in SELECT clause of join query. */
