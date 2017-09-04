@@ -20,6 +20,11 @@ Version 2.0.0
     Because of Oracle's inability to use CLOB in SQL expressions,
     this could lead to errors like
        ORA-00932: inconsistent datatypes: expected - got CLOB
+  - Fix bug in "pg_terminate_backend" handling.
+    "pg_terminate_backend" (or SIGTERM) was not handled
+    correctly, since neither the Oracle query was canceled nor did
+    the backend terminate.
+    Reported by Dmitry Chirkin.
 
 Version 1.5.0, released 2016-08-05
   Enhancements:

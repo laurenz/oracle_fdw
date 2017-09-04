@@ -28,6 +28,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_user_mapping.h"
 #include "catalog/pg_type.h"
+#include "commands/defrem.h"
 #include "commands/explain.h"
 #include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
@@ -42,16 +43,19 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
+#include "nodes/relation.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/planmain.h"
 #include "optimizer/restrictinfo.h"
+#include "optimizer/tlist.h"
 #include "optimizer/var.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "port.h"
 #include "storage/ipc.h"
 #include "storage/lock.h"
+#include "tcop/tcopprot.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
@@ -70,9 +74,6 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
-#include "nodes/relation.h"
-#include "commands/defrem.h"
-#include "optimizer/tlist.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -345,6 +346,7 @@ static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *new
 #endif  /* WRITE_API */
 static void transactionCallback(XactEvent event, void *arg);
 static void exitHook(int code, Datum arg);
+static void oracleDie(SIGNAL_ARGS);
 static char *setSelectParameters(struct paramDesc *paramList, ExprContext *econtext);
 static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob);
 static void errorContextCallback(void *arg);
@@ -5671,6 +5673,30 @@ exitHook(int code, Datum arg)
 }
 
 /*
+ * oracleDie
+ * 		Terminate the current query and prepare backend shutdown.
+ * 		This is a signal handler function.
+ */
+void
+oracleDie(SIGNAL_ARGS)
+{
+	/*
+	 * Terminate any running queries.
+	 * The Oracle sessions will be terminated by exitHook().
+	 */
+	oracleCancel();
+
+	/*
+	 * Call the original backend shutdown function.
+	 * If a query was canceled above, an error from Oracle would result.
+	 * To have the backend report the correct FATAL error instead,
+	 * we have to call CHECK_FOR_INTERRUPTS() before we report that error;
+	 * this is done in oracleError_d.
+	 */
+	die(postgres_signal_arg);
+}
+
+/*
  * setSelectParameters
  * 		Set the current values of the parameters into paramList.
  * 		Return a string containing the parameters set for a DEBUG message.
@@ -6097,6 +6123,16 @@ oracleFree(void *p)
 	pfree(p);
 }
 
+/*
+ * oracleSetHandlers
+ * 		Set signal handler for SIGTERM.
+ */
+void
+oracleSetHandlers()
+{
+	pqsignal(SIGTERM, oracleDie);
+}
+
 /* get a PostgreSQL error code from an oraError */
 #define to_sqlstate(x) \
 	(x==FDW_UNABLE_TO_ESTABLISH_CONNECTION ? ERRCODE_FDW_UNABLE_TO_ESTABLISH_CONNECTION : \
@@ -6113,6 +6149,9 @@ oracleFree(void *p)
 void
 oracleError_d(oraError sqlstate, const char *message, const char *detail)
 {
+	/* if the backend was terminated, report that rather than the Oracle error */
+	CHECK_FOR_INTERRUPTS();
+
 	ereport(ERROR,
 			(errcode(to_sqlstate(sqlstate)),
 			errmsg("%s", message),

@@ -178,6 +178,7 @@ extern oracleSession *oracleGetSession(const char *connectstring, char *user, ch
 extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
+extern void oracleCancel(void);
 extern void oracleEndTransaction(void *arg, int is_commit, int silent);
 extern void oracleEndSubtransaction(void *arg, int nest_level, int is_commit);
 extern int oracleIsStatementOpen(oracleSession *session);
@@ -201,6 +202,7 @@ extern void oracleUnregisterCallback(void *arg);
 extern void *oracleAlloc(size_t size);
 extern void *oracleRealloc(void *p, size_t size);
 extern void oracleFree(void *p);
+extern void oracleSetHandlers(void);
 extern void oracleError_d(oraError sqlstate, const char *message, const char *detail);
 extern void oracleError_sd(oraError sqlstate, const char *message, const char *arg, const char *detail);
 extern void oracleError_ssdh(oraError sqlstate, const char *message, const char *arg1, const char* arg2, const char *detail, const char *hint);

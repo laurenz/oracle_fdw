@@ -155,6 +155,13 @@ oracleSession
 		/* we can call OCITerminate now */
 		oci_initialized = 1;
 
+		/*
+		 * Oracle overwrites PostgreSQL's signal handlers, so we have to restore them.
+		 * Oracle's SIGINT handler is ok (it cancels the query), but we must do something
+		 * reasonable for SIGTERM.
+		 */
+		oracleSetHandlers();
+
 		/* allocate error handle */
 		if (checkerr(
 			OCIHandleAlloc((dvoid *) envhp, (dvoid **) &errhp,
@@ -559,6 +566,22 @@ oracleShutdown(void)
 	/* done with Oracle */
 	if (oci_initialized)
 		(void)OCITerminate(OCI_DEFAULT);
+}
+
+/*
+ * oracleCancel
+ * 		Cancel all running Oracle queries.
+ */
+void
+oracleCancel(void)
+{
+	struct envEntry *envp;
+	struct srvEntry *srvp;
+
+	/* send a cancel request for all servers ignoring errors */
+	for (envp = envlist; envp != NULL; envp = envp->next)
+		for (srvp = envp->srvlist; srvp != NULL; srvp = srvp->next)
+			(void)OCIBreak(srvp->srvhp, envp->errhp);
 }
 
 /*
