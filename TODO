@@ -1,7 +1,4 @@
 This is a list of things that should be done.
 Help is welcome!
 
-Support join pushdown
----------------------
-
-Try to push down joins from PostgreSQL 9.5 on.
+- Map PostgreSQL type "json" (and maybe "jsonb") to Oracle VARCHAR2 and CLOB.
