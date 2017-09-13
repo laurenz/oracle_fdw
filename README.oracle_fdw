@@ -17,7 +17,7 @@ This README contains the following sections:
 8. [Problems](#8-problems)
 9. [Support](#9-support)
 
-oracle_fdw was written by Laurenz Albe (laurenz.albe@wien.gv.at)
+oracle_fdw was written by Laurenz Albe
 
 1. Cookbook
 ===========
@@ -793,6 +793,3 @@ If you have a problem or question or any kind of feedback, the preferred
 option is to open an issue on GitHub:  
 https://github.com/laurenz/oracle_fdw/issues  
 This requires a GitHub account.
-
-I will also answer e-mail sent to me at laurenz.albe@wien.gv.at, but that way
-you exclude others from helping you or benefiting from your experience.
