@@ -38,6 +38,7 @@
 #else
 #include "common/md5.h"
 #endif  /* PG_VERSION_NUM */
+#include "libpq/pqsignal.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
