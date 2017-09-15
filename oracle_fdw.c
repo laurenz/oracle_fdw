@@ -123,6 +123,11 @@
 #undef JOIN_API
 #endif  /* PG_VERSION_NUM */
 
+#if PG_VERSION_NUM < 110000
+/* backport macro from V11 */
+#define TupleDescAttr(tupdesc, i) ((tupdesc)->attrs[(i)])
+#endif  /* PG_VERSION_NUM */
+
 PG_MODULE_MAGIC;
 
 /*
@@ -1510,7 +1515,7 @@ oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relat
 	/* loop through all columns of the foreign table */
 	for (i=0; i<tupdesc->natts; ++i)
 	{
-		Form_pg_attribute att = tupdesc->attrs[i];
+		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
 		AttrNumber attrno = att->attnum;
 		List *options;
 		ListCell *option;
@@ -1634,7 +1639,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 			for (attnum = 1; attnum <= tupdesc->natts; attnum++)
 			{
-				Form_pg_attribute attr = tupdesc->attrs[attnum - 1];
+				Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
 
 				if (!attr->attisdropped)
 					targetAttrs = lappend_int(targetAttrs, attnum);
@@ -2605,7 +2610,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 	index = 0;
 	for (i=0; i<tupdesc->natts; ++i)
 	{
-		Form_pg_attribute att_tuple = tupdesc->attrs[i];
+		Form_pg_attribute att_tuple = TupleDescAttr(tupdesc, i);
 #ifndef OLD_FDW_API
 		List *options;
 		ListCell *option;
