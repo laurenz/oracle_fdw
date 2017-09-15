@@ -1,4 +1,4 @@
-Version 2.0.0
+Version 2.0.0, released 2017-09-15
   Incompatible changes:
   - Remove the deprecated option "plan_costs", since it is not very useful and
     is a maintenance burden.  After an upgrade, tables with this option set
