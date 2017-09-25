@@ -128,6 +128,14 @@
 #define TupleDescAttr(tupdesc, i) ((tupdesc)->attrs[(i)])
 #endif  /* PG_VERSION_NUM */
 
+/* older versions don't have JSONOID or JSONBOID */
+#ifndef JSONOID
+#define JSONOID InvalidOid
+#endif
+#ifndef JSONBOID
+#define JSONBOID InvalidOid
+#endif
+
 PG_MODULE_MAGIC;
 
 /*
@@ -4714,6 +4722,13 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 	/* SDO_GEOMETRY can be converted to geometry */
 	if (oratype == ORA_TYPE_GEOMETRY
 			&& pgtype == GEOMETRYOID)
+		return;
+
+	/* VARCHAR2 and CLOB can be converted to json and jsonb */
+	if ((oratype == ORA_TYPE_VARCHAR2
+			|| oratype == ORA_TYPE_CLOB)
+			&& (pgtype == JSONOID
+			|| pgtype == JSONBOID))
 		return;
 
 	/* otherwise, report an error */

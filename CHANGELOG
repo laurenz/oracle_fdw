@@ -1,3 +1,9 @@
+Version 2.1.0
+  Enhancements:
+  - Add support for "json" and "jsonb" data types.
+    On the Oracle side, CLOB or VARCHAR2 can be used.
+    Suggested by "bsislow".
+
 Version 2.0.0, released 2017-09-15
   Incompatible changes:
   - Remove the deprecated option "plan_costs", since it is not very useful and

@@ -295,9 +295,9 @@ These conversions are automatically handled by oracle_fdw:
     CHAR                     | char, varchar, text
     NCHAR                    | char, varchar, text
     VARCHAR                  | char, varchar, text
-    VARCHAR2                 | char, varchar, text
+    VARCHAR2                 | char, varchar, text, json, jsonb
     NVARCHAR2                | char, varchar, text
-    CLOB                     | char, varchar, text
+    CLOB                     | char, varchar, text, json, jsonb
     LONG                     | char, varchar, text
     RAW                      | uuid, bytea
     BLOB                     | bytea
