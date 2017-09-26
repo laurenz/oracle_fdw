@@ -1,6 +1,6 @@
 Version 2.1.0
   Enhancements:
-  - Add support for "json" and "jsonb" data types.
+  - Add support for the "json" PostgreSQL data type.
     On the Oracle side, CLOB or VARCHAR2 can be used.
     Suggested by "bsislow".
 
