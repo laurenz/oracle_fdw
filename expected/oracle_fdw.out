@@ -381,3 +381,20 @@ SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1
   1
 (3 rows)
 
+/*
+ * Test that incorrect type mapping throws an error.
+ */
+-- create table with bad type matches
+CREATE FOREIGN TABLE badtypes (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   xml,
+   nc  xml
+) SERVER oracle OPTIONS (table 'TYPETEST1');
+-- should fail for column "nc", as "c" is not used
+SELECT id, nc FROM badtypes WHERE id = 1;
+ERROR:  column "nc" of foreign table "badtypes" cannot be converted to or from Oracle data type
+-- this will fail for inserting a NULL in column "c"
+INSERT INTO badtypes (id, nc) VALUES (42, XML '<empty/>');
+ERROR:  column "c" of foreign table "badtypes" cannot be converted to or from Oracle data type
+-- remove foreign table
+DROP FOREIGN TABLE badtypes;

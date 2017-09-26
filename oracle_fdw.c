@@ -867,17 +867,6 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	pfree(fdwState->session);
 	fdwState->session = NULL;
 
-	/* get PostgreSQL column data types, check that they match Oracle's */
-	for (i=0; i<fdwState->oraTable->ncols; ++i)
-		if (fdwState->oraTable->cols[i]->used)
-			checkDataType(
-				fdwState->oraTable->cols[i]->oratype,
-				fdwState->oraTable->cols[i]->scale,
-				fdwState->oraTable->cols[i]->pgtype,
-				fdwState->oraTable->pgname,
-				fdwState->oraTable->cols[i]->pgname
-			);
-
 	/* use a random "high" value for cost */
 	fdwState->startup_cost = 10000.0;
 
@@ -1239,6 +1228,17 @@ ForeignScan
 	/* create remote query */
 	fdwState->query = createQuery(fdwState, foreignrel, for_update, best_path->path.pathkeys);
 	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
+
+	/* get PostgreSQL column data types, check that they match Oracle's */
+	for (i=0; i<fdwState->oraTable->ncols; ++i)
+		if (fdwState->oraTable->cols[i]->used)
+			checkDataType(
+				fdwState->oraTable->cols[i]->oratype,
+				fdwState->oraTable->cols[i]->scale,
+				fdwState->oraTable->cols[i]->pgtype,
+				fdwState->oraTable->pgname,
+				fdwState->oraTable->cols[i]->pgname
+			);
 
 	fdw_private = serializePlanData(fdwState);
 

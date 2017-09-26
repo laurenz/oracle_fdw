@@ -263,3 +263,20 @@ EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY id, vc;
 -- push down complicated expressions
 EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
 SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+
+/*
+ * Test that incorrect type mapping throws an error.
+ */
+
+-- create table with bad type matches
+CREATE FOREIGN TABLE badtypes (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   xml,
+   nc  xml
+) SERVER oracle OPTIONS (table 'TYPETEST1');
+-- should fail for column "nc", as "c" is not used
+SELECT id, nc FROM badtypes WHERE id = 1;
+-- this will fail for inserting a NULL in column "c"
+INSERT INTO badtypes (id, nc) VALUES (42, XML '<empty/>');
+-- remove foreign table
+DROP FOREIGN TABLE badtypes;
