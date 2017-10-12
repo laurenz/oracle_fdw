@@ -4721,7 +4721,7 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			&& pgtype == GEOMETRYOID)
 		return;
 
-	/* VARCHAR2 and CLOB can be converted to json and jsonb */
+	/* VARCHAR2 and CLOB can be converted to json */
 	if ((oratype == ORA_TYPE_VARCHAR2
 			|| oratype == ORA_TYPE_CLOB)
 			&& pgtype == JSONOID)
