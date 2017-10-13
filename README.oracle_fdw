@@ -19,8 +19,8 @@ This README contains the following sections:
 
 oracle_fdw was written by Laurenz Albe
 
-1. Cookbook
-===========
+1 Cookbook
+==========
 
 This is a simple example how to use oracle_fdw.  
 More detailed information will be provided in the sections
@@ -81,8 +81,8 @@ normally be in uppercase.)
 
 Now you can use the table like a regular PostgreSQL table.
 
-2. Objects created by the extension
-===================================
+2 Objects created by the extension
+==================================
 
     FUNCTION oracle_fdw_handler() RETURNS fdw_handler
     FUNCTION oracle_fdw_validator(text[], oid) RETURNS void
@@ -114,8 +114,8 @@ some environment variables used for establishing Oracle connections.
 If called with the name of a foreign server, it will additionally return
 the Oracle server version.
 
-3. Options
-==========
+3 Options
+=========
 
 Foreign data wrapper options
 ----------------------------
@@ -235,8 +235,8 @@ Column options (from PostgreSQL 9.2 on)
   For UPDATE and DELETE to work, you must set this option on all columns
   that belong to the table's primary key.
 
-4. Usage
-========
+4 Usage
+=======
 
 Oracle permissions
 ------------------
@@ -494,8 +494,8 @@ following:
 - Table names in the LIMIT TO or EXCEPT clause must be written as they
   will appear in PostgreSQL after the case folding described above.
 
-5. Installation Requirements
-============================
+5 Installation Requirements
+===========================
 
 oracle_fdw should compile and run on any platform supported by PostgreSQL and
 Oracle client, although I could only test it on Linux and Windows.
@@ -525,8 +525,8 @@ Consult the oracle_fdw Wiki (https://github.com/laurenz/oracle_fdw/wiki)
 for tips about Oracle installation and configuration and share your own
 knowledge there.
 
-6. Installation
-===============
+6 Installation
+==============
 
 If you use a binary distribution of oracle_fdw, skip to "Installing the
 extension" below.
@@ -651,8 +651,8 @@ The regression tests are run as follows:
 
     $ make installcheck
 
-7. Internals
-============
+7 Internals
+===========
 
 oracle_fdw sets the MODULE of the Oracle session to `postgres` and the
 ACTION to the backend process number.  This can help identifying the Oracle
@@ -675,7 +675,9 @@ The actual execution plan or cost information is retrieved from V$SQL_PLAN.
 oracle_fdw uses transaction isolation level SERIALIZABLE on the Oracle side,
 which corresponds to PostgreSQL's REPEATABLE READ.  This is necessary because
 a single PostgreSQL statement can lead to multiple Oracle queries (e.g. during
-a nested loop join) and the results need to be consistent.
+a nested loop join) and the results need to be consistent.  
+Unfortunately the Oracle implementation of SERIALIZABLE has certain quirks;
+see the [Problems](#8-problems) section for more.
 
 The Oracle transaction is committed immediately before the local transaction
 commits, so that a completed PostgreSQL transaction guarantees that the Oracle
@@ -686,8 +688,8 @@ and a transaction manager, which is beyond what a foreign data wrapper
 can reasonably provide.  
 Prepared statements involving Oracle are not supported for the same reason.
 
-8. Problems
-===========
+8 Problems
+==========
 
 Encoding
 --------
@@ -766,6 +768,13 @@ transactions (see document 1285464.1 in Oracle's knowledge base).
 This is no serious problem; you can work around it by either ignoring that
 first error or creating the table with SEGMENT CREATION IMMEDIATE.
 
+A much nastier problem is that concurrent inserts can sometimes cause
+serialization errors when an index page is split concurrently with a
+modifying serializable transaction (see Oracle document 160593.1).
+
+Oracle claims that this is not a bug, and the suggested solution is to retry
+the transaction that got a serialization error.
+
 Oracle bugs
 -----------
 
@@ -776,8 +785,8 @@ even if no modification of remote data is attempted.
 It can occur with Oracle server 8.1.7.4 (install one-off patch 2728408) or
 Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 
-9. Support
-==========
+9 Support
+=========
 
 If you want to report a problem with oracle_fdw, and the name of the
 foreign server is (for example) "ora_serv", please include the output of
