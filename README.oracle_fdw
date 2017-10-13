@@ -17,7 +17,8 @@ This README contains the following sections:
 8. [Problems](#8-problems)
 9. [Support](#9-support)
 
-oracle_fdw was written by Laurenz Albe
+oracle_fdw was written by Laurenz Albe, with notable contributions from
+Vincent Mora of Oslandia and Tatsuro Yamada of the NTT OSS Center.
 
 1 Cookbook
 ==========
