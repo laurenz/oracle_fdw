@@ -722,18 +722,18 @@ Limited functionality in old Oracle versions
   changed with Oracle 10.1.  Using EXPLAIN VERBOSE with older Oracle server
   versions will result in errors like:
 
-        ERROR:  error describing query: OCIStmtExecute failed to execute
-                remote query for sql_id
-        DETAIL:  ORA-00904: "LAST_ACTIVE_TIME": invalid identifier
+      ERROR:  error describing query: OCIStmtExecute failed to execute
+              remote query for sql_id
+      DETAIL:  ORA-00904: "LAST_ACTIVE_TIME": invalid identifier
 
   There is no plan to fix this, since Oracle 9i has been out of Extended Support
   since 2010 and the functionality is not essential.
 
 - IMPORT FOREIGN SCHEMA throws the following error with Oracle server 8i:
 
-        ERROR:  error importing foreign schema: OCIStmtExecute failed to execute
-                column query
-        DETAIL:  ORA-00904: invalid column name
+      ERROR:  error importing foreign schema: OCIStmtExecute failed to execute
+              column query
+      DETAIL:  ORA-00904: invalid column name
 
   This is because the view ALL_TAB_COLUMNS lacks the column CHAR_LENGTH,
   which was added in Oracle 9i.
