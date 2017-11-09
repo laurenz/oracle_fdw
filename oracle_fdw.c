@@ -3806,9 +3806,14 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 					/* the second (=last) argument is an ArrayCoerceExpr */
 					arraycoerce = (ArrayCoerceExpr *)rightexpr;
 
-					/* if the conversion requires a function, don't push it down */
+					/* if the conversion requires more than binary coercion, don't push it down */
+#if PG_VERSION_NUM < 110000
 					if (arraycoerce->elemfuncid != InvalidOid)
 						return NULL;
+#else
+					if (arraycoerce->elemexpr && arraycoerce->elemexpr->type != T_RelabelType)
+						return NULL;
+#endif
 
 					/* the actual array is here */
 					rightexpr = arraycoerce->arg;
