@@ -7,6 +7,9 @@ Version 2.1.0
   Bugfixes:
   - Missing check if Oracle data types can be converted to PostgreSQL types.
     This bug was introduced in 2.0.0.
+  - When oracle_fdw is loaded, initializing background workers
+    (e.g. for parallel query) failed with:
+       ERROR:  invalid cache ID: 41
 
 Version 2.0.0, released 2017-09-15
   Incompatible changes:

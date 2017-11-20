@@ -210,6 +210,7 @@ extern void oracleError_ii(oraError sqlstate, const char *message, int arg1, int
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
 extern void oracleDebug2(const char *message);
+extern void initializePostGIS(void);
 
 /*
  * functions defined in oracle_gis.c

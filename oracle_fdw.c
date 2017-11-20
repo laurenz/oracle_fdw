@@ -144,6 +144,7 @@ static bool dml_in_transaction = false;
  * PostGIS geometry type, set upon library initialization.
  */
 static Oid GEOMETRYOID = InvalidOid;
+static bool geometry_is_setup = false;
 
 /*
  * Describes the valid options for objects that use this wrapper.
@@ -703,48 +704,12 @@ oracle_diag(PG_FUNCTION_ARGS)
  * _PG_init
  * 		Library load-time initalization.
  * 		Sets exitHook() callback for backend shutdown.
- * 		Also finds the OIDs of PostGIS the PostGIS geometry type.
  */
 void
 _PG_init(void)
 {
-	CatCList *catlist;
-	int i, argcount = 1;
-	Oid argtypes[] = { INTERNALOID };
-
 	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
-
-	/* find all functions called "geometry_recv" with "internal" argument type */
-	catlist = SearchSysCacheList2(
-					PROCNAMEARGSNSP,
-					CStringGetDatum("geometry_recv"),
-					PointerGetDatum(buildoidvector(argtypes, argcount)));
-
-	for (i = 0; i < catlist->n_members; i++)
-	{
-		HeapTuple proctup = &catlist->members[i]->tuple;
-		Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
-
-		/*
-		 * If we find more than one "geometry_recv" function, there is
-		 * probably more than one installation of PostGIS.
-		 * We don't know which one to use and give up trying.
-		 */
-		if (GEOMETRYOID != InvalidOid)
-		{
-			elog(DEBUG1, "oracle_fdw: more than one PostGIS installation found, giving up");
-
-			GEOMETRYOID = InvalidOid;
-			break;
-		}
-
-		/* "geometry" is the return type of the "geometry_recv" function */
-		GEOMETRYOID = procform->prorettype;
-
-		elog(DEBUG1, "oracle_fdw: PostGIS is installed, GEOMETRYOID = %d", GEOMETRYOID);
-	}
-	ReleaseSysCacheList(catlist);
 }
 
 #ifdef OLD_FDW_API
@@ -6258,4 +6223,53 @@ void
 oracleDebug2(const char *message)
 {
 	elog(DEBUG2, "%s", message);
+}
+
+/*
+ * initializePostGIS
+ * 		Checks if PostGIS is installed and sets GEOMETRYOID if it is.
+ */
+void
+initializePostGIS()
+{
+	CatCList *catlist;
+	int i, argcount = 1;
+	Oid argtypes[] = { INTERNALOID };
+
+	/* this needs to be done only once per database session */
+	if (geometry_is_setup)
+		return;
+
+	geometry_is_setup = true;
+
+	/* find all functions called "geometry_recv" with "internal" argument type */
+	catlist = SearchSysCacheList2(
+					PROCNAMEARGSNSP,
+					CStringGetDatum("geometry_recv"),
+					PointerGetDatum(buildoidvector(argtypes, argcount)));
+
+	for (i = 0; i < catlist->n_members; i++)
+	{
+		HeapTuple proctup = &catlist->members[i]->tuple;
+		Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
+
+		/*
+		 * If we find more than one "geometry_recv" function, there is
+		 * probably more than one installation of PostGIS.
+		 * We don't know which one to use and give up trying.
+		 */
+		if (GEOMETRYOID != InvalidOid)
+		{
+			elog(DEBUG1, "oracle_fdw: more than one PostGIS installation found, giving up");
+
+			GEOMETRYOID = InvalidOid;
+			break;
+		}
+
+		/* "geometry" is the return type of the "geometry_recv" function */
+		GEOMETRYOID = procform->prorettype;
+
+		elog(DEBUG1, "oracle_fdw: PostGIS is installed, GEOMETRYOID = %d", GEOMETRYOID);
+	}
+	ReleaseSysCacheList(catlist);
 }

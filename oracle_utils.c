@@ -112,6 +112,13 @@ oracleSession
 	if (!nls_lang)
 		nls_lang = "";
 
+	/*
+	 * Check if PostGIS is installed and initialize GEOMETRYOID if it is.
+	 * We have to initialize that here rather than in _PG_init()
+	 * because we need to look up system catalogs.
+	 */
+	initializePostGIS();
+
 	/* search environment and server handle in cache */
 	for (envp = envlist; envp != NULL; envp = envp->next)
 	{
