@@ -24,3 +24,11 @@ results
 # other version control systems
 CVS
 .svn
+
+# Windows build, build output
+msvc/*.opensdf
+msvc/*.sdf
+msvc/*.suo
+msvc/*.vcxproj.filters
+msvc/Win32
+msvc/x64
