@@ -3,6 +3,8 @@ Version 2.1.0
   - Add support for the "json" PostgreSQL data type.
     On the Oracle side, CLOB or VARCHAR2 can be used.
     Suggested by "bsislow".
+  - Add support and documentation for building with Microsoft Visual Studio.
+    Patch by Christian Ullrich.
 
   Bugfixes:
   - Missing check if Oracle data types can be converted to PostgreSQL types.

@@ -20,6 +20,8 @@ This README contains the following sections:
 oracle_fdw was written by Laurenz Albe, with notable contributions from
 Vincent Mora of Oslandia and Tatsuro Yamada of the NTT OSS Center.
 
+Special thanks to Christian Ullrich for ongoing help with Windows.
+
 1 Cookbook
 ==========
 
@@ -532,15 +534,15 @@ knowledge there.
 6 Installation
 ==============
 
-If you use a binary distribution of oracle_fdw, skip to "Installing the
+If you are using a binary distribution of oracle_fdw, skip to "Installing the
 extension" below.
 
-Building oracle_fdw:
---------------------
+Building oracle_fdw on platforms other than Windows:
+----------------------------------------------------
 
 oracle_fdw has been written as a PostgreSQL extension and uses the Extension
 Building Infrastructure PGXS on all platforms except Windows.  It should be
-easy to install.  For Windows, see the next section.
+easy to install.  For building on Windows, see the next section.
 
 You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
 installed with packages, install the development package).  
@@ -840,17 +842,15 @@ table) indicates that PostgreSQL cannot find the Oracle client library:
     DETAIL:  No Oracle client is installed, or your system is configured incorrectly.
     HINT:  Verify that the PATH variable includes the Oracle client.
 
-Make sure that the path to `oci.dll` is in the environment of the user
-running the PostgreSQL server. If it is running as a Windows service, this
-is the system environment, and you must restart the service after changing
-it.
+Make sure that the path to `oci.dll` is in the PATH environment variable of
+the user running the PostgreSQL server.  If it is running as a Windows service,
+this is the system environment, and you must restart the service after
+changing it.
 
 If updating the environment does not work, you may be using a PostgreSQL
 distribution that provides its own environment variables, hiding the Oracle
-client.  See [this bug
-report](https://github.com/laurenz/oracle_fdw/issues/160) for more
-information.
-
+client.  See the bug report at https://github.com/laurenz/oracle_fdw/issues/160
+for more information.
 
 9 Support
 =========
@@ -869,4 +869,3 @@ If you have a problem or question or any kind of feedback, the preferred
 option is to open an issue on GitHub:  
 https://github.com/laurenz/oracle_fdw/issues  
 This requires a GitHub account.
-
