@@ -579,7 +579,7 @@ To build oracle_fdw on Windows, you need:
 - Oracle headers and libraries (SDK package for Instant Client).
 - Microsoft Visual Studio 2013 or later.
 
-To build, either use the IDE, or:
+To build, either open `oracle_fdw\msvc\oracle_fdw.sln` in the IDE, or:
 
 - Open a development command prompt (either x86 or x64 depending on your
   PostgreSQL installation) and change to the `oracle_fdw\msvc` directory.
