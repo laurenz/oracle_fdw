@@ -539,14 +539,15 @@ Building oracle_fdw:
 --------------------
 
 oracle_fdw has been written as a PostgreSQL extension and uses the Extension
-Building Infrastructure PGXS.  It should be easy to install.
+Building Infrastructure PGXS on all platforms except Windows.  It should be
+easy to install.  For Windows, see the next section.
 
 You will need PostgreSQL headers and PGXS installed (if your PostgreSQL was
 installed with packages, install the development package).  
 You need to install Oracle's C header files as well (SDK package for Instant
-Client).  If you use the Instant Client ZIP files provided by Oracle and you
-are not on Windows, you will have to create a symbolic link from `libclntsh.so`
-to the actual shared library file yourself.
+Client).  If you use the Instant Client ZIP files provided by Oracle,
+you will have to create a symbolic link from `libclntsh.so` to the
+actual shared library file yourself.
 
 Make sure that PostgreSQL is configured `--without-ldap` (at least the server).
 See the [Problems](#8-problems) section.
@@ -567,6 +568,37 @@ PostgreSQL is installed.
 If you want to build oracle_fdw in a source tree of PostgreSQL, use
 
     $ make NO_PGXS=1
+
+Building oracle_fdw on Windows:
+-------------------------------
+
+To build oracle_fdw on Windows, you need:
+
+- PostgreSQL headers and libraries. These can be found in the PostgreSQL
+  installation directory.
+- Oracle headers and libraries (SDK package for Instant Client).
+- Microsoft Visual Studio 2013 or later.
+
+To build, either open `oracle_fdw\msvc\oracle_fdw.sln` in the IDE, or:
+
+- Open a development command prompt (either x86 or x64 depending on your
+  PostgreSQL installation) and change to the `oracle_fdw\msvc` directory.
+- Run (single command line):
+
+      > msbuild oracle_fdw.sln /p:Configuration=(Debug or Release) ^
+            /p:Platform=(Win32 or x64) ^
+            /p:OracleClient=(path to Oracle Client/SDK) ^
+            /p:PostgreSQL=(path to PostgreSQL installation)
+
+  (The "^"s are line continuations; you can just put everything on a single
+line instead.)
+
+When the build is complete, you will find `oracle_fdw.dll` in a subdirectory
+named for your build options, e.g. `x64\Release`.
+
+If you use Visual Studio 2015 or later and you get errors about missing
+header files including `sys/types.h`, you must install the Universal CRT
+SDK (part of Visual Studio).
 
 Installing the extension:
 -------------------------
