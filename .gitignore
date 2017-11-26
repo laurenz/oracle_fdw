@@ -26,6 +26,7 @@ CVS
 .svn
 
 # Windows build, build output
+v15
 msvc/*.opensdf
 msvc/*.sdf
 msvc/*.suo
