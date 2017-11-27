@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="$(Platform)=='x64'">
+    <OracleClient>C:\Daten\work\install\oracle64\instantclient_10_2</OracleClient>
+    <PostgreSQL>C:\Daten\pgsql\pg10-x64</PostgreSQL>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(Platform)=='Win32'">
+    <OracleClient>C:\Daten\work\install\oracle32\instantclient_10_2</OracleClient>
+    <PostgreSQL>C:\Daten\pgsql\pg10-x86</PostgreSQL>
+  </PropertyGroup>
+  <PropertyGroup>
+    <IncludePath>$(PostgreSQL)\include\server\port\win32_msvc;$(PostgreSQL)\include\server\port\win32;$(PostgreSQL)\include\server\port;$(PostgreSQL)\include\server;$(PostgreSQL)\include\internal;$(PostgreSQL)\include;$(OracleClient)\sdk\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(PostgreSQL)\lib;$(OracleClient)\sdk\lib\msvc;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup />
+  <ItemGroup />
+</Project>
