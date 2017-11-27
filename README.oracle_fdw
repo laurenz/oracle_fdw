@@ -833,7 +833,7 @@ It can occur with Oracle server 8.1.7.4 (install one-off patch 2728408) or
 Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 
 Missing Oracle client DLL (on Windows only)
----------------
+-------------------------------------------
 
 The following error message (from any query involving an Oracle foreign
 table) indicates that PostgreSQL cannot find the Oracle client library:
