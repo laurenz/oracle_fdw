@@ -830,6 +830,28 @@ even if no modification of remote data is attempted.
 It can occur with Oracle server 8.1.7.4 (install one-off patch 2728408) or
 Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
 
+Missing Oracle client DLL (on Windows only)
+-------------------------------------------
+
+The following error message (from any query involving an Oracle foreign
+table) indicates that PostgreSQL cannot find the Oracle client library:
+
+    ERROR:  Oracle client library (oci.dll) not found
+    DETAIL:  No Oracle client is installed, or your system is configured incorrectly.
+    HINT:  Verify that the PATH variable includes the Oracle client.
+
+Make sure that the path to `oci.dll` is in the environment of the user
+running the PostgreSQL server. If it is running as a Windows service, this
+is the system environment, and you must restart the service after changing
+it.
+
+If updating the environment does not work, you may be using a PostgreSQL
+distribution that provides its own environment variables, hiding the Oracle
+client.  See [this bug
+report](https://github.com/laurenz/oracle_fdw/issues/160) for more
+information.
+
+
 9 Support
 =========
 
@@ -847,3 +869,4 @@ If you have a problem or question or any kind of feedback, the preferred
 option is to open an issue on GitHub:  
 https://github.com/laurenz/oracle_fdw/issues  
 This requires a GitHub account.
+
