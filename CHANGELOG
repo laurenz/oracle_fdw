@@ -5,6 +5,9 @@ Version 2.1.0
     Suggested by "bsislow".
   - Add support and documentation for building with Microsoft Visual Studio.
     Patch by Christian Ullrich.
+  - Enable delayed loading of the Oracle DLL on Windows.
+    This allows better diagnostic messages if the library cannot be loaded.
+    Patch by Christian Ullrich.
 
   Bugfixes:
   - Missing check if Oracle data types can be converted to PostgreSQL types.
