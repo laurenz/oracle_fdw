@@ -36,7 +36,7 @@ For the sake of this example, let's assume you can connect as operating system
 user `postgres` (or whoever starts the PostgreSQL server) with the following
 command:
 
-    sqlplus orauser/orapwd@//dbserver.mydomain.com/ORADB
+    sqlplus orauser/orapwd@//dbserver.mydomain.com:1521/ORADB
 
 That means that the Oracle client and the environment is set up correctly.
 I also assume that oracle_fdw has been compiled and installed (see the
@@ -57,7 +57,7 @@ Then configure oracle_fdw as PostgreSQL superuser like this:
 
     pgdb=# CREATE EXTENSION oracle_fdw;
     pgdb=# CREATE SERVER oradb FOREIGN DATA WRAPPER oracle_fdw
-              OPTIONS (dbserver '//dbserver.mydomain.com/ORADB');
+              OPTIONS (dbserver '//dbserver.mydomain.com:1521/ORADB');
     pgdb=# GRANT USAGE ON FOREIGN SERVER oradb TO pguser;
 
 
