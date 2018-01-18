@@ -16,8 +16,8 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1
 SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2) ORDER BY t1.id, t2.id;
 EXPLAIN (COSTS off) SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2);
 /* ORDER BY does not get pushed down */
-SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id;
+SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id, t2.id;
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id, t2.id;
 /* natural join */
 SELECT id FROM typetest1 NATURAL JOIN shorty ORDER BY id;
 EXPLAIN (COSTS off) SELECT id FROM typetest1 NATURAL JOIN shorty;
