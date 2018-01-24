@@ -86,144 +86,6 @@ WARNING:  column number 19 of foreign table "longy" does not exist in foreign Or
    Oracle query: SELECT /*8081bf2a10cd5ae8f08211f18a58ca48*/ r1."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."C" = r2."C"))
 (2 rows)
 
-/* outer joins */
-SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  1 |  1
-  3 |  3
-  4 |   
-(3 rows)
-
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d;
-                                                                    QUERY PLAN                                                                    
---------------------------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan
-   Oracle query: SELECT /*5e527b967b72d9836bfcd379c4677476*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 LEFT JOIN "TYPETEST1" r2 ON (r1."D" = r2."D"))
-(2 rows)
-
-SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  1 |  1
-  3 |  3
-    |  4
-(3 rows)
-
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d;
-                                                                    QUERY PLAN                                                                    
---------------------------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan
-   Oracle query: SELECT /*8cfad8830fdd7c0b2616a8b988b7abb5*/ r2."ID", r1."ID" FROM ("TYPETEST1" r2 LEFT JOIN "TYPETEST1" r1 ON (r1."D" = r2."D"))
-(2 rows)
-
-SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  1 |  1
-  3 |  3
-  4 |   
-    |  4
-(4 rows)
-
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d;
-                                                                    QUERY PLAN                                                                    
---------------------------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan
-   Oracle query: SELECT /*b7d371124a9aef6bf7585118c4d988be*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 FULL JOIN "TYPETEST1" r2 ON (r1."D" = r2."D"))
-(2 rows)
-
-/* outer joins and filter conditions */
-SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  3 |  3
-(1 row)
-
-explain (verbose, costs off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-                                                                                QUERY PLAN                                                                                 
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Output: t1.id, t2.id
-   Sort Key: t1.id, t2.id
-   ->  Foreign Scan
-         Output: t1.id, t2.id
-         Oracle query: SELECT /*903605daec63f1093ca442cf8f057768*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."D" = r2."D") AND (r1."ID" > 1))
-         Oracle plan: SELECT STATEMENT
-         Oracle plan:   HASH JOIN   (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1
-         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1
-(11 rows)
-
-SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  3 |  3
-  4 |   
-(2 rows)
-
-explain (verbose, costs off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-                                                                                 QUERY PLAN                                                                                 
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Output: t1.id, t2.id
-   Sort Key: t1.id, t2.id
-   ->  Foreign Scan
-         Output: t1.id, t2.id
-         Oracle query: SELECT /*33d4bb3c03d9e953c8c2417f9225ac32*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 LEFT JOIN "TYPETEST1" r2 ON (r1."D" = r2."D")) WHERE (r1."ID" > 1)
-         Oracle plan: SELECT STATEMENT
-         Oracle plan:   HASH JOIN OUTER  (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1
-         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1
-(11 rows)
-
-SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  3 |  3
-(1 row)
-
-explain (verbose, costs off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-                                                                                QUERY PLAN                                                                                 
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Output: t1.id, t2.id
-   Sort Key: t1.id, t2.id
-   ->  Foreign Scan
-         Output: t1.id, t2.id
-         Oracle query: SELECT /*903605daec63f1093ca442cf8f057768*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."D" = r2."D") AND (r1."ID" > 1))
-         Oracle plan: SELECT STATEMENT
-         Oracle plan:   HASH JOIN   (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1
-         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1
-(11 rows)
-
-SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
- id | id 
-----+----
-  3 |  3
-  4 |   
-(2 rows)
-
-explain (verbose, costs off) SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-                                                                                 QUERY PLAN                                                                                 
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Output: t1.id, t2.id
-   Sort Key: t1.id, t2.id
-   ->  Foreign Scan
-         Output: t1.id, t2.id
-         Oracle query: SELECT /*33d4bb3c03d9e953c8c2417f9225ac32*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 LEFT JOIN "TYPETEST1" r2 ON (r1."D" = r2."D")) WHERE (r1."ID" > 1)
-         Oracle plan: SELECT STATEMENT
-         Oracle plan:   HASH JOIN OUTER  (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1
-         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1
-(11 rows)
-
 /*
  * Cases that should not be pushed down.
  */
@@ -267,6 +129,43 @@ EXPLAIN (COSTS off) SELECT max(t1.id), min(t2.id) FROM typetest1 t1 JOIN typetes
                      Filter: (((vc)::text || 'x'::text) = 'shortx'::text)
                      Oracle query: SELECT /*f0e10b1797a5d532ee14127a96556d46*/ r1."ID", r1."VC", r1."FL" FROM "TYPETEST1" r1
 (9 rows)
+
+/* outer joins */
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Hash Left Join
+   Hash Cond: (t1.d = t2.d)
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*ad51e4762dd1a5d210370c477b8596af*/ r1."ID", r1."D" FROM "TYPETEST1" r1
+   ->  Hash
+         ->  Foreign Scan on typetest1 t2
+               Oracle query: SELECT /*ec272bdf979278cf22710fbd2595dd78*/ r2."ID", r2."D" FROM "TYPETEST1" r2
+(7 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Hash Left Join
+   Hash Cond: (t2.d = t1.d)
+   ->  Foreign Scan on typetest1 t2
+         Oracle query: SELECT /*ec272bdf979278cf22710fbd2595dd78*/ r2."ID", r2."D" FROM "TYPETEST1" r2
+   ->  Hash
+         ->  Foreign Scan on typetest1 t1
+               Oracle query: SELECT /*ad51e4762dd1a5d210370c477b8596af*/ r1."ID", r1."D" FROM "TYPETEST1" r1
+(7 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Hash Full Join
+   Hash Cond: (t1.d = t2.d)
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*ad51e4762dd1a5d210370c477b8596af*/ r1."ID", r1."D" FROM "TYPETEST1" r1
+   ->  Hash
+         ->  Foreign Scan on typetest1 t2
+               Oracle query: SELECT /*ec272bdf979278cf22710fbd2595dd78*/ r2."ID", r2."D" FROM "TYPETEST1" r2
+(7 rows)
 
 /* cross join */
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 CROSS JOIN typetest1 t2;
