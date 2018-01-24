@@ -136,6 +136,12 @@
 PG_MODULE_MAGIC;
 
 /*
+ * GUC variables
+ */
+static bool enable_joinpd = true;
+
+
+/*
  * "true" if Oracle data have been modified in the current transaction.
  */
 static bool dml_in_transaction = false;
@@ -708,6 +714,20 @@ oracle_diag(PG_FUNCTION_ARGS)
 void
 _PG_init(void)
 {
+	/* Define custom GUC variables. */
+	DefineCustomBoolVariable("oracle_fdw.enable_joinpd",
+							"Use join pushdown for executing remote query.",
+							NULL,
+							&enable_joinpd,
+							true,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	EmitWarningsOnPlaceholders("oracle_fdw");
+
 	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 }
@@ -968,7 +988,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 /*
  * oracleGetForeignJoinPaths
  * 		Add possible ForeignPath to joinrel if the join is safe to push down.
- * 		For now, we can only push down 2-way inner join for SELECT.
+ * 		For now, we can only push down 2-way inner/outer join for SELECT.
  */
 static void
 oracleGetForeignJoinPaths(PlannerInfo *root,
@@ -2696,6 +2716,8 @@ char
 	 * For inner joins, all conditions that are pushed down get added
 	 * to fdwState->joinclauses and have already been added above,
 	 * so there is no extra WHERE clause.
+	 * For outer joins, add an extra WHERE caluse if fdwState->where_claus 
+	 * is true.
 	 */
 #ifdef JOIN_API
 	if (IS_SIMPLE_REL(foreignrel))
@@ -2705,6 +2727,16 @@ char
 		if (fdwState->where_clause)
 			appendStringInfo(&query, "%s", fdwState->where_clause);	
 	}
+	else
+	{
+		/*
+		 * add an extra WHERE caluse to outer join query.
+		 */
+		if (fdwState->where_clause)
+			appendStringInfo(&query, "%s", fdwState->where_clause);
+	}
+
+	elog(DEBUG1, "fdwState->where_clause: %s", fdwState->where_clause);
 
 	/* append ORDER BY clause if all its expressions can be pushed down */
 	if (fdwState->order_clause)
@@ -2865,12 +2897,18 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	struct oraTable *oraTable_i;
 
 	ListCell   *lc;
+	List       *joinclauses;
 	List       *otherclauses;
 
 	char *tabname;  /* for warning messages */
 
-	/* we only support pushing down INNER joins */
-	if (jointype != JOIN_INNER)
+	/* GUC valiable */
+	if (!enable_joinpd)
+		return false;
+
+	/* we support pushing down INNER/OUTER joins */
+	if (jointype != JOIN_INNER && jointype != JOIN_LEFT &&
+		jointype != JOIN_RIGHT && jointype != JOIN_FULL)
 		return false;
 
 	fdwState = (struct OracleFdwState *) joinrel->fdw_private;
@@ -2888,16 +2926,43 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * not be pushed down.
 	 */
 	if (fdwState_o->local_conds || fdwState_i->local_conds)
+	{
+		elog(DEBUG1, "*a*");
 		return false;
+	}
 
 	/* Separate restrict list into join quals and quals on join relation */
+	if (IS_OUTER_JOIN(jointype))
+		extract_actual_join_clauses(extra->restrictlist, &joinclauses, &otherclauses);
+	else
+	{
+		/*
+		 * Unlike an outer join, for inner join, the join result contains only
+		 * the rows which satisfy join clauses, similar to the other clause.
+		 * Hence all clauses can be treated the same.
+		 */
+		otherclauses = extract_actual_clauses(extra->restrictlist, false);
+		joinclauses = NIL;
+	}
 
-	/*
-	 * Unlike an outer join, for inner join, the join result contains only
-	 * the rows which satisfy join clauses, similar to the other clause.
-	 * Hence all clauses can be treated the same.
-	 */
-	otherclauses = extract_actual_clauses(extra->restrictlist, false);
+	/* Join quals must be safe to push down. */
+	/* JOIN_INNER: skip */
+	foreach(lc, joinclauses)
+	{
+		char *tmp = NULL;
+		Expr *expr = (Expr *) lfirst(lc);
+
+		tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
+		elog(DEBUG1, "joinclauses tmp: %s", tmp);
+		if (tmp == NULL)
+		{
+			elog(DEBUG1, "*b*");
+			return false;
+		}
+	}
+
+	/* Save the join clauses, for later use. */
+	fdwState->joinclauses = joinclauses;
 
 	/*
 	 * For inner joins, "otherclauses" contains now the join conditions.
@@ -2909,7 +2974,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		Expr *expr = (Expr *) lfirst(lc);
 	
 		tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
-
+		elog(DEBUG1, "otherclauses tmp: %s", tmp);
 		if (tmp == NULL)
 			fdwState->local_conds = lappend(fdwState->local_conds, expr);
 		else
@@ -2930,12 +2995,21 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * a join where not all join conditions can be pushed down, but we choose
 	 * the safe road of not pushing down such joins at all.
 	 */
-	if(fdwState->local_conds != NIL)
-		return false;
+	if(!IS_OUTER_JOIN(jointype))
+	{
+		if(fdwState->local_conds != NIL)
+		{
+			elog(DEBUG1, "*c");
+			return false;
+		}
 
-	/* CROSS JOIN (T1 JOIN T2 ON true) is not pushed down */
-	if(fdwState->remote_conds == NIL)
-		return false;
+		/* CROSS JOIN (T1 JOIN T2 ON true) is not pushed down */
+		if(fdwState->remote_conds == NIL)
+		{
+			elog(DEBUG1, "*d");
+			return false;
+		}
+	}
 
 	/*
 	 * Pull the other remote conditions from the joining relations into join
@@ -2946,21 +3020,118 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * For an inner join, clauses from both the relations are added to the
 	 * other remote clauses.
 	 *
+	 * For LEFT and RIGHT OUTER join, the clauses from the outer side are added
+	 * to remote_conds since those can be evaluated after the join is evaluated.
+	 * The clauses from inner side are added to the joinclauses, since they 
+	 * need to evaluated while constructing the join.
+	 *
+	 * For a FULL OUTER JOIN, the other clauses from either relation can not
+	 * be added to the joinclauses or remote_conds, since each relation acts
+	 * as an outer relation for the other. Consider such full outer join as
+	 * unshippable because of the reasons mentioned above in this comment.
+	 *
 	 * The joining sides can not have local conditions, thus no need to test
 	 * shippability of the clauses being pulled up.
 	 */
-	fdwState->remote_conds = list_concat(fdwState->remote_conds,
-								  list_copy(fdwState_i->remote_conds));
-	fdwState->remote_conds = list_concat(fdwState->remote_conds,
-								  list_copy(fdwState_o->remote_conds));
+	switch (jointype)
+	{
+		case JOIN_INNER:
+			elog(DEBUG1, "INNER");
+			fdwState->remote_conds = list_concat(fdwState->remote_conds,
+										  list_copy(fdwState_i->remote_conds));
+			fdwState->remote_conds = list_concat(fdwState->remote_conds,
+										  list_copy(fdwState_o->remote_conds));
+			break;
+
+		case JOIN_LEFT:
+			elog(DEBUG1, "LEFT");
+			fdwState->joinclauses = list_concat(fdwState->joinclauses,
+										  list_copy(fdwState_i->remote_conds));
+			fdwState->remote_conds = list_concat(fdwState->remote_conds,
+										  list_copy(fdwState_o->remote_conds));
+			break;
+
+		case JOIN_RIGHT:
+			elog(DEBUG1, "RIGHT");
+			fdwState->joinclauses = list_concat(fdwState->joinclauses,
+										  list_copy(fdwState_o->remote_conds));
+			fdwState->remote_conds = list_concat(fdwState->remote_conds,
+										  list_copy(fdwState_i->remote_conds));
+			break;
+
+		case JOIN_FULL:
+			elog(DEBUG1, "FULL");
+			if (fdwState_i->remote_conds || fdwState_o->remote_conds)
+			{
+				elog(DEBUG1, "*e*");
+				return false;
+			}
+			break;
+
+		default:
+			/* Should not happen, we have just check this above */
+			elog(ERROR, "unsupported join type %d", jointype);
+	}
+
+/* if outer join query has no joinclauses, it means CROSS JOIN so it is not pushed down */
+	if(IS_OUTER_JOIN(jointype))
+	{
+		if(fdwState->joinclauses == NIL)
+		{
+			elog(DEBUG1, "*f*");
+			return false;
+		}
+	}
 
 	/*
 	 * For an inner join, all restrictions can be treated alike. Treating the
 	 * pushed down conditions as join conditions allows a top level full outer
 	 * join to be deparsed without requiring subqueries.
 	 */
-	fdwState->joinclauses = fdwState->remote_conds;
-	fdwState->remote_conds = NIL;
+	if (!IS_OUTER_JOIN(jointype))
+	{
+		Assert(!fdwState->joinclauses);
+		fdwState->joinclauses = fdwState->remote_conds;
+		fdwState->remote_conds = NIL;
+	}
+	else
+	{
+		/*
+		 * For outer join, remote_conds has to deparse to WHERE clause and set it to
+		 * fdwState->where_clase. It will be used in createQuery.
+		 */
+		char *keyword = "WHERE"; /* for outer join's WHERE clause */
+		StringInfoData where;
+		initStringInfo(&where);
+		if (fdwState->remote_conds != NIL)
+		{
+			foreach(lc, fdwState->remote_conds)
+			{
+				char *tmp = NULL;
+				Expr *expr = (Expr *) lfirst(lc);
+
+				tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
+				if (tmp != NULL)
+				{
+					appendStringInfo(&where, " %s %s", keyword, tmp);
+					keyword = "AND";
+					elog(DEBUG1, "remote_conds tmp: %s", tmp);
+				}
+			}
+			fdwState->where_clause = where.data;
+		}
+
+		foreach(lc, fdwState->joinclauses)
+		{
+			char *tmp = NULL;
+			Expr *expr = (Expr *) lfirst(lc);
+
+			tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
+			elog(DEBUG1, "joinclauses tmp: %s", tmp);
+		}
+	}
+
+	elog(DEBUG1, "foreign_join_ok fdwState->where_clause: %s", fdwState->where_clause);
 
 	/* set fetch size to minimum of the joining sides */
 	if (fdwState_o->prefetch < fdwState_i->prefetch)
