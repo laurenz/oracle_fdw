@@ -15,6 +15,8 @@ Version 2.1.0
   - When oracle_fdw is loaded, initializing background workers
     (e.g. for parallel query) failed with:
        ERROR:  invalid cache ID: 41
+  - Don't try to push down IS [NOT] DISTINCT FROM expressions.
+    Oracle does not support this standard SQL syntax.
 
 Version 2.0.0, released 2017-09-15
   Incompatible changes:

@@ -3819,35 +3819,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			appendStringInfo(&result, "))");
 
 			break;
-		case T_DistinctExpr:
-			/* get argument type */
-			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(((DistinctExpr *)expr)->opno));
-			if (! HeapTupleIsValid(tuple))
-			{
-				elog(ERROR, "cache lookup failed for operator %u", ((DistinctExpr *)expr)->opno);
-			}
-			rightargtype = ((Form_pg_operator)GETSTRUCT(tuple))->oprright;
-			ReleaseSysCache(tuple);
-
-			if (! canHandleType(rightargtype))
-				return NULL;
-
-			left = deparseExpr(session, foreignrel, linitial(((DistinctExpr *)expr)->args), oraTable, params);
-			if (left == NULL)
-			{
-				return NULL;
-			}
-			right = deparseExpr(session, foreignrel, lsecond(((DistinctExpr *)expr)->args), oraTable, params);
-			if (right == NULL)
-			{
-				pfree(left);
-				return NULL;
-			}
-
-			initStringInfo(&result);
-			appendStringInfo(&result, "(%s IS DISTINCT FROM %s)", left, right);
-
-			break;
 		case T_NullIfExpr:
 			/* get argument type */
 			tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(((NullIfExpr *)expr)->opno));
