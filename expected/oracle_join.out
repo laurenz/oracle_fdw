@@ -268,6 +268,45 @@ EXPLAIN (COSTS off) SELECT max(t1.id), min(t2.id) FROM typetest1 t1 JOIN typetes
                      Oracle query: SELECT /*f0e10b1797a5d532ee14127a96556d46*/ r1."ID", r1."VC", r1."FL" FROM "TYPETEST1" r1
 (9 rows)
 
+EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (a.id = typetest1.id)
+   Join Filter: (a.c >= typetest1.c)
+   ->  Foreign Scan on typetest1 a
+         Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
+   ->  Hash
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*72a1013be41cb88abb779b355393907e*/ r4."ID", r4."C", r4."NC" FROM "TYPETEST1" r4
+(8 rows)
+
+EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a LEFT JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Hash Left Join
+   Hash Cond: (a.id = typetest1.id)
+   Join Filter: (a.c >= typetest1.c)
+   ->  Foreign Scan on typetest1 a
+         Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
+   ->  Hash
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*72a1013be41cb88abb779b355393907e*/ r4."ID", r4."C", r4."NC" FROM "TYPETEST1" r4
+(8 rows)
+
+/* subquery with where clause cannnot be pushed down in full outer join query */
+EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a FULL JOIN (SELECT * FROM typetest1 WHERE id > 1) b USING (id);
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Hash Full Join
+   Hash Cond: (a.id = typetest1.id)
+   ->  Foreign Scan on typetest1 a
+         Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
+   ->  Hash
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*4fd3d8b5ec9e1bf1dcace4e4c5bfa9ba*/ r4."ID", r4."NC" FROM "TYPETEST1" r4 WHERE (r4."ID" > 1)
+(7 rows)
+
 /* cross join */
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 CROSS JOIN typetest1 t2;
                                              QUERY PLAN                                              

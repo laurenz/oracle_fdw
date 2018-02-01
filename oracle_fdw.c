@@ -988,7 +988,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 /*
  * oracleGetForeignJoinPaths
  * 		Add possible ForeignPath to joinrel if the join is safe to push down.
- * 		For now, we can only push down 2-way inner/outer join for SELECT.
+ * 		For now, we can only push down 2-way joins for SELECT.
  */
 static void
 oracleGetForeignJoinPaths(PlannerInfo *root,
@@ -2713,27 +2713,19 @@ char
 							&(fdwState->params));
 
 	/*
+	 * For baserel, add a WHERE caluse if fdwState->where_claus is exist.
+	 *
 	 * For inner joins, all conditions that are pushed down get added
 	 * to fdwState->joinclauses and have already been added above,
 	 * so there is no extra WHERE clause.
+	 *
 	 * For outer joins, add an extra WHERE caluse if fdwState->where_claus 
 	 * is true.
 	 */
-#ifdef JOIN_API
-	if (IS_SIMPLE_REL(foreignrel))
-#endif  /* JOIN_API */
+	/* append WHERE clauses */
+	if (fdwState->where_clause)
 	{
-		/* append WHERE clauses */
-		if (fdwState->where_clause)
 			appendStringInfo(&query, "%s", fdwState->where_clause);	
-	}
-	else
-	{
-		/*
-		 * add an extra WHERE caluse to outer join query.
-		 */
-		if (fdwState->where_clause)
-			appendStringInfo(&query, "%s", fdwState->where_clause);
 	}
 
 	elog(DEBUG1, "fdwState->where_clause: %s", fdwState->where_clause);
@@ -2945,8 +2937,10 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		joinclauses = NIL;
 	}
 
-	/* Join quals must be safe to push down. */
-	/* JOIN_INNER: skip */
+	/*
+	 * Join quals must be safe to push down.
+	 * This is not executed for inner joins.
+	 */
 	foreach(lc, joinclauses)
 	{
 		char *tmp = NULL;
@@ -2999,14 +2993,14 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	{
 		if(fdwState->local_conds != NIL)
 		{
-			elog(DEBUG1, "*c");
+			elog(DEBUG1, "*c*");
 			return false;
 		}
 
 		/* CROSS JOIN (T1 JOIN T2 ON true) is not pushed down */
 		if(fdwState->remote_conds == NIL)
 		{
-			elog(DEBUG1, "*d");
+			elog(DEBUG1, "*d*");
 			return false;
 		}
 	}
@@ -3073,7 +3067,10 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			elog(ERROR, "unsupported join type %d", jointype);
 	}
 
-/* if outer join query has no joinclauses, it means CROSS JOIN so it is not pushed down */
+	/* 
+	 * If outer join query has no joinclauses, it means CROSS JOIN so it is 
+	 * not pushed down.
+	 */
 	if(IS_OUTER_JOIN(jointype))
 	{
 		if(fdwState->joinclauses == NIL)
@@ -3083,22 +3080,11 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		}
 	}
 
-	/*
-	 * For an inner join, all restrictions can be treated alike. Treating the
-	 * pushed down conditions as join conditions allows a top level full outer
-	 * join to be deparsed without requiring subqueries.
-	 */
-	if (!IS_OUTER_JOIN(jointype))
-	{
-		Assert(!fdwState->joinclauses);
-		fdwState->joinclauses = fdwState->remote_conds;
-		fdwState->remote_conds = NIL;
-	}
-	else
+	if (IS_OUTER_JOIN(jointype))
 	{
 		/*
 		 * For outer join, remote_conds has to deparse to WHERE clause and set it to
-		 * fdwState->where_clase. It will be used in createQuery.
+		 * fdwState->where_clause. It will be used in createQuery.
 		 */
 		char *keyword = "WHERE"; /* for outer join's WHERE clause */
 		StringInfoData where;
@@ -3129,6 +3115,15 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
 			elog(DEBUG1, "joinclauses tmp: %s", tmp);
 		}
+	}
+	else
+	{
+		/*
+		 * For an inner join, remote_conds has all join conditions.
+		 */
+		Assert(!fdwState->joinclauses);
+		fdwState->joinclauses = fdwState->remote_conds;
+		fdwState->remote_conds = NIL;
 	}
 
 	elog(DEBUG1, "foreign_join_ok fdwState->where_clause: %s", fdwState->where_clause);
