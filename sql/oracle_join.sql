@@ -52,6 +52,10 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.vc = t2.vc AND t1.lb = t2.lb;
 /* condition on one table needs to be evaluated locally */
 EXPLAIN (COSTS off) SELECT max(t1.id), min(t2.id) FROM typetest1 t1 JOIN typetest1 t2 ON t1.fl = t2.fl WHERE t1.vc || 'x' = 'shortx';
+EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a LEFT JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+/* subquery with where clause cannnot be pushed down in full outer join query */
+EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a FULL JOIN (SELECT * FROM typetest1 WHERE id > 1) b USING (id);
 /* cross join */
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 CROSS JOIN typetest1 t2;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON true;
