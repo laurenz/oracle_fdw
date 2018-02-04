@@ -1974,9 +1974,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	/* create a memory context for short-lived memory */
 	fdw_state->temp_cxt = AllocSetContextCreate(estate->es_query_cxt,
 							"oracle_fdw temporary data",
-							ALLOCSET_SMALL_MINSIZE,
-							ALLOCSET_SMALL_INITSIZE,
-							ALLOCSET_SMALL_MAXSIZE);
+							ALLOCSET_SMALL_SIZES);
 }
 
 /*
@@ -3141,9 +3139,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	/* create a memory context for short-lived data in convertTuples() */
 	tmp_cxt = AllocSetContextCreate(CurrentMemoryContext,
 								"oracle_fdw temporary data",
-								ALLOCSET_SMALL_MINSIZE,
-								ALLOCSET_SMALL_INITSIZE,
-								ALLOCSET_SMALL_MAXSIZE);
+								ALLOCSET_SMALL_SIZES);
 
 	/* Prepare for sampling rows */
 	rstate = anl_init_selection_state(targrows);
