@@ -1968,8 +1968,28 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 
 	if (result != OCI_SUCCESS && result != OCI_NO_DATA)
 	{
+		oraError sqlstate;
+		switch (err_code)
+		{
+			case 1:
+				sqlstate = FDW_UNIQUE_VIOLATION; break;
+			case 60:
+				sqlstate = FDW_DEADLOCK_DETECTED; break;
+			case 1400:
+				sqlstate = FDW_NOT_NULL_VIOLATION; break;
+			case 2290:
+				sqlstate = FDW_CHECK_VIOLATION; break;
+			case 2291:
+			case 2292:
+				sqlstate = FDW_FOREIGN_KEY_VIOLATION; break;
+			case 8177:
+				sqlstate = FDW_SERIALIZATION_FAILURE; break;
+			default:
+				sqlstate = FDW_UNABLE_TO_CREATE_EXECUTION;
+		}
+
 		/* use the correct SQLSTATE for serialization failures */
-		oracleError_d(err_code == 8177 ? FDW_SERIALIZATION_FAILURE : FDW_UNABLE_TO_CREATE_EXECUTION,
+		oracleError_d(sqlstate,
 			"error executing query: OCIStmtExecute failed to execute remote query",
 			oraMessage);
 	}
