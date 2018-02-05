@@ -8,6 +8,8 @@ Version 2.1.0
   - Enable delayed loading of the Oracle DLL on Windows.
     This allows better diagnostic messages if the library cannot be loaded.
     Patch by Christian Ullrich.
+  - Report the correct SQLSTATE for constraint violation and deadlock errors.
+    Idea by "omistler".
 
   Bugfixes:
   - Missing check if Oracle data types can be converted to PostgreSQL types.
