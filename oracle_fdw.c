@@ -253,8 +253,8 @@ struct OracleFdwState {
 	 * obtained from extract_actual_join_clauses, which strips RestrictInfo
 	 * construct. So, for a join relation they are list of bare clauses.
 	 */
-	List       *remote_conds;
-	List       *local_conds;
+	List       *remote_conds;  /* can be pushdown to remote server */
+	List       *local_conds;   /* cannot be pushdwon to remote server */
 
 	/* Join information */
 	RelOptInfo *outerrel;
@@ -960,7 +960,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 	}
 
 	/* set order clause */
-	if(usable_pathkeys != NIL)
+	if (usable_pathkeys != NIL)
 		fdwState->order_clause = orderedquery.data;
 
 	/* add the only path */
@@ -2713,11 +2713,11 @@ char
 	/*
 	 * For baserel, add a WHERE caluse if fdwState->where_claus is exist.
 	 *
-	 * For inner joins, all conditions that are pushed down get added
+	 * For an INNER join, all conditions that are pushed down get added
 	 * to fdwState->joinclauses and have already been added above,
 	 * so there is no extra WHERE clause.
 	 *
-	 * For outer joins, add an extra WHERE caluse if fdwState->where_claus 
+	 * For an OUTER join, add an extra WHERE caluse if fdwState->where_claus 
 	 * is true.
 	 */
 	/* append WHERE clauses */
@@ -2887,8 +2887,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	struct oraTable *oraTable_i;
 
 	ListCell   *lc;
-	List       *joinclauses;
-	List       *otherclauses;
+	List       *joinclauses;   /* TBA */
+	List       *otherclauses;  /* TBA */
 
 	char *tabname;  /* for warning messages */
 
@@ -2976,7 +2976,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	/*
 	 * Only push down joins for which all join conditions can be pushed down.
 	 *
-	 * For an inner join it would be ok to only push own some of the join
+	 * For an INNER join it would be ok to only push own some of the join
 	 * conditions and evaluate the others locally, but we cannot be certain
 	 * that such a plan is a good or even a feasible one:
 	 * With one of the join conditions missing in the pushed down query,
@@ -2987,16 +2987,17 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * a join where not all join conditions can be pushed down, but we choose
 	 * the safe road of not pushing down such joins at all.
 	 */
-	if(!IS_OUTER_JOIN(jointype))
+	if (!IS_OUTER_JOIN(jointype))
 	{
-		if(fdwState->local_conds != NIL)
+		/* We use all or nothing approach */
+		if (fdwState->local_conds != NIL)
 		{
 			elog(DEBUG1, "*c*");
 			return false;
 		}
 
 		/* CROSS JOIN (T1 JOIN T2 ON true) is not pushed down */
-		if(fdwState->remote_conds == NIL)
+		if (fdwState->remote_conds == NIL)
 		{
 			elog(DEBUG1, "*d*");
 			return false;
@@ -3009,7 +3010,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * wherever possible. This avoids building subqueries at every join step,
 	 * which is not currently supported by the deparser logic.
 	 *
-	 * For an inner join, clauses from both the relations are added to the
+	 * For an INNER join, clauses from both the relations are added to the
 	 * other remote clauses.
 	 *
 	 * For LEFT and RIGHT OUTER join, the clauses from the outer side are added
@@ -3065,27 +3066,27 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			elog(ERROR, "unsupported join type %d", jointype);
 	}
 
-	/* 
-	 * If outer join query has no joinclauses, it means CROSS JOIN so it is 
-	 * not pushed down.
-	 */
-	if(IS_OUTER_JOIN(jointype))
+	if (IS_OUTER_JOIN(jointype))
 	{
-		if(fdwState->joinclauses == NIL)
+		StringInfoData where; /* for outer join's WHERE clause */
+		char *keyword = "WHERE";
+
+		/* 
+		 * If outer join query has no joinclauses, it means CROSS JOIN so it is 
+		 * not pushed down.
+		 */
+		if (fdwState->joinclauses == NIL)
 		{
 			elog(DEBUG1, "*f*");
 			return false;
 		}
-	}
 
-	if (IS_OUTER_JOIN(jointype))
-	{
 		/*
 		 * For outer join, remote_conds has to deparse to WHERE clause and set it to
 		 * fdwState->where_clause. It will be used in createQuery.
+		 *
+		 * Note: Should we do these in createuery to avoid redundant code? 
 		 */
-		char *keyword = "WHERE"; /* for outer join's WHERE clause */
-		StringInfoData where;
 		initStringInfo(&where);
 		if (fdwState->remote_conds != NIL)
 		{
