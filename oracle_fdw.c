@@ -2711,20 +2711,14 @@ char
 							&(fdwState->params));
 
 	/*
-	 * For baserel, add a WHERE caluse if fdwState->where_claus is exist.
+	 * For base relations and OUTER joins, add a WHERE clause if there is one.
 	 *
 	 * For an INNER join, all conditions that are pushed down get added
 	 * to fdwState->joinclauses and have already been added above,
 	 * so there is no extra WHERE clause.
-	 *
-	 * For an OUTER join, add an extra WHERE caluse if fdwState->where_claus 
-	 * is true.
 	 */
-	/* append WHERE clauses */
 	if (fdwState->where_clause)
-	{
-			appendStringInfo(&query, "%s", fdwState->where_clause);	
-	}
+		appendStringInfo(&query, "%s", fdwState->where_clause);
 
 	elog(DEBUG1, "fdwState->where_clause: %s", fdwState->where_clause);
 
@@ -2930,6 +2924,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		 * Unlike an outer join, for inner join, the join result contains only
 		 * the rows which satisfy join clauses, similar to the other clause.
 		 * Hence all clauses can be treated the same.
+		 *
+		 * Note that all join conditions will become remote_conds and
+		 * eventually joinclauses again.
 		 */
 		otherclauses = extract_actual_clauses(extra->restrictlist, false);
 		joinclauses = NIL;
@@ -3017,7 +3014,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 *
 	 * For LEFT and RIGHT OUTER join, the clauses from the outer side are added
 	 * to remote_conds since those can be evaluated after the join is evaluated.
-	 * The clauses from inner side are added to the joinclauses, since they 
+	 * The clauses from inner side are added to the joinclauses, since they
 	 * need to evaluated while constructing the join.
 	 *
 	 * For a FULL OUTER JOIN, the other clauses from either relation can not
@@ -3073,8 +3070,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		StringInfoData where; /* for outer join's WHERE clause */
 		char *keyword = "WHERE";
 
-		/* 
-		 * If outer join query has no joinclauses, it means CROSS JOIN so it is 
+		/*
+		 * If outer join query has no joinclauses, it means CROSS JOIN so it is
 		 * not pushed down.
 		 */
 		if (fdwState->joinclauses == NIL)
@@ -3084,10 +3081,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		}
 
 		/*
-		 * For outer join, remote_conds has to deparse to WHERE clause and set it to
-		 * fdwState->where_clause. It will be used in createQuery.
-		 *
-		 * Note: Should we do these in createuery to avoid redundant code? 
+		 * For outer join, deparse remote_conds and store it in fdwState->where_clause.
+		 * It will be used in createQuery.
 		 */
 		initStringInfo(&where);
 		if (fdwState->remote_conds != NIL)
@@ -3157,6 +3152,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * Search oraColumn from children's oraTable.
 	 * Here we assume that children are foreign table, not foreign join.
 	 * We need capability to track relid chain through join tree to support N-way join.
+	 *
+	 * Note: This code is O(#columns^2), but we have no better idea currently.
 	 */
 	tabname = "?";
 	foreach(lc, joinrel->reltarget->exprs)
