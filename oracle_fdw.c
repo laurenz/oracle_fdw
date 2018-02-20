@@ -2887,8 +2887,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	struct oraTable *oraTable_i;
 
 	ListCell   *lc;
-	List       *joinclauses;   /* TBA */
-	List       *otherclauses;  /* TBA */
+	List       *joinclauses;   /* join quals */
+	List       *otherclauses;  /* pushed-down (other) quals */
 
 	char *tabname;  /* for warning messages */
 
@@ -2921,7 +2921,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		return false;
 	}
 
-	/* Separate restrict list into join quals and quals on join relation */
+	/* Separate restrict list into join quals and pushed-down (other) quals from extra->restrictlist */
 	if (IS_OUTER_JOIN(jointype))
 		extract_actual_join_clauses(extra->restrictlist, &joinclauses, &otherclauses);
 	else
@@ -2958,7 +2958,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 
 	/*
 	 * For inner joins, "otherclauses" contains now the join conditions.
-	 * Check which ones can be pushed down.
+	 * For outer joins, "otherclauses" means these Restrictinfos was pushed down from other relation.
+	 *
+	 * Check which ones can be pushed down to remote server.
 	 */
 	foreach(lc, otherclauses)
 	{
