@@ -19,6 +19,9 @@ Version 2.1.0
        ERROR:  invalid cache ID: 41
   - Don't try to push down IS [NOT] DISTINCT FROM expressions.
     Oracle does not support this standard SQL syntax.
+  - Don't push down IS [NOT] NULL tests on boolean expressions.
+    This caused "ORA-00907: missing right parenthesis".
+    Noticed by Tatsuro Yamada during testing with "sqlsmith".
 
 Version 2.0.0, released 2017-09-15
   Incompatible changes:
