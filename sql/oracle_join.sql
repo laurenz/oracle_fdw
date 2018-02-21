@@ -52,16 +52,21 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.vc = t2.vc AND t1.lb = t2.lb;
 /* condition on one table needs to be evaluated locally */
 EXPLAIN (COSTS off) SELECT max(t1.id), min(t2.id) FROM typetest1 t1 JOIN typetest1 t2 ON t1.fl = t2.fl WHERE t1.vc || 'x' = 'shortx';
-EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
-EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a LEFT JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+EXPLAIN (COSTS OFF) SELECT t1.c, t2.nc FROM typetest1 t1 JOIN (SELECT * FROM typetest1) t2 ON (t1.id = t2.id AND t1.c >= t2.c);
+EXPLAIN (COSTS OFF) SELECT t1.c, t2.nc FROM typetest1 t1 LEFT JOIN (SELECT * FROM typetest1) t2 ON (t1.id = t2.id AND t1.c >= t2.c);
 /* subquery with where clause cannnot be pushed down in full outer join query */
-EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a FULL JOIN (SELECT * FROM typetest1 WHERE id > 1) b USING (id);
+EXPLAIN (COSTS OFF) SELECT t1.c, t2.nc FROM typetest1 t1 FULL JOIN (SELECT * FROM typetest1 WHERE id > 1) t2 USING (id);
 /* cross join */
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 CROSS JOIN typetest1 t2;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON true;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT  JOIN typetest1 t2 ON true;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON true;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN typetest1 t2 ON true;
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 CROSS JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2;
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT  JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
 /* semi-join */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1 WHERE EXISTS (SELECT 1 FROM typetest1 t2 WHERE t1.d = t2.d);
 /* anti-join */

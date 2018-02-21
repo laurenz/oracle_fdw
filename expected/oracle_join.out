@@ -268,26 +268,26 @@ EXPLAIN (COSTS off) SELECT max(t1.id), min(t2.id) FROM typetest1 t1 JOIN typetes
                      Oracle query: SELECT /*f0e10b1797a5d532ee14127a96556d46*/ r1."ID", r1."VC", r1."FL" FROM "TYPETEST1" r1
 (9 rows)
 
-EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+EXPLAIN (COSTS OFF) SELECT t1.c, t2.nc FROM typetest1 t1 JOIN (SELECT * FROM typetest1) t2 ON (t1.id = t2.id AND t1.c >= t2.c);
                                                       QUERY PLAN                                                      
 ----------------------------------------------------------------------------------------------------------------------
  Hash Join
-   Hash Cond: (a.id = typetest1.id)
-   Join Filter: (a.c >= typetest1.c)
-   ->  Foreign Scan on typetest1 a
+   Hash Cond: (t1.id = typetest1.id)
+   Join Filter: (t1.c >= typetest1.c)
+   ->  Foreign Scan on typetest1 t1
          Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
    ->  Hash
          ->  Foreign Scan on typetest1
                Oracle query: SELECT /*72a1013be41cb88abb779b355393907e*/ r4."ID", r4."C", r4."NC" FROM "TYPETEST1" r4
 (8 rows)
 
-EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a LEFT JOIN (SELECT * FROM typetest1) b ON (a.id = b.id AND a.c >= b.c);
+EXPLAIN (COSTS OFF) SELECT t1.c, t2.nc FROM typetest1 t1 LEFT JOIN (SELECT * FROM typetest1) t2 ON (t1.id = t2.id AND t1.c >= t2.c);
                                                       QUERY PLAN                                                      
 ----------------------------------------------------------------------------------------------------------------------
  Hash Left Join
-   Hash Cond: (a.id = typetest1.id)
-   Join Filter: (a.c >= typetest1.c)
-   ->  Foreign Scan on typetest1 a
+   Hash Cond: (t1.id = typetest1.id)
+   Join Filter: (t1.c >= typetest1.c)
+   ->  Foreign Scan on typetest1 t1
          Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
    ->  Hash
          ->  Foreign Scan on typetest1
@@ -295,12 +295,12 @@ EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a LEFT JOIN (SELECT * FROM t
 (8 rows)
 
 /* subquery with where clause cannnot be pushed down in full outer join query */
-EXPLAIN (COSTS OFF) SELECT a.c, b.nc FROM typetest1 a FULL JOIN (SELECT * FROM typetest1 WHERE id > 1) b USING (id);
+EXPLAIN (COSTS OFF) SELECT t1.c, t2.nc FROM typetest1 t1 FULL JOIN (SELECT * FROM typetest1 WHERE id > 1) t2 USING (id);
                                                             QUERY PLAN                                                            
 ----------------------------------------------------------------------------------------------------------------------------------
  Hash Full Join
-   Hash Cond: (a.id = typetest1.id)
-   ->  Foreign Scan on typetest1 a
+   Hash Cond: (t1.id = typetest1.id)
+   ->  Foreign Scan on typetest1 t1
          Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
    ->  Hash
          ->  Foreign Scan on typetest1
@@ -361,6 +361,58 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN typetest1 t
    ->  Materialize
          ->  Foreign Scan on typetest1 t2
                Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
+(6 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 CROSS JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2;
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Foreign Scan on typetest1
+         Oracle query: SELECT /*ca8a876017325c446646472507d12799*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+(5 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Foreign Scan on typetest1
+         Oracle query: SELECT /*ca8a876017325c446646472507d12799*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+(5 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT  JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+   ->  Materialize
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*ca8a876017325c446646472507d12799*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
+(6 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Foreign Scan on typetest1
+         Oracle query: SELECT /*ca8a876017325c446646472507d12799*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+(5 rows)
+
+EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Merge Full Join
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+   ->  Materialize
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*ca8a876017325c446646472507d12799*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
 (6 rows)
 
 /* semi-join */
