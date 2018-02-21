@@ -4155,7 +4155,13 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 
 			break;
 		case T_NullTest:
-			arg = deparseExpr(session, foreignrel, ((NullTest *)expr)->arg, oraTable, params);
+			rightexpr = ((NullTest *)expr)->arg;
+
+			/* since booleans are translated as (expr <> 0), we cannot push them down */
+			if (exprType((Node *)rightexpr) == BOOLOID)
+				return NULL;
+
+			arg = deparseExpr(session, foreignrel, rightexpr, oraTable, params);
 			if (arg == NULL)
 				return NULL;
 
