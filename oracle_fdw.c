@@ -2917,7 +2917,36 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 
 	/* Separate restrict list into join quals and pushed-down (other) quals from extra->restrictlist */
 	if (IS_OUTER_JOIN(jointype))
+	{
 		extract_actual_join_clauses(extra->restrictlist, &joinclauses, &otherclauses);
+
+		/* CROSS JOIN (T1 LEFT/RIGHT/FULL JOIN T2 ON true) is not pushed down */
+		if (joinclauses == NIL)
+		{
+			elog(DEBUG1, "*b*");
+			return false;
+		}
+
+		/*
+		 * Join quals must be safe to push down.
+		 */
+		foreach(lc, joinclauses)
+		{
+			char *tmp = NULL;
+			Expr *expr = (Expr *) lfirst(lc);
+
+			tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
+			elog(DEBUG1, "joinclauses tmp *c*: %s", tmp);
+			if (tmp == NULL)
+			{
+				elog(DEBUG1, "*c*");
+				return false;
+			}
+		}
+
+		/* Save the join clauses, for later use. */
+		fdwState->joinclauses = joinclauses;
+	}
 	else
 	{
 		/*
@@ -2931,27 +2960,6 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		otherclauses = extract_actual_clauses(extra->restrictlist, false);
 		joinclauses = NIL;
 	}
-
-	/*
-	 * Join quals must be safe to push down.
-	 * This is not executed for inner joins.
-	 */
-	foreach(lc, joinclauses)
-	{
-		char *tmp = NULL;
-		Expr *expr = (Expr *) lfirst(lc);
-
-		tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
-		elog(DEBUG1, "joinclauses tmp: %s", tmp);
-		if (tmp == NULL)
-		{
-			elog(DEBUG1, "*b*");
-			return false;
-		}
-	}
-
-	/* Save the join clauses, for later use. */
-	fdwState->joinclauses = joinclauses;
 
 	/*
 	 * For inner joins, "otherclauses" contains now the join conditions.
@@ -2986,19 +2994,21 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * a join where not all join conditions can be pushed down, but we choose
 	 * the safe road of not pushing down such joins at all.
 	 */
+
 	if (!IS_OUTER_JOIN(jointype))
 	{
+		/* For an inner join */
 		/* We use all or nothing approach */
 		if (fdwState->local_conds != NIL)
 		{
-			elog(DEBUG1, "*c*");
+			elog(DEBUG1, "*d*");
 			return false;
 		}
 
 		/* CROSS JOIN (T1 JOIN T2 ON true) is not pushed down */
 		if (fdwState->remote_conds == NIL)
 		{
-			elog(DEBUG1, "*d*");
+			elog(DEBUG1, "*e*");
 			return false;
 		}
 	}
@@ -3055,7 +3065,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			elog(DEBUG1, "FULL");
 			if (fdwState_i->remote_conds || fdwState_o->remote_conds)
 			{
-				elog(DEBUG1, "*e*");
+				elog(DEBUG1, "*f*");
 				return false;
 			}
 			break;
@@ -3069,16 +3079,6 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	{
 		StringInfoData where; /* for outer join's WHERE clause */
 		char *keyword = "WHERE";
-
-		/*
-		 * If outer join query has no joinclauses, it means CROSS JOIN so it is
-		 * not pushed down.
-		 */
-		if (fdwState->joinclauses == NIL)
-		{
-			elog(DEBUG1, "*f*");
-			return false;
-		}
 
 		/*
 		 * For outer join, deparse remote_conds and store it in fdwState->where_clause.
@@ -3101,15 +3101,6 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 				}
 			}
 			fdwState->where_clause = where.data;
-		}
-
-		foreach(lc, fdwState->joinclauses)
-		{
-			char *tmp = NULL;
-			Expr *expr = (Expr *) lfirst(lc);
-
-			tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
-			elog(DEBUG1, "joinclauses tmp: %s", tmp);
 		}
 	}
 	else
