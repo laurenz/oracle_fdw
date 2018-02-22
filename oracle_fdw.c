@@ -2898,7 +2898,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	fdwState = (struct OracleFdwState *) joinrel->fdw_private;
 	fdwState_o = (struct OracleFdwState *) outerrel->fdw_private;
 	fdwState_i = (struct OracleFdwState *) innerrel->fdw_private;
-	Assert(fdwState && fdwState_o && fdwState_i);
+
+	if (!fdwState_o || !fdwState_i)
+		return false;
 
 	fdwState->outerrel = outerrel;
 	fdwState->innerrel = innerrel;
