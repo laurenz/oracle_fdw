@@ -2964,8 +2964,33 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	}
 
 	/*
+	 * ToDo: rewrite this comment since we have no deparseExplicitTargetList().
+	 *
+	 * deparseExplicitTargetList() isn't smart enough to handle anything other
+	 * than a Var.  In particular, if there's some PlaceHolderVar that would
+	 * need to be evaluated within this join tree (because there's an upper
+	 * reference to a quantity that may go to NULL as a result of an outer
+	 * join), then we can't try to push the join down because we'll fail when
+	 * we get to deparseExplicitTargetList().  However, a PlaceHolderVar that
+	 * needs to be evaluated *at the top* of this join tree is OK, because we
+	 * can do that locally after fetching the results from the remote side.
+	 */
+	foreach(lc, root->placeholder_list)
+	{
+		PlaceHolderInfo *phinfo = lfirst(lc);
+		Relids      relids = joinrel->relids;
+
+		if (bms_is_subset(phinfo->ph_eval_at, relids) &&
+			bms_nonempty_difference(relids, phinfo->ph_eval_at))
+		{
+			elog(DEBUG1, "*PlaceHolder*");
+			return false;
+		}
+	}
+
+	/*
 	 * For inner joins, "otherclauses" contains now the join conditions.
-	 * For outer joins, "otherclauses" means these Restrictinfos was pushed down from other relation.
+	 * For outer joins, it means these Restrictinfos were pushed down from other relation.
 	 *
 	 * Check which ones can be pushed down to remote server.
 	 */
