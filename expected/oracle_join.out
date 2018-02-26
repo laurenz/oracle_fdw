@@ -415,6 +415,28 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN (SELECT * F
                Oracle query: SELECT /*ca8a876017325c446646472507d12799*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
 (6 rows)
 
+/* outer join with placeholder */
+EXPLAIN (COSTS off) SELECT t1.id, sq1.x, sq1.y
+FROM typetest1 t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1 t2) sq1 on t1.id = sq1.x
+WHERE 1 = (SELECT 1 FROM typetest1 t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
+ Hash Left Join
+   Hash Cond: (t1.id = t2.id)
+   Filter: (1 = (SubPlan 1))
+   ->  Foreign Scan on typetest1 t1
+         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+   ->  Hash
+         ->  Foreign Scan on typetest1 t2
+               Oracle query: SELECT /*aa503178012a63f0d817dc29515fe77a*/ r4."ID" FROM "TYPETEST1" r4
+   SubPlan 1
+     ->  Limit
+           ->  Result
+                 One-Time Filter: ((99) IS NOT NULL)
+                 ->  Foreign Scan on typetest1 t3
+                       Oracle query: SELECT /*304e6f7c053bc0b83b11731b93c34a38*/ '1' FROM "TYPETEST1" r1 WHERE (:p1 IS NOT NULL)
+(14 rows)
+
 /* semi-join */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1 WHERE EXISTS (SELECT 1 FROM typetest1 t2 WHERE t1.d = t2.d);
                                               QUERY PLAN                                               
