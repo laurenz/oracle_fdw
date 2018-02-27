@@ -71,6 +71,29 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN (SELECT * F
 EXPLAIN (COSTS off) SELECT t1.id, sq1.x, sq1.y
 FROM typetest1 t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1 t2) sq1 on t1.id = sq1.x
 WHERE 1 = (SELECT 1 FROM typetest1 t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+/* inner join with placeholder */
+EXPLAIN (COSTS OFF)
+SELECT subq2.c3 FROM typetest1
+RIGHT JOIN
+    (
+    SELECT
+        c AS c1
+    FROM
+        typetest1
+    ) AS subq1
+ON true
+LEFT JOIN
+    (
+    SELECT
+        ref1.nc AS c2,
+        10 AS c3
+    FROM
+        typetest1 AS ref1
+    INNER JOIN
+        typetest1 AS ref2
+	ON (ref1.fl = ref2.fl)
+    ) AS subq2
+ON (subq1.c1 = subq2.c2);
 /* semi-join */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1 WHERE EXISTS (SELECT 1 FROM typetest1 t2 WHERE t1.d = t2.d);
 /* anti-join */

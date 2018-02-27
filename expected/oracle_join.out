@@ -437,6 +437,44 @@ WHERE 1 = (SELECT 1 FROM typetest1 t3 WHERE sq1.y IS NOT NULL LIMIT 1);
                        Oracle query: SELECT /*304e6f7c053bc0b83b11731b93c34a38*/ '1' FROM "TYPETEST1" r1 WHERE (:p1 IS NOT NULL)
 (14 rows)
 
+/* inner join with placeholder */
+EXPLAIN (COSTS OFF)
+SELECT subq2.c3 FROM typetest1
+RIGHT JOIN
+    (
+    SELECT
+        c AS c1
+    FROM
+        typetest1
+    ) AS subq1
+ON true
+LEFT JOIN
+    (
+    SELECT
+        ref1.nc AS c2,
+        10 AS c3
+    FROM
+        typetest1 AS ref1
+    INNER JOIN
+        typetest1 AS ref2
+	ON (ref1.fl = ref2.fl)
+    ) AS subq2
+ON (subq1.c1 = subq2.c2);
+                                                                          QUERY PLAN                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Hash Left Join
+         Hash Cond: (typetest1_1.c = ref1.nc)
+         ->  Foreign Scan on typetest1 typetest1_1
+               Oracle query: SELECT /*03d840654a7d8ad573b60a3d811a0519*/ r6."C" FROM "TYPETEST1" r6
+         ->  Hash
+               ->  Foreign Scan
+                     Oracle query: SELECT /*ad04a23c2a5a201a7c18cc82bc9223fc*/ r7."NC" FROM ("TYPETEST1" r7 INNER JOIN "TYPETEST1" r8 ON (r7."FL" = r8."FL"))
+   ->  Materialize
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*50857ae5af0c5a170837c8c56f91e583*/ '1' FROM "TYPETEST1" r1
+(11 rows)
+
 /* semi-join */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1 WHERE EXISTS (SELECT 1 FROM typetest1 t2 WHERE t1.d = t2.d);
                                               QUERY PLAN                                               
