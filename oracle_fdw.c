@@ -2883,6 +2883,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	ListCell   *lc;
 	List       *joinclauses;   /* join quals */
 	List       *otherclauses;  /* pushed-down (other) quals */
+	List	   *targetvars;    /* pulled Vars from targetlist */
 
 	char *tabname;  /* for warning messages */
 
@@ -3174,7 +3175,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * Note: This code is O(#columns^2), but we have no better idea currently.
 	 */
 	tabname = "?";
-	foreach(lc, joinrel->reltarget->exprs)
+	/* Get only Vars because there is not only Vars but also PlaceHolderVars in below exprs. */
+	targetvars = pull_var_clause((Node *)joinrel->reltarget->exprs, PVC_RECURSE_PLACEHOLDERS);
+	foreach(lc, targetvars)
 	{
 		int i;
 		Var *var = (Var *) lfirst(lc);
