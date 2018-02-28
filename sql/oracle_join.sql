@@ -94,6 +94,8 @@ LEFT JOIN
 	ON (ref1.fl = ref2.fl)
     ) AS subq2
 ON (subq1.c1 = subq2.c2);
+/* inner rel is false */
+EXPLAIN (COSTS OFF) SELECT 1 FROM (SELECT 1 FROM typetest1 WHERE false) AS subq1 RIGHT JOIN typetest1 AS ref1 ON NULL;
 /* semi-join */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1 WHERE EXISTS (SELECT 1 FROM typetest1 t2 WHERE t1.d = t2.d);
 /* anti-join */

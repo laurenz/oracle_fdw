@@ -475,6 +475,18 @@ ON (subq1.c1 = subq2.c2);
                Oracle query: SELECT /*50857ae5af0c5a170837c8c56f91e583*/ '1' FROM "TYPETEST1" r1
 (11 rows)
 
+/* inner rel is false */
+EXPLAIN (COSTS OFF) SELECT 1 FROM (SELECT 1 FROM typetest1 WHERE false) AS subq1 RIGHT JOIN typetest1 AS ref1 ON NULL;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Nested Loop Left Join
+   Join Filter: NULL::boolean
+   ->  Foreign Scan on typetest1 ref1
+         Oracle query: SELECT /*6acba10a65785ec3f7677fd6ac254a44*/ '1' FROM "TYPETEST1" r2
+   ->  Result
+         One-Time Filter: false
+(6 rows)
+
 /* semi-join */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1 WHERE EXISTS (SELECT 1 FROM typetest1 t2 WHERE t1.d = t2.d);
                                               QUERY PLAN                                               
