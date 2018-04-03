@@ -96,6 +96,12 @@ typedef enum
 #define UUIDOID 2950
 #endif
 
+/* PostgreSQL before 9.6 doesn't have this macro */
+#ifndef ALLOCSET_SMALL_SIZES
+#define ALLOCSET_SMALL_SIZES \
+ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE
+#endif
+
 struct oraColumn
 {
 	char *name;              /* name in Oracle */
