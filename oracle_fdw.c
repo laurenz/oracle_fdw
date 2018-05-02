@@ -537,18 +537,18 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						errhint("Valid values in this context are numbers between 0.000001 and 100.")));
 		}
 
- 		/* check valid values for "prefetch" */
- 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
- 		{
- 			char *val = ((Value *) (def->arg))->val.str;
- 			char *endptr;
- 			unsigned long prefetch = strtol(val, &endptr, 0);
- 			if (val[0] == '\0' || *endptr != '\0' || prefetch < 0 || prefetch > 10240 )
- 				ereport(ERROR,
- 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
- 						errmsg("invalid value for option \"%s\"", def->defname),
- 						errhint("Valid values in this context are integers between 0 and 10240.")));
- 		}
+		/* check valid values for "prefetch" */
+		if (strcmp(def->defname, OPT_PREFETCH) == 0)
+		{
+			char *val = ((Value *) (def->arg))->val.str;
+			char *endptr;
+			long prefetch = strtol(val, &endptr, 0);
+			if (val[0] == '\0' || *endptr != '\0' || prefetch < 0 || prefetch > 10240 )
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are integers between 0 and 10240.")));
+		}
 	}
 
 	/* check that all required options have been given */
@@ -1618,12 +1618,12 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	{
 		case CMD_INSERT:
 			/*
-	 		* In an INSERT, we transmit all columns that are defined in the foreign
-	 		* table.  In an UPDATE, we transmit only columns that were explicitly
-	 		* targets of the UPDATE, so as to avoid unnecessary data transmission.
-	 		* (We can't do that for INSERT since we would miss sending default values
-	 		* for columns not listed in the source statement.)
-	 		*/
+			 * In an INSERT, we transmit all columns that are defined in the foreign
+			 * table.  In an UPDATE, we transmit only columns that were explicitly
+			 * targets of the UPDATE, so as to avoid unnecessary data transmission.
+			 * (We can't do that for INSERT since we would miss sending default values
+			 * for columns not listed in the source statement.)
+			 */
 
 			tupdesc = RelationGetDescr(rel);
 
