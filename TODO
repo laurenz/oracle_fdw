@@ -1,4 +1,7 @@
 This is a list of things that should be done.
 Help is welcome!
 
+- Set parameters like NLS_DATE_FORMAT *after* the Oracle connection has been
+  established.  Otherwise, an ill-guided Oracle logon trigger could mess up
+  our NLS settings.
 - Map PostgreSQL type "json" (and maybe "jsonb") to Oracle VARCHAR2 and CLOB.

@@ -496,16 +496,15 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						errhint("Valid values in this context are: on/yes/true or off/no/false")));
 		}
 
-		/* check valid values for "table" and "schema" */
-		if (strcmp(def->defname, OPT_TABLE) == 0
-				|| strcmp(def->defname, OPT_SCHEMA) == 0)
+		/* check valid values for "schema" */
+		if (strcmp(def->defname, OPT_SCHEMA) == 0)
 		{
 			char *val = ((Value *)(def->arg))->val.str;
 			if (strchr(val, '"') != NULL)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Double quotes are not allowed in names.")));
+						errhint("Double quotes are not allowed in the schema name.")));
 		}
 
 		/* check valid values for max_long */
