@@ -136,12 +136,6 @@
 PG_MODULE_MAGIC;
 
 /*
- * GUC variables
- */
-static bool enable_joinpd = true;
-
-
-/*
  * "true" if Oracle data have been modified in the current transaction.
  */
 static bool dml_in_transaction = false;
@@ -713,20 +707,6 @@ oracle_diag(PG_FUNCTION_ARGS)
 void
 _PG_init(void)
 {
-	/* Define custom GUC variables. */
-	DefineCustomBoolVariable("oracle_fdw.enable_joinpd",
-							"Use join pushdown for executing remote query.",
-							NULL,
-							&enable_joinpd,
-							true,
-							PGC_USERSET,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-	EmitWarningsOnPlaceholders("oracle_fdw");
-
 	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 }
@@ -2849,6 +2829,15 @@ appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, List **params
 	{
 		Expr  *expr = (Expr *) lfirst(lc);
 
+		/*
+		 * Extract clause from RestrictInfo, if required. 
+		 */
+		if (IsA(expr, RestrictInfo))
+		{
+			RestrictInfo *ri = (RestrictInfo *) expr;
+			expr = ri->clause;
+		}
+
 		/* connect expressions with AND */
 		if (!is_first)
 			appendStringInfo(buf, " AND ");
@@ -2880,15 +2869,11 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	struct oraTable *oraTable_i;
 
 	ListCell   *lc;
-	List       *joinclauses;   /* join quals */
-	List       *otherclauses;  /* pushed-down (other) quals */
+	List	   *joinclauses;   /* join quals */
+	List	   *otherclauses;  /* pushed-down (other) quals */
 	List	   *targetvars;    /* pulled Vars from targetlist */
 
 	char *tabname;  /* for warning messages */
-
-	/* GUC valiable */
-	if (!enable_joinpd)
-		return false;
 
 	/* we support pushing down INNER/OUTER joins */
 	if (jointype != JOIN_INNER && jointype != JOIN_LEFT &&
@@ -2913,19 +2898,17 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 */
 	if (fdwState_o->local_conds || fdwState_i->local_conds)
 	{
-		elog(DEBUG1, "*a*");
 		return false;
 	}
 
 	/* Separate restrict list into join quals and pushed-down (other) quals from extra->restrictlist */
 	if (IS_OUTER_JOIN(jointype))
 	{
-		extract_actual_join_clauses(extra->restrictlist, &joinclauses, &otherclauses);
+		extract_actual_join_clauses(extra->restrictlist, joinrel->relids, &joinclauses, &otherclauses);
 
 		/* CROSS JOIN (T1 LEFT/RIGHT/FULL JOIN T2 ON true) is not pushed down */
 		if (joinclauses == NIL)
 		{
-			elog(DEBUG1, "*b*");
 			return false;
 		}
 
@@ -2938,10 +2921,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			Expr *expr = (Expr *) lfirst(lc);
 
 			tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
-			elog(DEBUG1, "joinclauses tmp *c*: %s", tmp);
+			elog(DEBUG1, "joinclauses tmp: %s", tmp);
 			if (tmp == NULL)
 			{
-				elog(DEBUG1, "*c*");
 				return false;
 			}
 		}
@@ -2983,7 +2965,6 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		if (bms_is_subset(phinfo->ph_eval_at, relids) &&
 			bms_nonempty_difference(relids, phinfo->ph_eval_at))
 		{
-			elog(DEBUG1, "*PlaceHolder*");
 			return false;
 		}
 	}
@@ -3028,14 +3009,12 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		/* We use all or nothing approach */
 		if (fdwState->local_conds != NIL)
 		{
-			elog(DEBUG1, "*d*");
 			return false;
 		}
 
 		/* CROSS JOIN (T1 JOIN T2 ON true) is not pushed down */
 		if (fdwState->remote_conds == NIL)
 		{
-			elog(DEBUG1, "*e*");
 			return false;
 		}
 	}
@@ -3092,7 +3071,6 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 			elog(DEBUG1, "FULL");
 			if (fdwState_i->remote_conds || fdwState_o->remote_conds)
 			{
-				elog(DEBUG1, "*f*");
 				return false;
 			}
 			break;
