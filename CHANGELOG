@@ -22,6 +22,14 @@ Version 2.1.0
   - Don't push down IS [NOT] NULL tests on boolean expressions.
     This caused "ORA-00907: missing right parenthesis".
     Noticed by Tatsuro Yamada during testing with "sqlsmith".
+  - Allow foreign tables to be defined on Oracle queries that contain double
+    quotes.  This caused an error message due to a sanity check that has become
+    obsolete when this feature was introduced.
+    Noted by "Bpapman".
+  - Disable push-down of foreign joins in queries with FOR UPDATE.
+    These used to be pushed down before, but without the FOR UPDATE clause,
+    leading to incorrect behavior in the face of concurrency.
+    Noted and fixed by Tatsuro Yamada.
 
 Version 2.0.0, released 2017-09-15
   Incompatible changes:
