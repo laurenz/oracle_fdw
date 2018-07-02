@@ -995,12 +995,6 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 		return;
 	}
 
-	if (root->rowMarks)
-	{
-		elog(INFO, "oracle_fdw: don't push down join with FOR UPDATE");
-		return;
-	}
-
 	/*
 	 * N-way join is not supported, due to the column definition infrastracture.
 	 * If we can track relid mapping of join relations, we can support N-way join.
