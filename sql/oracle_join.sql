@@ -11,47 +11,58 @@ ANALYZE typetest1;
  * Cases that should be pushed down.
  */
 -- inner join two tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
 SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
+EXPLAIN (COSTS off) 
+SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2);
 SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2) ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT length(t1.lb), length(t2.lc) FROM typetest1 t1 JOIN typetest1 t2 ON (t1.id + t2.id = 2);
 -- inner join two tables with ORDER BY clause, but ORDER BY does not get pushed down */
+EXPLAIN (COSTS off) 
 SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 USING (ts, num) ORDER BY t1.id, t2.id;
 -- natural join two tables
+EXPLAIN (COSTS off) 
+SELECT id FROM typetest1 NATURAL JOIN shorty;
 SELECT id FROM typetest1 NATURAL JOIN shorty ORDER BY id;
-EXPLAIN (COSTS off) SELECT id FROM typetest1 NATURAL JOIN shorty;
 -- table with column that does not exist in Oracle (should become NULL)
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.x FROM typetest1 t1 JOIN longy t2 ON t1.c = t2.c;
 SELECT t1.id, t2.x FROM typetest1 t1 JOIN longy t2 ON t1.c = t2.c ORDER BY t1.id, t2.x;
-EXPLAIN (COSTS off) SELECT t1.id, t2.x FROM typetest1 t1 JOIN longy t2 ON t1.c = t2.c;
 -- left outer join two tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d;
 SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d;
 -- right outer join two tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d;
 SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d;
 -- full outer join two tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d;
 SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
-EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d;
 -- joins with filter conditions 
 ---- inner join with WHERE clause
+EXPLAIN (VERBOSE, COSTS off) 
 SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-EXPLAIN (VERBOSE, COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
 ---- left outer join with WHERE clause
+EXPLAIN (VERBOSE, COSTS off) 
 SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-EXPLAIN (VERBOSE, COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
 ---- right outer join with WHERE clause
+EXPLAIN (VERBOSE, COSTS off) 
 SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-EXPLAIN (VERBOSE, COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
 ---- full outer join with WHERE clause
+EXPLAIN (VERBOSE, COSTS off) 
 SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
-EXPLAIN (VERBOSE, COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
 
 
 /*
  * Cases that should not be pushed down.
  */
-
 -- join expression cannot be pushed down
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.lc = t2.lc;
 -- only one join condition cannot be pushed down
@@ -93,27 +104,93 @@ EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 INNER JOIN (SELECT * F
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 LEFT  JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 RIGHT JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
 EXPLAIN (COSTS off) SELECT t1.id, t2.id FROM typetest1 t1 FULL  JOIN (SELECT * FROM typetest1 WHERE vc = 'short') t2 ON true;
--- UPDATE statement, not pushed down
+-- update statement, not pushed down
 EXPLAIN (COSTS off) UPDATE typetest1 t1 SET c = NULL FROM typetest1 t2 WHERE t1.vc = t2.vc AND t2.num = 3.14159;
--- only part of a three-way join will be pushed down
-EXPLAIN (COSTS off) SELECT t1.id, t3.id
-   FROM typetest1 t1
-      JOIN typetest1 t2 USING (nvc)
-      JOIN typetest1 t3 ON t2.db = t3.db;
-/* join with for update */
+-- join with FOR UPDATE, not pushed down
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t2.id FOR UPDATE;
+-- only part of a three-way join will be pushed down
+---- inner join three tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 USING (nvc) JOIN typetest1 t3 ON t2.db = t3.db;
+SELECT t1.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 USING (nvc) JOIN typetest1 t3 ON t2.db = t3.db;
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- inner outer join + left outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- inner outer join + right outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- inner outer join + full outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- left outer join three tables
+EXPLAIN (COSTS off) a
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- left outer join + inner outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- left outer join + right outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- left outer join + full outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 LEFT JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- right outer join three tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- right outer join + inner outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- right outer join + left outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- right outer join + full outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 RIGHT JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- full outer join three tables
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d FULL JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- full outer join + inner join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- full outer join + left outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d LEFT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- full outer join + right outer join
+EXPLAIN (COSTS off) 
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+SELECT t1.id, t2.id, t3.id FROM typetest1 t1 FULL JOIN typetest1 t2 ON t1.d = t2.d RIGHT JOIN typetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+---- join in CTE
+EXPLAIN (COSTS off) 
+WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
+WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1 t1 JOIN typetest1 t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
 
 /*
  * Cost estimates.
  */
-
-/* delete statistics */
+-- delete statistics
 DELETE FROM pg_statistic WHERE starelid = 'typetest1'::regclass;
 UPDATE pg_class SET relpages = 0, reltuples = 0.0 WHERE oid = 'typetest1'::regclass;
-/* default costs */
+-- default costs
 EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
-/* gather statistics */
+-- gather statistics
 ANALYZE typetest1;
-/* costs with statistics */
+-- costs with statistics
 EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
 EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c <> t2.c;
