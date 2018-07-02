@@ -52,6 +52,8 @@ EXPLAIN (COSTS off) SELECT t1.id, t3.id
    FROM typetest1 t1
       JOIN typetest1 t2 USING (nvc)
       JOIN typetest1 t3 ON t2.db = t3.db;
+/* join with for update */
+EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t2.id FOR UPDATE;
 
 /*
  * Cost estimates.
