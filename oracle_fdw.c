@@ -3004,6 +3004,14 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		int used_flag = 0;
 
 		Assert(IsA(var, Var));
+
+		/*
+		 * Skip whole-row references and system columns.
+		 * There shouldn't be any, but it's better to be safe.
+		 */
+		if (var->varattno <= 0)
+			continue;
+
 		/* Find appropriate entry from children's oraTable. */
 		for (i=0; i<oraTable_o->ncols; ++i)
 		{
