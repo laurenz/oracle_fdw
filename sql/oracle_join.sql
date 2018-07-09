@@ -198,6 +198,27 @@ SELECT t1.id, t2.id FROM ltypetest1 t1 FULL  JOIN (SELECT * FROM ltypetest1 WHER
 EXPLAIN (COSTS off) UPDATE typetest1 t1 SET c = NULL FROM typetest1 t2 WHERE t1.vc = t2.vc AND t2.num = 3.14159;
 -- join with FOR UPDATE, not pushed down
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t2.id FOR UPDATE;
+-- join in CTE
+EXPLAIN (COSTS off) 
+WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1  t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
+WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1  t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
+WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM ltypetest1 t1 JOIN ltypetest1 t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
+-- whole-row and system columns, not pushed down
+EXPLAIN (COSTS off)
+SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id;
+SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
+EXPLAIN (COSTS off)
+SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id;
+SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
+EXPLAIN (COSTS off)
+SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id;
+SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
+EXPLAIN (COSTS off)
+SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id;
+SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
+EXPLAIN (COSTS off)
+SELECT t1, t1.ctid FROM shorty t1 CROSS JOIN longy t2; 
+SELECT t1, t1.ctid FROM shorty t1 CROSS JOIN longy t2 ORDER BY t1.id;
 -- only part of a three-way join will be pushed down
 ---- inner join three tables
 EXPLAIN (COSTS off) 
@@ -283,12 +304,6 @@ EXPLAIN (COSTS off)
 SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d RIGHT JOIN typetest1  t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
 SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d RIGHT JOIN typetest1  t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
 SELECT t1.id, t2.id, t3.id FROM ltypetest1 t1 FULL  JOIN ltypetest1 t2 ON t1.d = t2.d RIGHT JOIN ltypetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
----- join in CTE
-EXPLAIN (COSTS off) 
-WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1  t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
-WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1  t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
-WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM ltypetest1 t1 JOIN ltypetest1 t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
-
 
 /*
  * Cost estimates.
