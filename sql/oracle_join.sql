@@ -54,6 +54,9 @@ EXPLAIN (COSTS off) SELECT t1.id, t3.id
       JOIN typetest1 t3 ON t2.db = t3.db;
 /* join with for update */
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t2.id FOR UPDATE;
+/* whole-row and system columns */
+EXPLAIN SELECT t1, t1.ctid FROM shorty t1 JOIN longy t2 ON t1.id = t2.id;
+SELECT t1, t1.ctid FROM shorty t1 JOIN longy t2 ON t1.id = t2.id;
 
 /*
  * Cost estimates.

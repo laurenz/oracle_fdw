@@ -250,6 +250,27 @@ EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t
                      Oracle query: SELECT /*f740ec4b7e4325474338c127bc6f4c01*/ r2."ID", r2."C", r2."NC", r2."VC", r2."NVC", r2."LC", r2."R", r2."U", r2."LB", r2."LR", r2."B", r2."NUM", r2."FL", r2."DB", r2."D", r2."TS", r2."IDS", r2."IYM" FROM "TYPETEST1" r2 FOR UPDATE
 (8 rows)
 
+/* whole-row and system columns */
+EXPLAIN SELECT t1, t1.ctid FROM shorty t1 JOIN longy t2 ON t1.id = t2.id;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Hash Join  (cost=30012.50..40190.00 rows=5000 width=78)
+   Hash Cond: (t1.id = t2.id)
+   ->  Foreign Scan on shorty t1  (cost=10000.00..20000.00 rows=1000 width=82)
+         Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
+   ->  Hash  (cost=20000.00..20000.00 rows=1000 width=4)
+         ->  Foreign Scan on longy t2  (cost=10000.00..20000.00 rows=1000 width=4)
+               Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
+(7 rows)
+
+SELECT t1, t1.ctid FROM shorty t1 JOIN longy t2 ON t1.id = t2.id;
+             t1             |      ctid      
+----------------------------+----------------
+ (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
+ (4,"short     ")           | (4294967295,0)
+ (1,"fixed chau")           | (4294967295,0)
+(3 rows)
+
 /*
  * Cost estimates.
  */
