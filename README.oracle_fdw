@@ -510,10 +510,11 @@ PostgreSQL 9.1 or better is required.
 Support for ANALYZE is available from PostgreSQL 9.2 on.  
 Support for INSERT, UPDATE and DELETE is available from PostgreSQL 9.3 on.
 
-oracle_fdw is designed to be used with
-[PostgreSQL](https://www.postgresql.org/). Forks of PostgreSQL, such
-as "PostgresPro" and "Postgres-XL", are likely to be incompatible. If
-you encounter problems while using such a PostgreSQL-derived server,
+oracle_fdw is written for standard open source PostgreSQL.
+Forks of PostgreSQL, such as "PostgresPro" and "Postgres-XL", are likely to
+be incompatible.
+If you want to try it nonetheless, you'll have to build oracle_fdw from source.
+If you encounter problems while using such a PostgreSQL-derived server,
 please try with the original version before reporting an issue.
 
 Oracle client version 10.1 or better is required.  
@@ -857,14 +858,6 @@ If updating the environment does not work, you may be using a PostgreSQL
 distribution that provides its own environment variables, hiding the Oracle
 client.  See the bug report at https://github.com/laurenz/oracle_fdw/issues/160
 for more information.
-
-Incompatible PostgreSQL distributions
--------------------------------------
-
-Please see the [Installation
-Requirements](#5-installation-requirements) above if you plan to use
-oracle_fdw with a fork of PostgreSQL such as "PostgresPro" or
-"Postgres-XL".
 
 9 Support
 =========
