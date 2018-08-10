@@ -510,6 +510,13 @@ PostgreSQL 9.1 or better is required.
 Support for ANALYZE is available from PostgreSQL 9.2 on.  
 Support for INSERT, UPDATE and DELETE is available from PostgreSQL 9.3 on.
 
+oracle_fdw is written for standard open source PostgreSQL.
+Forks of PostgreSQL, such as "PostgresPro" and "Postgres-XL", are likely to
+be incompatible.
+If you want to try it nonetheless, you'll have to build oracle_fdw from source.
+If you encounter problems while using such a PostgreSQL-derived server,
+please try with the original version before reporting an issue.
+
 Oracle client version 10.1 or better is required.  
 oracle_fdw can be built and used with Oracle Instant Client as well as with
 Oracle Client and Server installations installed with Universal Installer.
