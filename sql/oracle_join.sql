@@ -304,6 +304,11 @@ EXPLAIN (COSTS off)
 SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d RIGHT JOIN typetest1  t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
 SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d RIGHT JOIN typetest1  t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
 SELECT t1.id, t2.id, t3.id FROM ltypetest1 t1 FULL  JOIN ltypetest1 t2 ON t1.d = t2.d RIGHT JOIN ltypetest1 t3 ON t2.d = t3.d ORDER BY t1.id, t2.id;
+-- join with LATERAL reference
+EXPLAIN (COSTS off)
+SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty s,   longy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
+SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty s,   longy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
+SELECT t1.id, sl.c FROM ltypetest1 t1, LATERAL (SELECT DISTINCT s.c FROM lshorty s, llongy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
 
 /*
  * Cost estimates.

@@ -1751,6 +1751,39 @@ SELECT t1.id, t2.id, t3.id FROM ltypetest1 t1 FULL  JOIN ltypetest1 t2 ON t1.d =
     |    |  4
 (3 rows)
 
+-- join with LATERAL reference
+EXPLAIN (COSTS off)
+SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty s,   longy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
+                                                                                      QUERY PLAN                                                                                      
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.id, s.c
+   ->  Nested Loop
+         ->  Foreign Scan on typetest1 t1
+               Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
+         ->  Unique
+               ->  Sort
+                     Sort Key: s.c
+                     ->  Foreign Scan
+                           Oracle query: SELECT /*15093cb7b24e9f5e9b2a8f9a08bf45bd*/ r1."C" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."ID" = r2."ID") AND (r2."C" = :p1))
+(10 rows)
+
+SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty s,   longy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
+ id |          c           
+----+----------------------
+  1 | fixed chau
+  3 | a\x1B\x07\r\x7Fb    
+  4 | short     
+(3 rows)
+
+SELECT t1.id, sl.c FROM ltypetest1 t1, LATERAL (SELECT DISTINCT s.c FROM lshorty s, llongy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
+ id |          c           
+----+----------------------
+  1 | fixed chau
+  3 | a\x1B\x07\r\x7Fb    
+  4 | short     
+(3 rows)
+
 /*
  * Cost estimates.
  */
