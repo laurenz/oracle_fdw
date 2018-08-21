@@ -2939,16 +2939,13 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	}
 
 	/*
-	 * ToDo: rewrite this comment since we have no deparseExplicitTargetList().
-	 *
-	 * deparseExplicitTargetList() isn't smart enough to handle anything other
-	 * than a Var.  In particular, if there's some PlaceHolderVar that would
-	 * need to be evaluated within this join tree (because there's an upper
-	 * reference to a quantity that may go to NULL as a result of an outer
-	 * join), then we can't try to push the join down because we'll fail when
-	 * we get to deparseExplicitTargetList().  However, a PlaceHolderVar that
-	 * needs to be evaluated *at the top* of this join tree is OK, because we
-	 * can do that locally after fetching the results from the remote side.
+	 * If there is a PlaceHolderVar that needs to be evaluated at a lower level
+	 * than the complete join relation, it may happen that a reference from
+	 * outside is wrongly evaluated to a non-NULL value.
+	 * This can happen if the value is NULL only because it appears on the nullable
+	 * side of an outer join.
+	 * So we don't push down the join in this case - if PostgreSQL performs the join,
+	 * it will evaluate the placeholder correctly.
 	 */
 	foreach(lc, root->placeholder_list)
 	{

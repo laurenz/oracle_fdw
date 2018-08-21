@@ -520,44 +520,39 @@ SELECT t1.c, t2.nc FROM ltypetest1 t1 FULL JOIN (SELECT * FROM ltypetest1 WHERE 
  fixed chau           | 
 (3 rows)
 
--- left outer join with placeholdear, not pushed down
+-- left outer join with placeholder, not pushed down
 EXPLAIN (COSTS off) 
 SELECT t1.id, sq1.x, sq1.y
-FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2) sq1 ON t1.id = sq1.x WHERE 1 = (SELECT 1 FROM typetest1  t3 WHERE sq1.y IS NOT NULL LIMIT 1);
-                                                           QUERY PLAN                                                            
----------------------------------------------------------------------------------------------------------------------------------
- Hash Left Join
-   Hash Cond: (t1.id = t2.id)
-   Filter: (1 = (SubPlan 1))
-   ->  Foreign Scan on typetest1 t1
-         Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
-   ->  Hash
-         ->  Foreign Scan on typetest1 t2
-               Oracle query: SELECT /*aa503178012a63f0d817dc29515fe77a*/ r4."ID" FROM "TYPETEST1" r4
-   SubPlan 1
-     ->  Limit
-           ->  Result
-                 One-Time Filter: ((99) IS NOT NULL)
-                 ->  Foreign Scan on typetest1 t3
-                       Oracle query: SELECT /*304e6f7c053bc0b83b11731b93c34a38*/ '1' FROM "TYPETEST1" r1 WHERE (:p1 IS NOT NULL)
-(14 rows)
+FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2 WHERE id > 1) sq1 ON t1.id = sq1.x ORDER BY t1.id, sq1.x;
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.id, t2.id
+   ->  Hash Left Join
+         Hash Cond: (t1.id = t2.id)
+         ->  Foreign Scan on typetest1 t1
+               Oracle query: SELECT /*709894645e7b46ee7c82f53e6eeb7cac*/ r1."ID" FROM "TYPETEST1" r1
+         ->  Hash
+               ->  Foreign Scan on typetest1 t2
+                     Oracle query: SELECT /*72056508e2fe13e435a026d39ffafac0*/ r4."ID" FROM "TYPETEST1" r4 WHERE (r4."ID" > 1)
+(9 rows)
 
 SELECT t1.id, sq1.x, sq1.y
-FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2) sq1 ON t1.id = sq1.x WHERE 1 = (SELECT 1 FROM typetest1  t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2 WHERE id > 1) sq1 ON t1.id = sq1.x ORDER BY t1.id, sq1.x;
  id | x | y  
 ----+---+----
+  1 |   |   
   3 | 3 | 99
   4 | 4 | 99
-  1 | 1 | 99
 (3 rows)
 
 SELECT t1.id, sq1.x, sq1.y
-FROM ltypetest1 t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM ltypetest1 t2) sq1 ON t1.id = sq1.x WHERE 1 = (SELECT 1 FROM ltypetest1 t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+FROM ltypetest1 t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM ltypetest1 t2 WHERE id > 1) sq1 ON t1.id = sq1.x ORDER BY t1.id, sq1.x;
  id | x | y  
 ----+---+----
+  1 |   |   
   3 | 3 | 99
   4 | 4 | 99
-  1 | 1 | 99
 (3 rows)
 
 -- inner join with placeholder, not pushed down

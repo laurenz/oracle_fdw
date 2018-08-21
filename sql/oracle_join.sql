@@ -110,14 +110,14 @@ EXPLAIN (COSTS off)
 SELECT t1.c, t2.nc FROM typetest1  t1 FULL JOIN (SELECT * FROM typetest1  WHERE id > 1) t2 USING (id);
 SELECT t1.c, t2.nc FROM typetest1  t1 FULL JOIN (SELECT * FROM typetest1  WHERE id > 1) t2 USING (id);
 SELECT t1.c, t2.nc FROM ltypetest1 t1 FULL JOIN (SELECT * FROM ltypetest1 WHERE id > 1) t2 USING (id);
--- left outer join with placeholdear, not pushed down
+-- left outer join with placeholder, not pushed down
 EXPLAIN (COSTS off) 
 SELECT t1.id, sq1.x, sq1.y
-FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2) sq1 ON t1.id = sq1.x WHERE 1 = (SELECT 1 FROM typetest1  t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2 WHERE id > 1) sq1 ON t1.id = sq1.x ORDER BY t1.id, sq1.x;
 SELECT t1.id, sq1.x, sq1.y
-FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2) sq1 ON t1.id = sq1.x WHERE 1 = (SELECT 1 FROM typetest1  t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2 WHERE id > 1) sq1 ON t1.id = sq1.x ORDER BY t1.id, sq1.x;
 SELECT t1.id, sq1.x, sq1.y
-FROM ltypetest1 t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM ltypetest1 t2) sq1 ON t1.id = sq1.x WHERE 1 = (SELECT 1 FROM ltypetest1 t3 WHERE sq1.y IS NOT NULL LIMIT 1);
+FROM ltypetest1 t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM ltypetest1 t2 WHERE id > 1) sq1 ON t1.id = sq1.x ORDER BY t1.id, sq1.x;
 -- inner join with placeholder, not pushed down
 EXPLAIN (COSTS off)
 SELECT subq2.c3
