@@ -686,6 +686,11 @@ The Oracle database must be prepared as follows:
            g   MDSYS.SDO_GEOMETRY
         ) SEGMENT CREATION IMMEDIATE;
 
+- Gather statistics for the two tables:
+
+        EXEC DBMS_STATS.GATHER_TABLE_STATS ('SCOTT', 'TYPETEST1', NULL, 100);
+        EXEC DBMS_STATS.GATHER_TABLE_STATS ('SCOTT', 'GIS', NULL, 100);
+
 Set the environment for the PostgreSQL server so that it can establish an
 Oracle connection without connect string:
 If the Oracle server is on the same machine, set the environment variables
