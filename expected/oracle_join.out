@@ -241,10 +241,12 @@ SELECT t1.id, t2.id FROM typetest1  t1 INNER JOIN typetest1  t2 ON t1.d = t2.d W
          Output: t1.id, t2.id
          Oracle query: SELECT /*903605daec63f1093ca442cf8f057768*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."D" = r2."D") AND (r1."ID" > 1))
          Oracle plan: SELECT STATEMENT
-         Oracle plan:   HASH JOIN   (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter ("R1"."D" IS NOT NULL AND "R1"."ID">1))
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter "R2"."D" IS NOT NULL)
-(10 rows)
+         Oracle plan:   NESTED LOOPS
+         Oracle plan:     NESTED LOOPS
+         Oracle plan:       TABLE ACCESS FULL TYPETEST1
+         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
+         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1  (filter "R1"."D"="R2"."D")
+(12 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 INNER JOIN typetest1  t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
  id | id 
@@ -271,9 +273,10 @@ SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d = t2.d W
          Oracle query: SELECT /*33d4bb3c03d9e953c8c2417f9225ac32*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 LEFT JOIN "TYPETEST1" r2 ON (r1."D" = r2."D")) WHERE (r1."ID" > 1)
          Oracle plan: SELECT STATEMENT
          Oracle plan:   HASH JOIN OUTER  (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter "R1"."ID">1)
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter "R2"."D" IS NOT NULL)
-(10 rows)
+         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1
+         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
+         Oracle plan:     TABLE ACCESS FULL TYPETEST1
+(11 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
  id | id 
@@ -301,10 +304,12 @@ SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d = t2.d W
          Output: t1.id, t2.id
          Oracle query: SELECT /*903605daec63f1093ca442cf8f057768*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."D" = r2."D") AND (r1."ID" > 1))
          Oracle plan: SELECT STATEMENT
-         Oracle plan:   HASH JOIN   (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter ("R1"."D" IS NOT NULL AND "R1"."ID">1))
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter "R2"."D" IS NOT NULL)
-(10 rows)
+         Oracle plan:   NESTED LOOPS
+         Oracle plan:     NESTED LOOPS
+         Oracle plan:       TABLE ACCESS FULL TYPETEST1
+         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
+         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1  (filter "R1"."D"="R2"."D")
+(12 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
  id | id 
@@ -331,9 +336,10 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d W
          Oracle query: SELECT /*33d4bb3c03d9e953c8c2417f9225ac32*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 LEFT JOIN "TYPETEST1" r2 ON (r1."D" = r2."D")) WHERE (r1."ID" > 1)
          Oracle plan: SELECT STATEMENT
          Oracle plan:   HASH JOIN OUTER  (condition "R1"."D"="R2"."D")
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter "R1"."ID">1)
-         Oracle plan:     TABLE ACCESS FULL TYPETEST1  (filter "R2"."D" IS NOT NULL)
-(10 rows)
+         Oracle plan:     TABLE ACCESS BY INDEX ROWID TYPETEST1
+         Oracle plan:       INDEX RANGE SCAN TYPETEST1_PKEY (condition "R1"."ID">1)
+         Oracle plan:     TABLE ACCESS FULL TYPETEST1
+(11 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d WHERE t1.id > 1 ORDER BY t1.id, t2.id;
  id | id 
