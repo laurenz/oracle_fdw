@@ -2942,8 +2942,8 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	 * If there is a PlaceHolderVar that needs to be evaluated at a lower level
 	 * than the complete join relation, it may happen that a reference from
 	 * outside is wrongly evaluated to a non-NULL value.
-	 * This can happen if the value is NULL only because it appears on the nullable
-	 * side of an outer join.
+	 * This can happen if the reason for the value to be NULL is that it comes from
+	 * the nullable side of an outer join.
 	 * So we don't push down the join in this case - if PostgreSQL performs the join,
 	 * it will evaluate the placeholder correctly.
 	 */
