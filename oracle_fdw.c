@@ -325,6 +325,7 @@ static void appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, L
 static bool foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype, RelOptInfo *outerrel, RelOptInfo *innerrel, JoinPathExtraData *extra);
 static const char *get_jointype_name(JoinType jointype);
 static List *build_tlist_to_deparse(RelOptInfo *foreignrel);
+static struct oraTable *build_join_oratable(struct OracleFdwState *fdwState, struct PathTarget *reltarget);
 #endif  /* JOIN_API */
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
@@ -1022,7 +1023,7 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 
 	joinrel->fdw_private = fdwState;
 
-	/* this performs further checks and completes joinrel->fdw_private */
+	/* this performs further checks */
 	if (!foreign_join_ok(root, joinrel, jointype, outerrel, innerrel, extra))
 		return;
 
@@ -1072,6 +1073,7 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
  * 		Construct a ForeignScan node containing the serialized OracleFdwState,
  * 		the RestrictInfo clauses not handled entirely by Oracle and the list
  * 		of parameters we need for execution.
+ * 		For join relations, the oraTable is constructed from the target list.
  */
 ForeignScan
 *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *foreignrel, Oid foreigntableid, ForeignPath *best_path, List *tlist, List *scan_clauses
@@ -1192,6 +1194,9 @@ ForeignScan
 													  qual);
 			}
 		}
+
+		/* construct oraTable for the result of join */
+		fdwState->oraTable = build_join_oratable(fdwState, foreignrel->reltarget);
 	}
 #endif  /* JOIN_API */
 
@@ -2855,8 +2860,7 @@ appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, List **params
 /*
  * foreign_join_ok
  * 		Assess whether the join between inner and outer relations can be pushed down
- * 		to the foreign server. As a side effect, save information we obtain in this
- * 		function to OracleFdwState passed in.
+ * 		to the foreign server.
  */
 static bool
 foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
@@ -2867,15 +2871,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	struct OracleFdwState *fdwState_o;
 	struct OracleFdwState *fdwState_i;
 
-	struct oraTable *oraTable_o;
-	struct oraTable *oraTable_i;
-
 	ListCell   *lc;
 	List	   *joinclauses;   /* join quals */
 	List	   *otherclauses;  /* pushed-down (other) quals */
-	List	   *targetvars;    /* pulled Vars from targetlist */
-
-	char *tabname;  /* for warning messages */
 
 	/* we support pushing down INNER/OUTER joins */
 	if (jointype != JOIN_INNER && jointype != JOIN_LEFT &&
@@ -3110,35 +3108,9 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	fdwState->password = fdwState_o->password;
 	fdwState->nls_lang = fdwState_o->nls_lang;
 
-	/* construct oraTable for the result of join */
-	oraTable_o = fdwState_o->oraTable;
-	oraTable_i = fdwState_i->oraTable;
-
-	fdwState->oraTable = (struct oraTable *) palloc0(sizeof(struct oraTable));
-	fdwState->oraTable->name = pstrdup("");
-	fdwState->oraTable->pgname = pstrdup("");
-	fdwState->oraTable->ncols = 0;
-	fdwState->oraTable->npgcols = 0;
-	fdwState->oraTable->cols = (struct oraColumn **) palloc0(sizeof(struct oraColumn*) *
-												(oraTable_o->ncols + oraTable_i->ncols));
-
-	/*
-	 * Search oraColumn from children's oraTable.
-	 * Here we assume that children are foreign table, not foreign join.
-	 * We need capability to track relid chain through join tree to support N-way join.
-	 *
-	 * Note: This code is O(#columns^2), but we have no better idea currently.
-	 */
-	tabname = "?";
-	/* get only Vars because there is not only Vars but also PlaceHolderVars in below exprs */
-	targetvars = pull_var_clause((Node *)joinrel->reltarget->exprs, PVC_RECURSE_PLACEHOLDERS);
-	foreach(lc, targetvars)
+	foreach(lc, pull_var_clause((Node *)joinrel->reltarget->exprs, PVC_RECURSE_PLACEHOLDERS))
 	{
-		int i;
 		Var *var = (Var *) lfirst(lc);
-		struct oraColumn *col = NULL;
-		struct oraColumn *newcol;
-		int used_flag = 0;
 
 		Assert(IsA(var, Var));
 
@@ -3148,62 +3120,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		 */
 		if (var->varattno <= 0)
 			return false;
-
-		/* find appropriate entry from children's oraTable */
-		for (i=0; i<oraTable_o->ncols; ++i)
-		{
-			struct oraColumn *tmp = oraTable_o->cols[i];
-
-			if (tmp->varno == var->varno)
-			{
-				tabname = oraTable_o->pgname;
-
-				if (tmp->pgattnum == var->varattno)
-				{
-					col = tmp;
-					break;
-				}
-			}
-		}
-		if (!col)
-		{
-			for (i=0; i<oraTable_i->ncols; ++i)
-			{
-				struct oraColumn *tmp = oraTable_i->cols[i];
-
-				if (tmp->varno == var->varno)
-				{
-					tabname = oraTable_i->pgname;
-
-					if (tmp->pgattnum == var->varattno)
-					{
-						col = tmp;
-						break;
-					}
-				}
-			}
-		}
-
-		newcol = (struct oraColumn*) palloc0(sizeof(struct oraColumn));
-		if (col)
-		{
-			memcpy(newcol, col, sizeof(struct oraColumn));
-			used_flag = 1;
-		}
-		else
-			/* non-existing column, print a warning */
-			ereport(WARNING,
-					(errcode(ERRCODE_WARNING),
-					errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", var->varattno, tabname)));
-
-		newcol->used = used_flag;
-		/* pgattnum should be the index in SELECT clause of join query. */
-		newcol->pgattnum = fdwState->oraTable->ncols + 1;
-
-		fdwState->oraTable->cols[fdwState->oraTable->ncols++] = newcol;
 	}
-
-	fdwState->oraTable->npgcols = fdwState->oraTable->ncols;
 
 	return true;
 }
@@ -3259,6 +3176,109 @@ build_tlist_to_deparse(RelOptInfo *foreignrel)
 											  PVC_RECURSE_PLACEHOLDERS));
 
 	return tlist;
+}
+
+/*
+ * Fill fdwState->oraTable with a table constructed from the
+ * inner and outer tables using the target list in "reltarget".
+ */
+struct oraTable *
+build_join_oratable(struct OracleFdwState *fdwState, struct PathTarget *reltarget)
+{
+	struct oraTable	*oraTable;
+	char			*tabname;		/* for warning messages */
+	List			*targetvars;	/* pulled Vars from targetlist */
+	ListCell		*lc;
+	struct OracleFdwState *fdwState_o = (struct OracleFdwState *)fdwState->outerrel->fdw_private;
+	struct OracleFdwState *fdwState_i = (struct OracleFdwState *)fdwState->innerrel->fdw_private;
+	struct oraTable *oraTable_o = fdwState_o->oraTable;
+	struct oraTable *oraTable_i = fdwState_i->oraTable;
+
+	oraTable = (struct oraTable *) palloc0(sizeof(struct oraTable));
+	oraTable->name = pstrdup("");
+	oraTable->pgname = pstrdup("");
+	oraTable->ncols = 0;
+	oraTable->npgcols = 0;
+	oraTable->cols = (struct oraColumn **) palloc0(sizeof(struct oraColumn*) *
+												(oraTable_o->ncols + oraTable_i->ncols));
+
+	/*
+	 * Search oraColumn from children's oraTable.
+	 * Here we assume that children are foreign table, not foreign join.
+	 * We need capability to track relid chain through join tree to support N-way join.
+	 *
+	 * Note: This code is O(#columns^2), but we have no better idea currently.
+	 */
+	tabname = "?";
+	/* get only Vars because there is not only Vars but also PlaceHolderVars in below exprs */
+	targetvars = pull_var_clause((Node *)reltarget->exprs, PVC_RECURSE_PLACEHOLDERS);
+	foreach(lc, targetvars)
+	{
+		int i;
+		Var *var = (Var *) lfirst(lc);
+		struct oraColumn *col = NULL;
+		struct oraColumn *newcol;
+		int used_flag = 0;
+
+		Assert(IsA(var, Var));
+
+		/* find appropriate entry from children's oraTable */
+		for (i=0; i<oraTable_o->ncols; ++i)
+		{
+			struct oraColumn *tmp = oraTable_o->cols[i];
+
+			if (tmp->varno == var->varno)
+			{
+				tabname = oraTable_o->pgname;
+
+				if (tmp->pgattnum == var->varattno)
+				{
+					col = tmp;
+					break;
+				}
+			}
+		}
+		if (!col)
+		{
+			for (i=0; i<oraTable_i->ncols; ++i)
+			{
+				struct oraColumn *tmp = oraTable_i->cols[i];
+
+				if (tmp->varno == var->varno)
+				{
+					tabname = oraTable_i->pgname;
+
+					if (tmp->pgattnum == var->varattno)
+					{
+						col = tmp;
+						break;
+					}
+				}
+			}
+		}
+
+		newcol = (struct oraColumn*) palloc0(sizeof(struct oraColumn));
+		if (col)
+		{
+			memcpy(newcol, col, sizeof(struct oraColumn));
+			used_flag = 1;
+		}
+		else
+			/* non-existing column, print a warning */
+			ereport(WARNING,
+					(errcode(ERRCODE_WARNING),
+					errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", var->varattno, tabname)));
+
+		newcol->used = used_flag;
+		/* pgattnum should be the index in SELECT clause of join query. */
+		newcol->pgattnum = oraTable->ncols + 1;
+
+		oraTable->cols[oraTable->ncols++] = newcol;
+	}
+
+	oraTable->npgcols = oraTable->ncols;
+
+	return oraTable;
 }
 #endif  /* JOIN_API */
 
