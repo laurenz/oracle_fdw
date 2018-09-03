@@ -10,6 +10,8 @@ Version 2.1.0
     Patch by Christian Ullrich.
   - Report the correct SQLSTATE for constraint violation and deadlock errors.
     Idea by "omistler".
+  - Push down outer joins to Oracle.
+    Patch by Tatsuro Yamada, courtesy of NTT OSS Center.
 
   Bugfixes:
   - Missing check if Oracle data types can be converted to PostgreSQL types.
