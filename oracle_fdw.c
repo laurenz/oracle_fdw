@@ -3488,6 +3488,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	char *opername, *left, *right, *arg, oprkind;
 #ifndef OLD_FDW_API
 	char parname[10];
+	Param *param;
 #endif
 	Const *constant;
 	OpExpr *oper;
@@ -3496,7 +3497,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	BoolExpr *boolexpr;
 	CoalesceExpr *coalesceexpr;
 	CoerceViaIO *coerce;
-	Param *param;
 	Var *variable;
 	FuncExpr *func;
 	Expr *rightexpr;
@@ -3550,11 +3550,12 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 			break;
 		case T_Param:
-			param = (Param *)expr;
 #ifdef OLD_FDW_API
 			/* don't try to push down parameters with 9.1 */
 			return NULL;
 #else
+			param = (Param *)expr;
+
 			/* don't try to handle interval parameters */
 			if (! canHandleType(param->paramtype) || param->paramtype == INTERVALOID)
 				return NULL;
