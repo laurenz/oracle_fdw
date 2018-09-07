@@ -708,6 +708,20 @@ oracle_diag(PG_FUNCTION_ARGS)
 void
 _PG_init(void)
 {
+	/* check for incompatible server versions */
+	char *pgver_str = GetConfigOptionByName("server_version_num", NULL);
+	long pgver = strtol(pgver_str, NULL, 10);
+
+	pfree(pgver_str);
+
+	if ((pgver >= 90600 && pgver <= 90608)
+			|| (pgver >= 100000 && pgver <= 100003))
+		ereport(ERROR,
+				(errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+				errmsg("PostgreSQL version \"%s\" not supported by oracle_fdw",
+					   GetConfigOptionByName("server_version", NULL)),
+				errhint("You'll have to update PostgreSQL to a later minor release.")));
+
 	/* register an exit hook */
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 }

@@ -510,6 +510,9 @@ PostgreSQL 9.1 or better is required.
 Support for ANALYZE is available from PostgreSQL 9.2 on.  
 Support for INSERT, UPDATE and DELETE is available from PostgreSQL 9.3 on.
 
+Due to an API break in a PostgreSQL minor release, the following PostgreSQL
+versions cannot be used: 9.6.0 to 9.6.8 and 10.0 to 10.3
+
 oracle_fdw is written for standard open source PostgreSQL.
 Forks of PostgreSQL, such as "PostgresPro" and "Postgres-XL", are likely to
 be incompatible.
