@@ -325,7 +325,7 @@ static void appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, L
 static bool foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype, RelOptInfo *outerrel, RelOptInfo *innerrel, JoinPathExtraData *extra);
 static const char *get_jointype_name(JoinType jointype);
 static List *build_tlist_to_deparse(RelOptInfo *foreignrel);
-static struct oraTable *build_join_oratable(struct OracleFdwState *fdwState, struct PathTarget *reltarget);
+static struct oraTable *build_join_oratable(struct OracleFdwState *fdwState, List *fdw_scan_tlist);
 #endif  /* JOIN_API */
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 #ifndef OLD_FDW_API
@@ -1210,7 +1210,8 @@ ForeignScan
 		}
 
 		/* construct oraTable for the result of join */
-		fdwState->oraTable = build_join_oratable(fdwState, foreignrel->reltarget);
+		fdwState->oraTable = build_join_oratable(fdwState, fdw_scan_tlist);
+
 	}
 #endif  /* JOIN_API */
 
@@ -3194,10 +3195,10 @@ build_tlist_to_deparse(RelOptInfo *foreignrel)
 
 /*
  * Fill fdwState->oraTable with a table constructed from the
- * inner and outer tables using the target list in "reltarget".
+ * inner and outer tables using the target list in "fdw_scan_tlist".
  */
 struct oraTable *
-build_join_oratable(struct OracleFdwState *fdwState, struct PathTarget *reltarget)
+build_join_oratable(struct OracleFdwState *fdwState, List *fdw_scan_tlist)
 {
 	struct oraTable	*oraTable;
 	char			*tabname;		/* for warning messages */
@@ -3225,7 +3226,7 @@ build_join_oratable(struct OracleFdwState *fdwState, struct PathTarget *reltarge
 	 */
 	tabname = "?";
 	/* get only Vars because there is not only Vars but also PlaceHolderVars in below exprs */
-	targetvars = pull_var_clause((Node *)reltarget->exprs, PVC_RECURSE_PLACEHOLDERS);
+	targetvars = pull_var_clause((Node *)fdw_scan_tlist, PVC_RECURSE_PLACEHOLDERS);
 	foreach(lc, targetvars)
 	{
 		int i;
