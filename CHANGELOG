@@ -1,3 +1,9 @@
+Version 2.1.1
+  Bugfixes:
+  - Fix crash in outer joins where a local filter condition needs different
+    columns than the conditions that are pushed down.
+    Bug found by Jaime Casanova and fixed by Tatsuro Yamada.
+
 Version 2.1.0, released 2018-10-01
   Enhancements:
   - Add support for the "json" PostgreSQL data type.

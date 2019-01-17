@@ -1356,6 +1356,21 @@ SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty 
   4 | short     
 (3 rows)
 
+-- test for bug #279 fixed with 839b125e1bdc63b71220ccd675fa852c028de9ea
+SELECT 1
+FROM typetest1 a
+   LEFT JOIN typetest1 b ON (a.id IS NOT NULL)
+WHERE (a.c = a.vc) = (b.id IS NOT NULL);
+ ?column? 
+----------
+        1
+        1
+        1
+        1
+        1
+        1
+(6 rows)
+
 /*
  * Cost estimates.
  */

@@ -242,6 +242,11 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d =
 EXPLAIN (COSTS off)
 SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty s,   longy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
 SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty s,   longy l WHERE s.id = l.id AND l.c = t1.c) sl ORDER BY t1.id, sl.c;
+-- test for bug #279 fixed with 839b125e1bdc63b71220ccd675fa852c028de9ea
+SELECT 1
+FROM typetest1 a
+   LEFT JOIN typetest1 b ON (a.id IS NOT NULL)
+WHERE (a.c = a.vc) = (b.id IS NOT NULL);
 
 /*
  * Cost estimates.
