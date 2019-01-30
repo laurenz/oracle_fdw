@@ -44,13 +44,11 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
-#include "nodes/relation.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/planmain.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/tlist.h"
-#include "optimizer/var.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "port.h"
@@ -71,10 +69,18 @@
 #include "utils/rel.h"
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
-#include "utils/tqual.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
+#if PG_VERSION_NUM < 120000
+#include "nodes/relation.h"
+#include "optimizer/var.h"
+#include "utils/tqual.h"
+#else
+#include "nodes/pathnodes.h"
+#include "optimizer/optimizer.h"
+#include "access/heapam.h"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -649,7 +655,7 @@ oracle_diag(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				errmsg("server \"%s\" does not exist", NameStr(*srvname))));
 
-		srvId = HeapTupleGetOid(tup);
+		srvId = ((Form_pg_foreign_server)GETSTRUCT(tup))->oid;
 
 		heap_close(rel, AccessShareLock);
 
