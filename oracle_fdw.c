@@ -655,7 +655,11 @@ oracle_diag(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				errmsg("server \"%s\" does not exist", NameStr(*srvname))));
 
+#if PG_VERSION_NUM < 120000
+		srvId = HeapTupleGetOid(tup);
+#else
 		srvId = ((Form_pg_foreign_server)GETSTRUCT(tup))->oid;
+#endif
 
 		heap_close(rel, AccessShareLock);
 
