@@ -340,7 +340,7 @@ static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 #endif  /* OLD_FDW_API */
 static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
 static char *datumToString(Datum datum, Oid type);
-static void getUsedColumns(Expr *expr, struct oraTable *oraTable);
+static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
 static char *deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds);
 static char *guessNlsLang(char *nls_lang);
@@ -979,7 +979,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 					fdwState->startup_cost,
 					fdwState->total_cost,
 					usable_pathkeys,
-					NULL,
+					baserel->lateral_relids,
 #if PG_VERSION_NUM >= 90500
 					NULL,  /* no extra plan */
 #endif  /* PG_VERSION_NUM */
@@ -2689,13 +2689,13 @@ char
 		/* examine each SELECT list entry for Var nodes */
 		foreach(cell, columnlist)
 		{
-			getUsedColumns((Expr *)lfirst(cell), fdwState->oraTable);
+			getUsedColumns((Expr *)lfirst(cell), fdwState->oraTable, foreignrel->relid);
 		}
 
 		/* examine each condition for Var nodes */
 		foreach(cell, conditions)
 		{
-			getUsedColumns((Expr *)lfirst(cell), fdwState->oraTable);
+			getUsedColumns((Expr *)lfirst(cell), fdwState->oraTable, foreignrel->relid);
 		}
 	}
 
@@ -4553,7 +4553,7 @@ static char
  * 		Set "used=true" in oraTable for all columns used in the expression.
  */
 void
-getUsedColumns(Expr *expr, struct oraTable *oraTable)
+getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 {
 	ListCell *cell;
 	Var *variable;
@@ -4565,10 +4565,10 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 	switch(expr->type)
 	{
 		case T_RestrictInfo:
-			getUsedColumns(((RestrictInfo *)expr)->clause, oraTable);
+			getUsedColumns(((RestrictInfo *)expr)->clause, oraTable, foreignrelid);
 			break;
 		case T_TargetEntry:
-			getUsedColumns(((TargetEntry *)expr)->expr, oraTable);
+			getUsedColumns(((TargetEntry *)expr)->expr, oraTable, foreignrelid);
 			break;
 		case T_Const:
 		case T_Param:
@@ -4578,6 +4578,10 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 			break;
 		case T_Var:
 			variable = (Var *)expr;
+
+			/* ignore columns belonging to a different foreign table */
+			if (variable->varno != foreignrelid)
+				break;
 
 			/* ignore system columns */
 			if (variable->varattno < 0)
@@ -4610,169 +4614,169 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable)
 		case T_Aggref:
 			foreach(cell, ((Aggref *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			foreach(cell, ((Aggref *)expr)->aggorder)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			foreach(cell, ((Aggref *)expr)->aggdistinct)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_WindowFunc:
 			foreach(cell, ((WindowFunc *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_ArrayRef:
 			foreach(cell, ((ArrayRef *)expr)->refupperindexpr)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			foreach(cell, ((ArrayRef *)expr)->reflowerindexpr)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
-			getUsedColumns(((ArrayRef *)expr)->refexpr, oraTable);
-			getUsedColumns(((ArrayRef *)expr)->refassgnexpr, oraTable);
+			getUsedColumns(((ArrayRef *)expr)->refexpr, oraTable, foreignrelid);
+			getUsedColumns(((ArrayRef *)expr)->refassgnexpr, oraTable, foreignrelid);
 			break;
 		case T_FuncExpr:
 			foreach(cell, ((FuncExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_OpExpr:
 			foreach(cell, ((OpExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_DistinctExpr:
 			foreach(cell, ((DistinctExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_NullIfExpr:
 			foreach(cell, ((NullIfExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_ScalarArrayOpExpr:
 			foreach(cell, ((ScalarArrayOpExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_BoolExpr:
 			foreach(cell, ((BoolExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_SubPlan:
 			foreach(cell, ((SubPlan *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_AlternativeSubPlan:
 			/* examine only first alternative */
-			getUsedColumns((Expr *)linitial(((AlternativeSubPlan *)expr)->subplans), oraTable);
+			getUsedColumns((Expr *)linitial(((AlternativeSubPlan *)expr)->subplans), oraTable, foreignrelid);
 			break;
 		case T_NamedArgExpr:
-			getUsedColumns(((NamedArgExpr *)expr)->arg, oraTable);
+			getUsedColumns(((NamedArgExpr *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_FieldSelect:
-			getUsedColumns(((FieldSelect *)expr)->arg, oraTable);
+			getUsedColumns(((FieldSelect *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_RelabelType:
-			getUsedColumns(((RelabelType *)expr)->arg, oraTable);
+			getUsedColumns(((RelabelType *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_CoerceViaIO:
-			getUsedColumns(((CoerceViaIO *)expr)->arg, oraTable);
+			getUsedColumns(((CoerceViaIO *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_ArrayCoerceExpr:
-			getUsedColumns(((ArrayCoerceExpr *)expr)->arg, oraTable);
+			getUsedColumns(((ArrayCoerceExpr *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_ConvertRowtypeExpr:
-			getUsedColumns(((ConvertRowtypeExpr *)expr)->arg, oraTable);
+			getUsedColumns(((ConvertRowtypeExpr *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_CollateExpr:
-			getUsedColumns(((CollateExpr *)expr)->arg, oraTable);
+			getUsedColumns(((CollateExpr *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_CaseExpr:
 			foreach(cell, ((CaseExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
-			getUsedColumns(((CaseExpr *)expr)->arg, oraTable);
-			getUsedColumns(((CaseExpr *)expr)->defresult, oraTable);
+			getUsedColumns(((CaseExpr *)expr)->arg, oraTable, foreignrelid);
+			getUsedColumns(((CaseExpr *)expr)->defresult, oraTable, foreignrelid);
 			break;
 		case T_CaseWhen:
-			getUsedColumns(((CaseWhen *)expr)->expr, oraTable);
-			getUsedColumns(((CaseWhen *)expr)->result, oraTable);
+			getUsedColumns(((CaseWhen *)expr)->expr, oraTable, foreignrelid);
+			getUsedColumns(((CaseWhen *)expr)->result, oraTable, foreignrelid);
 			break;
 		case T_ArrayExpr:
 			foreach(cell, ((ArrayExpr *)expr)->elements)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_RowExpr:
 			foreach(cell, ((RowExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_RowCompareExpr:
 			foreach(cell, ((RowCompareExpr *)expr)->largs)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			foreach(cell, ((RowCompareExpr *)expr)->rargs)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_CoalesceExpr:
 			foreach(cell, ((CoalesceExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_MinMaxExpr:
 			foreach(cell, ((MinMaxExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_XmlExpr:
 			foreach(cell, ((XmlExpr *)expr)->named_args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			foreach(cell, ((XmlExpr *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable);
+				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
 		case T_NullTest:
-			getUsedColumns(((NullTest *)expr)->arg, oraTable);
+			getUsedColumns(((NullTest *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_BooleanTest:
-			getUsedColumns(((BooleanTest *)expr)->arg, oraTable);
+			getUsedColumns(((BooleanTest *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_CoerceToDomain:
-			getUsedColumns(((CoerceToDomain *)expr)->arg, oraTable);
+			getUsedColumns(((CoerceToDomain *)expr)->arg, oraTable, foreignrelid);
 			break;
 		case T_PlaceHolderVar:
-			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable);
+			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable, foreignrelid);
 			break;
 #if PG_VERSION_NUM >= 100000
 		case T_SQLValueFunction:
