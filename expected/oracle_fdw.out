@@ -204,6 +204,13 @@ EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SEL
      ->  Result
 (4 rows)
 
+-- test modifications that need no foreign scan scan (bug #295)
+DELETE FROM typetest1 WHERE FALSE;
+UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
+ id | c 
+----+---
+(0 rows)
+
 /*
  * Test EXPLAIN support.
  */

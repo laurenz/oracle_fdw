@@ -1607,9 +1607,10 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				errmsg("INSERT with ON CONFLICT clause is not supported")));
 #endif  /* PG_VERSION_NUM */
 
-	/* check if the foreign table is scanned */
+	/* check if the foreign table is scanned and we already planned that scan */
 	if (resultRelation < root->simple_rel_array_size
-			&& root->simple_rel_array[resultRelation] != NULL)
+			&& root->simple_rel_array[resultRelation] != NULL
+			&& root->simple_rel_array[resultRelation]->fdw_private != NULL)
 	{
 		/* if yes, copy the foreign table information from the associated RelOptInfo */
 		fdwState = copyPlanData((struct OracleFdwState *)(root->simple_rel_array[resultRelation]->fdw_private));

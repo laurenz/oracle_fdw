@@ -8,6 +8,9 @@ Version 2.1.1
     This can lead to wrong results and warnings like:
     WARNING:  column number x of foreign table "y" does not exist in
               foreign Oracle table, will be replaced by NULL
+  - Fix crash in UPDATE or DELETE where the optimizer can deduce that no
+    scan is required, for example with "WHERE 1 = 0".
+    Reported by Andy Shipman.
 
 Version 2.1.0, released 2018-10-01
   Enhancements:

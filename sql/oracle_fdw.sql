@@ -173,6 +173,9 @@ ROLLBACK;
 -- test if "IN" or "= ANY" expressions are pushed down correctly
 SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
 EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
+-- test modifications that need no foreign scan scan (bug #295)
+DELETE FROM typetest1 WHERE FALSE;
+UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
 
 /*
  * Test EXPLAIN support.
