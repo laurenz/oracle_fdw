@@ -1083,7 +1083,7 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 									   startup_cost,
 									   total_cost,
 									   NIL, 	/* no pathkeys */
-									   NULL,	/* no required_outer */
+									   joinrel->lateral_relids,
 									   NULL,	/* no epq_path */
 									   NIL);	/* no fdw_private */
 
