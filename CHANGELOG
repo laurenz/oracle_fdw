@@ -1,7 +1,9 @@
 Version 2.1.1
   Bugfixes:
-  - Fix crash in outer joins where a local filter condition needs different
-    columns than the conditions that are pushed down.
+  - Fix crash or bad results with pushed down join queries.
+    The query target list can change during query planning, but oracle_fdw
+    relied on the one from before.
+    This bug only manifests in PostgreSQL v11.
     Bug found by Jaime Casanova and fixed by Tatsuro Yamada.
   - Fix push-down of foreign scan conditions with variables belonging
     to other tables.
