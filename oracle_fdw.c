@@ -3928,8 +3928,10 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 						appendStringInfo(&result, "NULL");
 					else
 					{
+						ArrayType *arr = DatumGetArrayTypeP(constant->constvalue);
+
 						/* loop through the array elements */
-						iterator = array_create_iterator(DatumGetArrayTypeP(constant->constvalue), 0);
+						iterator = array_create_iterator(arr, 0);
 						first_arg = true;
 						while (array_iterate(iterator, &datum, &isNull))
 						{
@@ -3939,7 +3941,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 								c = "NULL";
 							else
 							{
-								c = datumToString(datum, leftargtype);
+								c = datumToString(datum, ARR_ELEMTYPE(arr));
 								if (c == NULL)
 								{
 									array_free_iterator(iterator);

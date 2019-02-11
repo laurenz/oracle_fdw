@@ -176,6 +176,8 @@ EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SEL
 -- test modifications that need no foreign scan scan (bug #295)
 DELETE FROM typetest1 WHERE FALSE;
 UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
+-- test deparsing of ScalarArrayOpExpr where the RHS has different element type than the LHS
+SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
 
 /*
  * Test EXPLAIN support.

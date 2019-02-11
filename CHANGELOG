@@ -13,6 +13,8 @@ Version 2.1.1
   - Fix crash in UPDATE or DELETE where the optimizer can deduce that no
     scan is required, for example with "WHERE 1 = 0".
     Reported by Andy Shipman.
+  - Fix crash or bad results in queries with IN or "= ANY" where the element
+    type on the right-hand side is different from the left-hand side type.
 
 Version 2.1.0, released 2018-10-01
   Enhancements:

@@ -211,6 +211,12 @@ UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
 ----+---
 (0 rows)
 
+-- test deparsing of ScalarArrayOpExpr where the RHS has different element type than the LHS
+SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
+ id 
+----
+(0 rows)
+
 /*
  * Test EXPLAIN support.
  */
