@@ -1076,7 +1076,12 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 	fdwState->total_cost = total_cost;
 
 	/* create a new join path */
-	joinpath = create_foreignscan_path(root,
+#if PG_VERSION_NUM < 120000
+	joinpath = create_foreignscan_path(
+#else
+	joinpath = create_foreign_join_path(
+#endif
+									   root,
 									   joinrel,
 									   NULL,	/* default pathtarget */
 									   rows,
