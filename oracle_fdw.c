@@ -4634,18 +4634,28 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
 			}
 			break;
+#if PG_VERSION_NUM < 120000
+		case T_ArrayRef:
+			{
+				ArrayRef *ref = (ArrayRef *)expr;
+#else
 		case T_SubscriptingRef:
-			foreach(cell, ((SubscriptingRef *)expr)->refupperindexpr)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
+				SubscriptingRef *ref = (SubscriptingRef *)expr;
+#endif
+
+				foreach(cell, ref->refupperindexpr)
+				{
+					getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
+				}
+				foreach(cell, ref->reflowerindexpr)
+				{
+					getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
+				}
+				getUsedColumns(ref->refexpr, oraTable, foreignrelid);
+				getUsedColumns(ref->refassgnexpr, oraTable, foreignrelid);
+				break;
 			}
-			foreach(cell, ((SubscriptingRef *)expr)->reflowerindexpr)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			getUsedColumns(((SubscriptingRef *)expr)->refexpr, oraTable, foreignrelid);
-			getUsedColumns(((SubscriptingRef *)expr)->refassgnexpr, oraTable, foreignrelid);
-			break;
 		case T_FuncExpr:
 			foreach(cell, ((FuncExpr *)expr)->args)
 			{
