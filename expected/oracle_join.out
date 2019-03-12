@@ -786,18 +786,6 @@ EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t
 (8 rows)
 
 -- join in CTE
-EXPLAIN (COSTS off)
-WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1  t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
-                                                                        QUERY PLAN                                                                         
------------------------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: t.t1_id, t.t2_id
-   CTE t
-     ->  Foreign Scan
-           Oracle query: SELECT /*39ff63fd17699577c5ed553547b7320a*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."D" = r2."D"))
-   ->  CTE Scan on t
-(6 rows)
-
 WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1  t2 ON t1.d = t2.d) SELECT t1_id, t2_id FROM t ORDER BY t1_id, t2_id;
  t1_id | t2_id 
 -------+-------
