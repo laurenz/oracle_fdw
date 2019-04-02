@@ -6065,8 +6065,22 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		}
 		else
 		{
+			char *oraval = fdw_state->oraTable->cols[index]->val;
+
+			/* special handling for NUMBER's "infinity tilde" */
+			if ((fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_FLOAT
+					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_NUMBER)
+				&& (oraval[0] == '~' || (oraval[0] == '-' && oraval[1] == '~')))
+			{
+				/* "numeric" does not know infinity, so map to NaN */
+				if (pgtype == NUMERICOID)
+					strcpy(oraval, "Nan");
+				else
+					strcpy(oraval, (oraval[0] == '-' ? "-inf" : "inf"));
+			}
+
 			/* for other data types, oraTable contains the results */
-			value = fdw_state->oraTable->cols[index]->val;
+			value = oraval;
 			value_len = fdw_state->oraTable->cols[index]->val_len;
 		}
 
