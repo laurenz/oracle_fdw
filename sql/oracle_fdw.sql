@@ -235,14 +235,30 @@ SELECT * FROM qtest ORDER BY id;
 DELETE FROM qtest WHERE id = 5;
 
 /*
+ * Test COPY
+ */
+
+BEGIN;
+COPY shorty FROM STDIN;
+666	devil
+777	lucky
+0	\N
+\.
+ROLLBACK;
+
+/*
  * Test triggers on foreign tables.
  */
 
 -- trigger function
 CREATE FUNCTION shorttrig() RETURNS trigger LANGUAGE plpgsql AS
 $$BEGIN
-   RAISE WARNING 'trigger % % OLD row: id = %, c = %', TG_WHEN, TG_OP, OLD.id, OLD.c;
-   RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
+   IF TG_OP IN ('UPDATE', 'DELETE') THEN
+      RAISE WARNING 'trigger % % OLD row: id = %, c = %', TG_WHEN, TG_OP, OLD.id, OLD.c;
+   END IF;
+   IF TG_OP IN ('INSERT', 'UPDATE') THEN
+      RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
+   END IF;
    RETURN NEW;
 END;$$;
 
@@ -257,6 +273,17 @@ DROP TRIGGER shorttrig ON shorty;
 CREATE TRIGGER shorttrig AFTER UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
 BEGIN;
 UPDATE shorty SET id = id + 1 WHERE id = 4;
+ROLLBACK;
+
+-- test AFTER INSERT trigger with COPY
+DROP TRIGGER shorttrig ON shorty;
+CREATE TRIGGER shorttrig AFTER INSERT ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
+BEGIN;
+COPY shorty FROM STDIN;
+42	hammer
+753	rom
+0	\N
+\.
 ROLLBACK;
 
 /*

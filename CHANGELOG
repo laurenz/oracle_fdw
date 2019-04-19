@@ -1,4 +1,8 @@
-Version 2.1.1
+Version 2.2.0
+  Enhancements:
+  - Add support for COPY to foreign tables (from PostgreSQL v11 on).
+    This caused a crash before, as reported by "jkldv".
+
   Bugfixes:
   - Fix crash or bad results with pushed down join queries.
     The query target list can change during query planning, but oracle_fdw

@@ -375,6 +375,7 @@ static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *
 static void errorContextCallback(void *arg);
 static bool hasTrigger(Relation rel, CmdType cmdtype);
 static void buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState);
+static void buildUpdateQuery(StringInfo sql, struct OracleFdwState *fdwState, List *targetAttrs);
 static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState);
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase);
@@ -1606,7 +1607,6 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	List *returningList = NIL;
 	struct OracleFdwState *fdwState;
 	int attnum, i;
-	ListCell *cell;
 	bool has_trigger = false, firstcol;
 	char paramName[10];
 	TupleDesc tupdesc;
@@ -1768,52 +1768,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 			break;
 		case CMD_UPDATE:
-			appendStringInfo(&sql, "UPDATE %s SET ", fdwState->oraTable->name);
-
-			firstcol = true;
-			i = 0;
-			foreach(cell, targetAttrs)
-			{
-				/* find the corresponding oraTable entry */
-				while (i < fdwState->oraTable->ncols && fdwState->oraTable->cols[i]->pgattnum < lfirst_int(cell))
-					++i;
-				if (i == fdwState->oraTable->ncols)
-					break;
-
-				/* ignore columns that don't occur in the foreign table */
-				if (fdwState->oraTable->cols[i]->pgtype == 0)
-					continue;
-
-				/* check that the data types can be converted */
-				checkDataType(
-					fdwState->oraTable->cols[i]->oratype,
-					fdwState->oraTable->cols[i]->scale,
-					fdwState->oraTable->cols[i]->pgtype,
-					fdwState->oraTable->pgname,
-					fdwState->oraTable->cols[i]->pgname
-				);
-
-				/* add a parameter description for the column */
-				snprintf(paramName, 9, ":p%d", lfirst_int(cell));
-				addParam(&fdwState->paramList, paramName, fdwState->oraTable->cols[i]->pgtype,
-					fdwState->oraTable->cols[i]->oratype, i);
-
-				/* add the parameter name to the query */
-				if (firstcol)
-					firstcol = false;
-				else
-					appendStringInfo(&sql, ", ");
-
-				appendStringInfo(&sql, "%s = ", fdwState->oraTable->cols[i]->name);
-				appendAsType(&sql, paramName, fdwState->oraTable->cols[i]->pgtype);
-			}
-
-			/* throw a meaningful error if nothing is updated */
-			if (firstcol)
-				ereport(ERROR,
-						(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
-						errmsg("no Oracle column modified by UPDATE"),
-						errdetail("The UPDATE statement only changes colums that do not exist in the Oracle table.")));
+			buildUpdateQuery(&sql, fdwState, targetAttrs);
 
 			break;
 		case CMD_DELETE:
@@ -1946,6 +1901,16 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	elog(DEBUG3, "oracle_fdw: execute foreign table COPY on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	fdw_state = getFdwState(RelationGetRelid(rinfo->ri_RelationDesc), NULL);
+
+	/* not using "deserializePlanData", we have to initialize these ourselves */
+	for (i=0; i<fdw_state->oraTable->ncols; ++i)
+	{
+		fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size + 1);
+		fdw_state->oraTable->cols[i]->val_len = 0;
+		fdw_state->oraTable->cols[i]->val_len4 = 0;
+		fdw_state->oraTable->cols[i]->val_null = 1;
+	}
+	fdw_state->rowcount = 0;
 
 	fdw_state->session = oracleGetSession(
 			fdw_state->dbserver,
@@ -5171,6 +5136,7 @@ Const
 /*
  * deserializePlanData
  * 		Extract the data structures from a List created by serializePlanData.
+ * 		Allocates memory for values returned from Oracle.
  */
 
 struct OracleFdwState
@@ -5865,6 +5831,62 @@ buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState)
 }
 
 void
+buildUpdateQuery(StringInfo sql, struct OracleFdwState *fdwState, List *targetAttrs)
+{
+	bool firstcol;
+	int i;
+	char paramName[10];
+	ListCell *cell;
+
+	appendStringInfo(sql, "UPDATE %s SET ", fdwState->oraTable->name);
+
+	firstcol = true;
+	i = 0;
+	foreach(cell, targetAttrs)
+	{
+		/* find the corresponding oraTable entry */
+		while (i < fdwState->oraTable->ncols && fdwState->oraTable->cols[i]->pgattnum < lfirst_int(cell))
+			++i;
+		if (i == fdwState->oraTable->ncols)
+			break;
+
+		/* ignore columns that don't occur in the foreign table */
+		if (fdwState->oraTable->cols[i]->pgtype == 0)
+			continue;
+
+		/* check that the data types can be converted */
+		checkDataType(
+			fdwState->oraTable->cols[i]->oratype,
+			fdwState->oraTable->cols[i]->scale,
+			fdwState->oraTable->cols[i]->pgtype,
+			fdwState->oraTable->pgname,
+			fdwState->oraTable->cols[i]->pgname
+		);
+
+		/* add a parameter description for the column */
+		snprintf(paramName, 9, ":p%d", lfirst_int(cell));
+		addParam(&fdwState->paramList, paramName, fdwState->oraTable->cols[i]->pgtype,
+			fdwState->oraTable->cols[i]->oratype, i);
+
+		/* add the parameter name to the query */
+		if (firstcol)
+			firstcol = false;
+		else
+			appendStringInfo(sql, ", ");
+
+		appendStringInfo(sql, "%s = ", fdwState->oraTable->cols[i]->name);
+		appendAsType(sql, paramName, fdwState->oraTable->cols[i]->pgtype);
+	}
+
+	/* throw a meaningful error if nothing is updated */
+	if (firstcol)
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+				errmsg("no Oracle column modified by UPDATE"),
+				errdetail("The UPDATE statement only changes colums that do not exist in the Oracle table.")));
+}
+
+void
 appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState)
 {
 	int i;
@@ -5907,7 +5929,7 @@ appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState)
 			param->name = pstrdup(paramName);
 			param->type = fdwState->oraTable->cols[i]->pgtype;
 			param->bindType = BIND_OUTPUT;
-			param->value = NULL;
+			param->value = (void *)42;  /* something != NULL */
 			param->node = NULL;
 			param->bindh = NULL;
 			param->colnum = i;

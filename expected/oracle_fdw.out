@@ -340,13 +340,23 @@ SELECT * FROM qtest ORDER BY id;
 
 DELETE FROM qtest WHERE id = 5;
 /*
+ * Test COPY
+ */
+BEGIN;
+COPY shorty FROM STDIN;
+ROLLBACK;
+/*
  * Test triggers on foreign tables.
  */
 -- trigger function
 CREATE FUNCTION shorttrig() RETURNS trigger LANGUAGE plpgsql AS
 $$BEGIN
-   RAISE WARNING 'trigger % % OLD row: id = %, c = %', TG_WHEN, TG_OP, OLD.id, OLD.c;
-   RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
+   IF TG_OP IN ('UPDATE', 'DELETE') THEN
+      RAISE WARNING 'trigger % % OLD row: id = %, c = %', TG_WHEN, TG_OP, OLD.id, OLD.c;
+   END IF;
+   IF TG_OP IN ('INSERT', 'UPDATE') THEN
+      RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
+   END IF;
    RETURN NEW;
 END;$$;
 -- test BEFORE trigger
@@ -363,6 +373,15 @@ BEGIN;
 UPDATE shorty SET id = id + 1 WHERE id = 4;
 WARNING:  trigger AFTER UPDATE OLD row: id = 4, c = short     
 WARNING:  trigger AFTER UPDATE NEW row: id = 5, c = short     
+ROLLBACK;
+-- test AFTER INSERT trigger with COPY
+DROP TRIGGER shorttrig ON shorty;
+CREATE TRIGGER shorttrig AFTER INSERT ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
+BEGIN;
+COPY shorty FROM STDIN;
+WARNING:  trigger AFTER INSERT NEW row: id = 42, c = hammer    
+WARNING:  trigger AFTER INSERT NEW row: id = 753, c = rom       
+WARNING:  trigger AFTER INSERT NEW row: id = 0, c = <NULL>
 ROLLBACK;
 /*
  * Test ORDER BY pushdown.
