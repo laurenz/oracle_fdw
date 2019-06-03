@@ -520,7 +520,7 @@ If you want to try it nonetheless, you'll have to build oracle_fdw from source.
 If you encounter problems while using such a PostgreSQL-derived server,
 please try with the original version before reporting an issue.
 
-Oracle client version 10.1 or better is required.  
+Oracle client version 10.2 or better is required.
 oracle_fdw can be built and used with Oracle Instant Client as well as with
 Oracle Client and Server installations installed with Universal Installer.
 Binaries compiled with Oracle Client 10 can be used with later client versions
