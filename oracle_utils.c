@@ -767,7 +767,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error rolling back to savepoint: OCIStmtExecute failed to set savepoint",
+			"error rolling back to savepoint: OCIStmtExecute failed on ROLLBACK TO SAVEPOINT",
 			oraMessage);
 	}
 
@@ -1251,7 +1251,7 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error setting savepoint: OCIStmtExecute failed to set savepoint",
+				"error setting savepoint: OCIStmtExecute failed on SAVEPOINT",
 				oraMessage);
 		}
 
