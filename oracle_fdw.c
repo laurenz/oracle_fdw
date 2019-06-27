@@ -2251,13 +2251,13 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		else if (strcmp(def->defname, "readonly") == 0)
 		{
 			char *s = ((Value *) (def->arg))->val.str;
-			if (pg_strcasecmp(s, "on") != 0
-					|| pg_strcasecmp(s, "yes") != 0
-					|| pg_strcasecmp(s, "true") != 0)
+			if (pg_strcasecmp(s, "on") == 0
+					|| pg_strcasecmp(s, "yes") == 0
+					|| pg_strcasecmp(s, "true") == 0)
 				readonly = true;
-			else if (pg_strcasecmp(s, "off") != 0
-					|| pg_strcasecmp(s, "no") != 0
-					|| pg_strcasecmp(s, "false") != 0)
+			else if (pg_strcasecmp(s, "off") == 0
+					|| pg_strcasecmp(s, "no") == 0
+					|| pg_strcasecmp(s, "false") == 0)
 				readonly = false;
 			else
 				ereport(ERROR,
