@@ -378,7 +378,7 @@ static void buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState);
 static void buildUpdateQuery(StringInfo sql, struct OracleFdwState *fdwState, List *targetAttrs);
 static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState);
 #ifdef IMPORT_API
-static char *fold_case(char *name, fold_t foldcase);
+static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
 
 #define REL_ALIAS_PREFIX    "r"
@@ -2203,6 +2203,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	fold_t foldcase = CASE_SMART;
 	StringInfoData buf;
 	bool readonly = false, firstcol = true;
+	int collation = DEFAULT_COLLATION_OID;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -2248,6 +2249,26 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errhint("Valid values in this context are: %s", "keep, lower, smart")));
 			continue;
 		}
+		else if (strcmp(def->defname, "collation") == 0)
+		{
+			char *s = ((Value *) (def->arg))->val.str;
+			if (pg_strcasecmp(s, "default") != 0) {
+
+			/* look up collation within pg_catalog namespace with the name */
+
+			collation = GetSysCacheOid3(COLLNAMEENCNSP, 
+							PointerGetDatum(s),
+							Int32GetDatum(Int32GetDatum(-1)),
+							ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
+			
+			if (!OidIsValid(collation))
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Check pg_collation catalog to get valid values")));
+			}
+			continue;
+		}
 		else if (strcmp(def->defname, "readonly") == 0)
 		{
 			char *s = ((Value *) (def->arg))->val.str;
@@ -2269,7 +2290,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
 				errmsg("invalid option \"%s\"", def->defname),
-				errhint("Valid options in this context are: %s", "case, readonly")));
+				errhint("Valid options in this context are: %s", "case, collation, readonly")));
 	}
 
 	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
@@ -2320,7 +2341,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		{
 			/* start a new CREATE FOREIGN TABLE statement */
 			resetStringInfo(&buf);
-			foldedname = fold_case(tabname, foldcase);
+			foldedname = fold_case(tabname, foldcase, collation);
 			appendStringInfo(&buf, "CREATE FOREIGN TABLE \"%s\" (", foldedname);
 			pfree(foldedname);
 
@@ -2340,7 +2361,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				appendStringInfo(&buf, ", ");
 
 			/* column name */
-			foldedname = fold_case(colname, foldcase);
+			foldedname = fold_case(colname, foldcase, collation);
 			appendStringInfo(&buf, "\"%s\" ", foldedname);
 			pfree(foldedname);
 
@@ -6373,21 +6394,21 @@ errorContextCallback(void *arg)
  * 		Returns a palloc'ed string that is the case-folded first argument.
  */
 char *
-fold_case(char *name, fold_t foldcase)
+fold_case(char *name, fold_t foldcase, int collation)
 {
 	if (foldcase == CASE_KEEP)
 		return pstrdup(name);
 
 	if (foldcase == CASE_LOWER)
- 		return str_tolower(name, strlen(name), DEFAULT_COLLATION_OID);
+ 		return str_tolower(name, strlen(name), collation);
 
 	if (foldcase == CASE_SMART)
 	{
-		char *upstr = str_toupper(name, strlen(name), DEFAULT_COLLATION_OID);
+		char *upstr = str_toupper(name, strlen(name), collation);
 
 		/* fold case only if it does not contain lower case characters */
 		if (strcmp(upstr, name) == 0)
-			return str_tolower(name, strlen(name), DEFAULT_COLLATION_OID);
+			return str_tolower(name, strlen(name), collation);
 		else
 			return pstrdup(name);
 	}
