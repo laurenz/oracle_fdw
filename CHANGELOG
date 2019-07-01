@@ -2,6 +2,9 @@ Version 2.2.0
   Enhancements:
   - Add support for COPY to foreign tables (from PostgreSQL v11 on).
     This caused a crash before, as reported by "jkldv".
+  - Add a new "collation" option for IMPORT FOREIGN SCHEMA that controls
+    case folding.
+    Patch by Sahap Asci.
 
   Bugfixes:
   - Fix crash or bad results with pushed down join queries.

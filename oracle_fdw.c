@@ -2256,16 +2256,18 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 			/* look up collation within pg_catalog namespace with the name */
 
-			collation = GetSysCacheOid3(COLLNAMEENCNSP, 
+			collation = GetSysCacheOid3(
+							COLLNAMEENCNSP,
 							PointerGetDatum(s),
 							Int32GetDatum(Int32GetDatum(-1)),
-							ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
-			
+							ObjectIdGetDatum(PG_CATALOG_NAMESPACE)
+						);
+
 			if (!OidIsValid(collation))
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Check pg_collation catalog to get valid values")));
+						errhint("Check the \"pg_collation\" catalog for valid values.")));
 			}
 			continue;
 		}
@@ -6400,7 +6402,7 @@ fold_case(char *name, fold_t foldcase, int collation)
 		return pstrdup(name);
 
 	if (foldcase == CASE_LOWER)
- 		return str_tolower(name, strlen(name), collation);
+		return str_tolower(name, strlen(name), collation);
 
 	if (foldcase == CASE_SMART)
 	{

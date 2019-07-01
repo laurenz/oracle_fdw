@@ -477,17 +477,18 @@ following:
   but not synonyms.
 
 - There are three supported options for IMPORT FOREIGN SCHEMA:
-  - **case**: controls case folding for table and column names during import.
+  - **case**: controls case folding for table and column names during import.  
     The possible values are:
     - `keep`: leave the names as they are in Oracle, usually in upper case.
     - `lower`: translate all table and column names to lower case.
     - `smart`: only translate names that are all upper case in Oracle
                (this is the default).
-  - **collation**: controls case folding collation for table and column names during import.
-                   Default value is `default` which is collation of working database.
-                   Possible values refer to the `collname` values in 
-                   [pg_collation](https://www.postgresql.org/docs/current/catalog-pg-collation.html).
-                   Only collations in pg_catalog schema are supported.
+  - **collation**: the collation used for case folding for the `lower` and
+    `smart` options of **case**.  
+    The default value is `default` which is the database's default collation.
+    Only collations in the `pg_catalog` schema are supported.
+    See the `collname` values in the `pg_collation` catalog for a list of
+    possible values.
   - **readonly** (boolean): controls if imported tables can be modified.
     If set to `true`, all imported tables are created with the foreign
     table option **readonly** set to `true` (see the [Options](#3-options)
