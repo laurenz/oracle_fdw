@@ -2258,6 +2258,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 			collation = GetSysCacheOid3(
 							COLLNAMEENCNSP,
+#if PG_VERSION_NUM >= 120000
+							Anum_pg_collation_oid,
+#endif  /* PG_VERSION_NUM */
 							PointerGetDatum(s),
 							Int32GetDatum(Int32GetDatum(-1)),
 							ObjectIdGetDatum(PG_CATALOG_NAMESPACE)
