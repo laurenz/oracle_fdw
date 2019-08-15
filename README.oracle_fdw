@@ -365,7 +365,6 @@ that performs the join on the Oracle side.
 There are some restrictions when this can happen:
 
 - Both tables must be defined on the same foreign server.
-- The join must be an inner join.
 - Joins between three or more tables won't be pushed down.
 - The join must be in a SELECT statement.
 - oracle_fdw must be able to push down all join conditions and WHERE clauses.
