@@ -2444,6 +2444,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				case ORA_TYPE_INTERVALY2M:
 					appendStringInfo(&buf, "interval(0)");
 					break;
+				case ORA_TYPE_XMLTYPE:
+					appendStringInfo(&buf, "xml");
+					break;
 				case ORA_TYPE_GEOMETRY:
 					if (GEOMETRYOID != InvalidOid)
 					{
@@ -2723,7 +2726,11 @@ char
 			ADD_REL_QUALIFIER(&alias, fdwState->oraTable->cols[i]->varno);
 
 			/* add qualified column name */
-			appendStringInfo(&query, "%s%s%s", separator, alias.data, fdwState->oraTable->cols[i]->name);
+			if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_XMLTYPE)
+				/* convert XML to CLOB in the query */
+				appendStringInfo(&query, "%s(%s%s).getclobval()", separator, alias.data, fdwState->oraTable->cols[i]->name);
+			else
+				appendStringInfo(&query, "%s%s%s", separator, alias.data, fdwState->oraTable->cols[i]->name);
 			separator = ", ";
 		}
 	}
@@ -4894,6 +4901,10 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			&& pgtype == JSONOID)
 		return;
 
+    /* XMLTYPE can be converted to xml */
+    if (oratype == ORA_TYPE_XMLTYPE && pgtype == XMLOID)
+        return;
+
 	/* otherwise, report an error */
 	ereport(ERROR,
 			(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
@@ -5941,7 +5952,10 @@ appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState)
 			}
 			else
 				appendStringInfo(sql, ", ");
-			appendStringInfo(sql, "%s", fdwState->oraTable->cols[i]->name);
+			if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_XMLTYPE)
+				appendStringInfo(sql, "(%s).getclobval()", fdwState->oraTable->cols[i]->name);
+			else
+				appendStringInfo(sql, "%s", fdwState->oraTable->cols[i]->name);
 		}
 
 	/* add the parameters for the RETURNING clause */

@@ -5,6 +5,7 @@ Version 2.2.0
   - Add a new "collation" option for IMPORT FOREIGN SCHEMA that controls
     case folding.
     Patch by Sahap Asci.
+  - Add support for Oracle XMLTYPE.
 
   Bugfixes:
   - Fix crash or bad results with pushed down join queries.

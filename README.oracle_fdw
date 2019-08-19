@@ -188,10 +188,10 @@ Foreign table options
 
 - **max_long** (optional, defaults to "32767")
 
-  The maximal length of any LONG or LONG RAW columns in the Oracle table.
-  Possible values are integers between 1 and 1073741823 (the maximal size of a
-  `bytea` in PostgreSQL).  This amount of memory will be allocated at least
-  twice, so large values will consume a lot of memory.  
+  The maximal length of any LONG, LONG RAW and XMLTYPE columns in the Oracle
+  table.  Possible values are integers between 1 and 1073741823 (the maximal
+  size of a `bytea` in PostgreSQL).  This amount of memory will be allocated
+  at least twice, so large values will consume a lot of memory.  
   If **max_long** is less than the length of the longest value retrieved,
   you will receive the error message `ORA-01406: fetched column value was
   truncated`.
@@ -319,6 +319,7 @@ These conversions are automatically handled by oracle_fdw:
        LOCAL TIME ZONE       |
     INTERVAL YEAR TO MONTH   | interval, char, varchar, text
     INTERVAL DAY TO SECOND   | interval, char, varchar, text
+    XMLTYPE                  | xml, char, varchar, text
     MDSYS.SDO_GEOMETRY       | geometry (see "PostGIS support" below)
 
 If a NUMBER is converted to a boolean, 0 means `false`, everything else `true`.

@@ -1141,6 +1141,15 @@ struct oraTable
 					reply->cols[i-1]->val_size = sizeof(ora_geometry);
 					break;
 				}
+
+				if ((strcmp(type_schema, "SYS") == 0)
+					&& (strcmp(type_name, "XMLTYPE") == 0))
+				{
+					reply->cols[i-1]->oratype = ORA_TYPE_XMLTYPE;
+					/* will be converted to a LONG */
+					reply->cols[i-1]->val_size = max_long + 4;
+					break;
+				}
 				/* for other types, fall through */
 			default:
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
@@ -2570,8 +2579,13 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 			*type = ORA_TYPE_LONG;
 		else if (strcmp(typename, "LONG RAW") == 0)
 			*type = ORA_TYPE_LONGRAW;
-		else if (strcmp(typename, "SDO_GEOMETRY") == 0 && ind_typeowner == OCI_IND_NOTNULL && strcmp(typeowner, "MDSYS") == 0)
+		else if (strcmp(typename, "SDO_GEOMETRY") == 0
+				&& ind_typeowner == OCI_IND_NOTNULL && strcmp(typeowner, "MDSYS") == 0)
 			*type = ORA_TYPE_GEOMETRY;
+		else if (strcmp(typename, "XMLTYPE") == 0
+				&& ind_typeowner == OCI_IND_NOTNULL
+				&& (strcmp(typeowner, "PUBLIC") == 0 || strcmp(typeowner, "SYS") == 0))
+			*type = ORA_TYPE_XMLTYPE;
 		else if (strcmp(typename, "FLOAT") == 0)
 			*type = ORA_TYPE_FLOAT;
 		else if (strncmp(typename, "NVARCHAR", 8) == 0)
