@@ -6,6 +6,8 @@ Version 2.2.0
     case folding.
     Patch by Sahap Asci.
   - Add support for Oracle XMLTYPE.
+  - Set V$SESSION_CONNECT_INFO.CLIENT_DRIVER to "oracle_fdw".
+    This makes it easier to identify the session on the Oracle side.
 
   Bugfixes:
   - Fix crash or bad results with pushed down join queries.

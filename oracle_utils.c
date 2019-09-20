@@ -394,6 +394,17 @@ oracleSession
 				oraMessage);
 		}
 
+		/* set driver name for the Oracle session */
+		if (checkerr(
+			OCIAttrSet(userhp, OCI_HTYPE_SESSION, "oracle_fdw", (ub4)10,
+				OCI_ATTR_DRIVER_NAME, errhp),
+			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+				"error connecting to Oracle: OCIAttrSet failed to set driver name in session handle",
+				oraMessage);
+		}
+
 		/* set user name */
 		if (checkerr(
 			OCIAttrSet(userhp, OCI_HTYPE_SESSION, user, strlen(user),
