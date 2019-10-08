@@ -530,18 +530,17 @@ If you want to try it nonetheless, you'll have to build oracle_fdw from source.
 If you encounter problems while using such a PostgreSQL-derived server,
 please try with the original version before reporting an issue.
 
-Oracle client version 10.2 or better is required.
+Oracle client version 11.2 or better is required.
 oracle_fdw can be built and used with Oracle Instant Client as well as with
 Oracle Client and Server installations installed with Universal Installer.
-Binaries compiled with Oracle Client 10 can be used with later client versions
+Binaries compiled with Oracle Client 11 can be used with later client versions
 without recompilation or relink.
 
 The supported Oracle server versions depend on the used client version (see the
-Oracle Client/Server Interoperability Matrix in support document 207303.1).
-For maximum coverage use Oracle Client 10.2.0.5, as this will allow you to
-connect to every server version from 8.1.7 to 12.1.0 except 9.0.1.  
-PostgreSQL and Oracle need to have the same architecture, for example you
-cannot have 32-bit software for the one and 64-bit software for the other.
+Oracle Client/Server Interoperability Matrix in Oracle Support document
+207303.1).  PostgreSQL and Oracle need to have the same architecture.
+For example, you cannot have 32-bit software for the one and 64-bit software
+for the other.
 
 It is advisable to use the latest Patch Set on both Oracle client and server,
 particularly with desupported Oracle versions.  
