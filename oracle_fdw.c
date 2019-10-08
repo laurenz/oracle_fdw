@@ -2265,15 +2265,22 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 			/* look up collation within pg_catalog namespace with the name */
 
+#if PG_VERSION_NUM >= 120000
 			collation = GetSysCacheOid3(
 							COLLNAMEENCNSP,
-#if PG_VERSION_NUM >= 120000
 							Anum_pg_collation_oid,
-#endif  /* PG_VERSION_NUM */
 							PointerGetDatum(s),
 							Int32GetDatum(Int32GetDatum(-1)),
 							ObjectIdGetDatum(PG_CATALOG_NAMESPACE)
 						);
+#else
+			collation = GetSysCacheOid3(
+							COLLNAMEENCNSP,
+							PointerGetDatum(s),
+							Int32GetDatum(Int32GetDatum(-1)),
+							ObjectIdGetDatum(PG_CATALOG_NAMESPACE)
+						);
+#endif  /* PG_VERSION_NUM */
 
 			if (!OidIsValid(collation))
 				ereport(ERROR,
