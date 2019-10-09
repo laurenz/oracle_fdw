@@ -28,9 +28,10 @@ Special thanks to Christian Ullrich for ongoing help with Windows.
 This is a simple example how to use oracle_fdw.  
 More detailed information will be provided in the sections
 [Options](#3-options) and [Usage](#4-usage).  You should also read the
-[PostgreSQL documentation on foreign data]
-(https://www.postgresql.org/docs/current/static/ddl-foreign-data.html)
-and the commands referenced there.
+[PostgreSQL documentation on foreign data][fd] and the commands referenced
+there.
+
+ [fd]: (https://www.postgresql.org/docs/current/static/ddl-foreign-data.html)
 
 For the sake of this example, let's assume you can connect as operating system
 user `postgres` (or whoever starts the PostgreSQL server) with the following
