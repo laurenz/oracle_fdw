@@ -1,7 +1,7 @@
-#include "..\oracle_fdw.h"
-
 #include "postgres.h"
 #include "utils\elog.h"
+
+#include "..\oracle_fdw.h"
 
 #include <windows.h>
 
