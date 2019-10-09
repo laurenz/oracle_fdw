@@ -31,7 +31,7 @@ More detailed information will be provided in the sections
 [PostgreSQL documentation on foreign data][fd] and the commands referenced
 there.
 
- [fd]: (https://www.postgresql.org/docs/current/static/ddl-foreign-data.html)
+ [fd]: https://www.postgresql.org/docs/current/static/ddl-foreign-data.html
 
 For the sake of this example, let's assume you can connect as operating system
 user `postgres` (or whoever starts the PostgreSQL server) with the following
