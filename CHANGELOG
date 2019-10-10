@@ -1,4 +1,4 @@
-Version 2.2.0
+Version 2.2.0, released 2019-10-10
   Enhancements:
   - Add support for COPY to foreign tables (from PostgreSQL v11 on).
     This caused a crash before, as reported by "jkldv".
