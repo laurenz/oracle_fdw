@@ -10,3 +10,6 @@ Help is welcome!
 
 - Add options "max_long", "sample_percent" and "prefetch" to
   IMPORT FOREIGN SCHEMA.  See issue #350.
+
+- Add a foreign table option 'dblink' to allow Oracle database links.
+  See issue #356.
