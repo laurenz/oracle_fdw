@@ -148,6 +148,11 @@
 #define do_each_cell(cell, list, element) for_each_cell(cell, (list), (element))
 #endif  /* PG_VERSION_NUM */
 
+/* "table_open" was "heap_open" before v12 */
+#if PG_VERSION_NUM < 120000
+#define table_open(x, y) heap_open(x, y)
+#endif  /* PG_VERSION_NUM */
+
 PG_MODULE_MAGIC;
 
 /*
@@ -668,7 +673,7 @@ oracle_diag(PG_FUNCTION_ARGS)
 		oracleSession *session;
 
 		/* look up foreign server with this name */
-		rel = heap_open(ForeignServerRelationId, AccessShareLock);
+		rel = table_open(ForeignServerRelationId, AccessShareLock);
 
 		tup = SearchSysCacheCopy1(FOREIGNSERVERNAME, NameGetDatum(srvname));
 		if (!HeapTupleIsValid(tup))
@@ -1179,7 +1184,7 @@ ForeignScan
 		 * Core code already has some lock on each rel being planned, so we can
 		 * use NoLock here.
 		 */
-		rel = heap_open(foreigntableid, NoLock);
+		rel = table_open(foreigntableid, NoLock);
 
 		/* is there an AFTER trigger FOR EACH ROW? */
 		has_trigger = (foreignrel->relid == root->parse->resultRelation)
@@ -1650,7 +1655,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	 * Core code already has some lock on each rel being planned, so we can
 	 * use NoLock here.
 	 */
-	rel = heap_open(rte->relid, NoLock);
+	rel = table_open(rte->relid, NoLock);
 
 	/* figure out which attributes are affected and if there is a trigger */
 	switch (operation)
@@ -2625,7 +2630,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 	TupleDesc tupdesc;
 	int i, index;
 
-	rel = heap_open(foreigntableid, NoLock);
+	rel = table_open(foreigntableid, NoLock);
 	tupdesc = rel->rd_att;
 
 	/* number of PostgreSQL columns */
