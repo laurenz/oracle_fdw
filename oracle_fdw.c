@@ -151,6 +151,7 @@
 /* "table_open" was "heap_open" before v12 */
 #if PG_VERSION_NUM < 120000
 #define table_open(x, y) heap_open(x, y)
+#define table_close(x, y) heap_close(x, y)
 #endif  /* PG_VERSION_NUM */
 
 PG_MODULE_MAGIC;
@@ -687,7 +688,7 @@ oracle_diag(PG_FUNCTION_ARGS)
 		srvId = ((Form_pg_foreign_server)GETSTRUCT(tup))->oid;
 #endif
 
-		heap_close(rel, AccessShareLock);
+		table_close(rel, AccessShareLock);
 
 		/* get the foreign server, the user mapping and the FDW */
 		server = GetForeignServer(srvId);
@@ -1190,7 +1191,7 @@ ForeignScan
 		has_trigger = (foreignrel->relid == root->parse->resultRelation)
 						&& hasTrigger(rel, root->parse->commandType);
 
-		heap_close(rel, NoLock);
+		table_close(rel, NoLock);
 
 		if (has_trigger)
 		{
@@ -1712,7 +1713,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 			elog(ERROR, "unexpected operation: %d", (int) operation);
 	}
 
-	heap_close(rel, NoLock);
+	table_close(rel, NoLock);
 
 	/* mark all attributes for which we need a RETURNING clause */
 	if (has_trigger)
@@ -2677,7 +2678,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 #endif	/* OLD_FDW_API */
 	}
 
-	heap_close(rel, NoLock);
+	table_close(rel, NoLock);
 }
 
 /*
