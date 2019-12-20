@@ -328,3 +328,12 @@ SELECT id, nc FROM badtypes WHERE id = 1;
 INSERT INTO badtypes (id, nc) VALUES (42, XML '<empty/>');
 -- remove foreign table
 DROP FOREIGN TABLE badtypes;
+
+/*
+ * Test subplans (initplans)
+ */
+
+-- testcase for bug #364
+SELECT id FROM typetest1
+WHERE vc NOT IN (SELECT * FROM (VALUES ('short'), ('other')) AS q)
+ORDER BY id;

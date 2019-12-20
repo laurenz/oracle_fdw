@@ -452,3 +452,16 @@ INSERT INTO badtypes (id, nc) VALUES (42, XML '<empty/>');
 ERROR:  column "c" of foreign table "badtypes" cannot be converted to or from Oracle data type
 -- remove foreign table
 DROP FOREIGN TABLE badtypes;
+/*
+ * Test subplans (initplans)
+ */
+-- testcase for bug #364
+SELECT id FROM typetest1
+WHERE vc NOT IN (SELECT * FROM (VALUES ('short'), ('other')) AS q)
+ORDER BY id;
+ id 
+----
+  1
+  3
+(2 rows)
+

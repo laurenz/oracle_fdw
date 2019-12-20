@@ -1,3 +1,9 @@
+Version 2.2.1
+  Bugfixes:
+  - Fix bad results with uncorrelated subqueries.
+    This affects queries have a foreign scan with a filter based on a subplan.
+    Reported by "srakazmus".
+
 Version 2.2.0, released 2019-10-10
   Enhancements:
   - Add support for COPY to foreign tables (from PostgreSQL v11 on).

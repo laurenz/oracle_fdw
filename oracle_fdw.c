@@ -4724,9 +4724,15 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 			}
 			break;
 		case T_SubPlan:
-			foreach(cell, ((SubPlan *)expr)->args)
 			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
+				SubPlan *subplan = (SubPlan *)expr;
+
+				getUsedColumns((Expr *)(subplan->testexpr), oraTable, foreignrelid);
+
+				foreach(cell, subplan->args)
+				{
+					getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
+				}
 			}
 			break;
 		case T_AlternativeSubPlan:
