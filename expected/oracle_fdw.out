@@ -7,7 +7,86 @@ CREATE EXTENSION oracle_fdw;
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
 CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
 CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
--- Oracle table TYPETEST1 must be created for this one
+-- drop the Oracle tables if they exist
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest1 PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP TABLE scott.gis PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE TABLE scott.typetest1 (\n'
+          '   id  NUMBER(5)\n'
+          '      CONSTRAINT typetest1_pkey PRIMARY KEY,\n'
+          '   c   CHAR(10 CHAR),\n'
+          '   nc  NCHAR(10),\n'
+          '   vc  VARCHAR2(10 CHAR),\n'
+          '   nvc NVARCHAR2(10),\n'
+          '   lc  CLOB,\n'
+          '   r   RAW(10),\n'
+          '   u   RAW(16),\n'
+          '   lb  BLOB,\n'
+          '   lr  LONG RAW,\n'
+          '   b   NUMBER(1),\n'
+          '   num NUMBER(7,5),\n'
+          '   fl  BINARY_FLOAT,\n'
+          '   db  BINARY_DOUBLE,\n'
+          '   d   DATE,\n'
+          '   ts  TIMESTAMP WITH TIME ZONE,\n'
+          '   ids INTERVAL DAY TO SECOND,\n'
+          '   iym INTERVAL YEAR TO MONTH\n'
+          ') SEGMENT CREATION IMMEDIATE'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE TABLE scott.gis (\n'
+          '   id  NUMBER(5) PRIMARY KEY,\n'
+          '   g   MDSYS.SDO_GEOMETRY\n'
+          ') SEGMENT CREATION IMMEDIATE'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+-- gather statistics
+SELECT oracle_execute(
+          'oracle',
+          E'BEGIN\n'
+          '   DBMS_STATS.GATHER_TABLE_STATS (''SCOTT'', ''TYPETEST1'', NULL, 100);\n'
+          'END;'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+SELECT oracle_execute(
+          'oracle',
+          E'BEGIN\n'
+          '   DBMS_STATS.GATHER_TABLE_STATS (''SCOTT'', ''GIS'', NULL, 100);\n'
+          'END;'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+-- create the foreign tables
 CREATE FOREIGN TABLE typetest1 (
    id  integer OPTIONS (key 'yes') NOT NULL,
    q   double precision,
