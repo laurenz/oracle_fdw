@@ -1,4 +1,12 @@
-Version 2.2.1
+Version 2.3.0
+  Note: When upgrading from an older version of oracle_fdw, make sure to run
+        ALTER EXTENSION oracle_fdw UPDATE;
+        after installing the extension.
+
+  Enhancements:
+  - Add a function "oracle_execute" to execute arbitrary SQL statements on
+    Oracle.  The statements must not return a result (e.g. DDL statements).
+
   Bugfixes:
   - Fix bad results with uncorrelated subqueries.
     This affects queries have a foreign scan with a filter based on a subplan.

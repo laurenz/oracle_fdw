@@ -2097,6 +2097,49 @@ oracleFetchNext(oracleSession *session)
 }
 
 /*
+ * oracleExecuteCall
+ * 		Execute an Oracle statement that has no results.
+ */
+void
+oracleExecuteCall(oracleSession *session, char * const stmt)
+{
+	OCIStmt *stmthp;
+
+	/* create statement handle */
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION,
+		"error executing statement: OCIHandleAlloc failed to allocate statement handle");
+
+	/* prepare the query */
+	if (checkerr(
+		OCIStmtPrepare(stmthp, session->envp->errhp, (text *)stmt, (ub4) strlen(stmt),
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error executing statement: OCIStmtPrepare failed to prepare query",
+			oraMessage);
+	}
+
+	if (checkerr(
+		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		if (err_code == 24374)
+			oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"Oracle statement must not return a result");
+		else
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error executing statement: OCIStmtExecute failed to execute query",
+				oraMessage);
+	}
+
+	/* free the statement handle */
+	freeHandle(stmthp, session->connp);
+}
+
+/*
  * oracleGetLob
  * 		Get the LOB contents and store them in *value and *value_len.
  * 		If "trunc" is nonzero, it contains the number of bytes or characters to get.

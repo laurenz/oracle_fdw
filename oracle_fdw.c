@@ -285,11 +285,13 @@ extern PGDLLEXPORT Datum oracle_fdw_handler(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_fdw_validator(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_close_connections(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum oracle_diag(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum oracle_execute(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(oracle_fdw_handler);
 PG_FUNCTION_INFO_V1(oracle_fdw_validator);
 PG_FUNCTION_INFO_V1(oracle_close_connections);
 PG_FUNCTION_INFO_V1(oracle_diag);
+PG_FUNCTION_INFO_V1(oracle_execute);
 
 /*
  * on-load initializer
@@ -363,6 +365,7 @@ static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrel
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
 static char *deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds);
 static char *guessNlsLang(char *nls_lang);
+static oracleSession *oracleConnectServer(Name srvname);
 static List *serializePlanData(struct OracleFdwState *fdwState);
 static Const *serializeString(const char *s);
 static Const *serializeLong(long i);
@@ -620,7 +623,6 @@ oracle_close_connections(PG_FUNCTION_ARGS)
 PGDLLEXPORT Datum
 oracle_diag(PG_FUNCTION_ARGS)
 {
-	Oid srvId = InvalidOid;
 	char *pgversion;
 	int major, minor, update, patch, port_patch;
 	StringInfoData version;
@@ -661,70 +663,10 @@ oracle_diag(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		/* get the server version only if a non-null argument was given */
-		HeapTuple tup;
-		Relation rel;
-		Name srvname = PG_GETARG_NAME(0);
-		ForeignServer *server;
-		UserMapping *mapping;
-		ForeignDataWrapper *wrapper;
-		List *options;
-		ListCell *cell;
-		char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
 		oracleSession *session;
 
-		/* look up foreign server with this name */
-		rel = table_open(ForeignServerRelationId, AccessShareLock);
-
-		tup = SearchSysCacheCopy1(FOREIGNSERVERNAME, NameGetDatum(srvname));
-		if (!HeapTupleIsValid(tup))
-			ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_OBJECT),
-				errmsg("server \"%s\" does not exist", NameStr(*srvname))));
-
-#if PG_VERSION_NUM < 120000
-		srvId = HeapTupleGetOid(tup);
-#else
-		srvId = ((Form_pg_foreign_server)GETSTRUCT(tup))->oid;
-#endif
-
-		table_close(rel, AccessShareLock);
-
-		/* get the foreign server, the user mapping and the FDW */
-		server = GetForeignServer(srvId);
-		mapping = GetUserMapping(GetUserId(), srvId);
-		wrapper = GetForeignDataWrapper(server->fdwid);
-
-		/* get all options for these objects */
-		options = wrapper->options;
-		options = list_concat(options, server->options);
-		options = list_concat(options, mapping->options);
-
-		foreach(cell, options)
-		{
-			DefElem *def = (DefElem *) lfirst(cell);
-			if (strcmp(def->defname, OPT_NLS_LANG) == 0)
-				nls_lang = ((Value *) (def->arg))->val.str;
-			if (strcmp(def->defname, OPT_DBSERVER) == 0)
-				dbserver = ((Value *) (def->arg))->val.str;
-			if (strcmp(def->defname, OPT_USER) == 0)
-				user = ((Value *) (def->arg))->val.str;
-			if (strcmp(def->defname, OPT_PASSWORD) == 0)
-				password = ((Value *) (def->arg))->val.str;
-		}
-
-		/* guess a good NLS_LANG environment setting */
-		nls_lang = guessNlsLang(nls_lang);
-
-		/* connect to Oracle database */
-		session = oracleGetSession(
-			dbserver,
-			user,
-			password,
-			nls_lang,
-			NULL,
-			1
-		);
+		Name srvname = PG_GETARG_NAME(0);
+		session = oracleConnectServer(srvname);
 
 		/* get the server version */
 		oracleServerVersion(session, &major, &minor, &update, &patch, &port_patch);
@@ -735,6 +677,25 @@ oracle_diag(PG_FUNCTION_ARGS)
 	}
 
 	PG_RETURN_TEXT_P(cstring_to_text(version.data));
+}
+
+/*
+ * oracle_execute
+ * 		Execute a statement that returns no result values on a foreign server.
+ */
+PGDLLEXPORT Datum
+oracle_execute(PG_FUNCTION_ARGS)
+{
+	Name srvname = PG_GETARG_NAME(0);
+	char *stmt = text_to_cstring(PG_GETARG_TEXT_PP(1));
+	oracleSession *session = oracleConnectServer(srvname);
+
+	oracleExecuteCall(session, stmt);
+
+	/* free the session (connection will be cached) */
+	pfree(session);
+
+	PG_RETURN_VOID();
 }
 
 /*
@@ -5092,6 +5053,74 @@ char
 
 	return buf.data;
 }
+
+oracleSession *
+oracleConnectServer(Name srvname)
+{
+	Oid srvId = InvalidOid;
+	HeapTuple tup;
+	Relation rel;
+	ForeignServer *server;
+	UserMapping *mapping;
+	ForeignDataWrapper *wrapper;
+	List *options;
+	ListCell *cell;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+
+	/* look up foreign server with this name */
+	rel = table_open(ForeignServerRelationId, AccessShareLock);
+
+	tup = SearchSysCacheCopy1(FOREIGNSERVERNAME, NameGetDatum(srvname));
+	if (!HeapTupleIsValid(tup))
+		ereport(ERROR,
+			(errcode(ERRCODE_UNDEFINED_OBJECT),
+			errmsg("server \"%s\" does not exist", NameStr(*srvname))));
+
+#if PG_VERSION_NUM < 120000
+	srvId = HeapTupleGetOid(tup);
+#else
+	srvId = ((Form_pg_foreign_server)GETSTRUCT(tup))->oid;
+#endif
+
+	table_close(rel, AccessShareLock);
+
+	/* get the foreign server, the user mapping and the FDW */
+	server = GetForeignServer(srvId);
+	mapping = GetUserMapping(GetUserId(), srvId);
+	wrapper = GetForeignDataWrapper(server->fdwid);
+
+	/* get all options for these objects */
+	options = wrapper->options;
+	options = list_concat(options, server->options);
+	options = list_concat(options, mapping->options);
+
+	foreach(cell, options)
+	{
+		DefElem *def = (DefElem *) lfirst(cell);
+		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
+			nls_lang = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_DBSERVER) == 0)
+			dbserver = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_USER) == 0)
+			user = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_PASSWORD) == 0)
+			password = ((Value *) (def->arg))->val.str;
+	}
+
+	/* guess a good NLS_LANG environment setting */
+	nls_lang = guessNlsLang(nls_lang);
+
+	/* connect to Oracle database */
+	return oracleGetSession(
+		dbserver,
+		user,
+		password,
+		nls_lang,
+		NULL,
+		1
+	);
+}
+
 
 #define serializeInt(x) makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)(x)), false, true)
 #define serializeOid(x) makeConst(OIDOID, -1, InvalidOid, 4, ObjectIdGetDatum(x), false, true)

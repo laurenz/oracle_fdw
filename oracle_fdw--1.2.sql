@@ -26,6 +26,13 @@ LANGUAGE C STABLE CALLED ON NULL INPUT;
 COMMENT ON FUNCTION oracle_diag(name)
 IS 'shows the version of oracle_fdw, PostgreSQL, Oracle client and Oracle server';
 
+CREATE FUNCTION oracle_execute(server name, statement text) RETURNS void
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT;
+
+COMMENT ON FUNCTION oracle_execute(name, text)
+IS 'executes an arbitrary SQL statement with no results on the Oracle server';
+
 CREATE FOREIGN DATA WRAPPER oracle_fdw
   HANDLER oracle_fdw_handler
   VALIDATOR oracle_fdw_validator;

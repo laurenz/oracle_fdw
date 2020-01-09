@@ -118,6 +118,12 @@ some environment variables used for establishing Oracle connections.
 If called with the name of a foreign server, it will additionally return
 the Oracle server version.
 
+    FUNCTION oracle_execute(server name, stmt text) RETURNS void
+
+This function can be used to execute arbitrary SQL statements on the remote
+Oracle server.  That will only work with statements that do not return results
+(typically DDL statements).
+
 3 Options
 =========
 

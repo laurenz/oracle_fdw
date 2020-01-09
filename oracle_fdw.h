@@ -15,7 +15,7 @@
 #include <sys/types.h>
 
 /* oracle_fdw version */
-#define ORACLE_FDW_VERSION "2.2.1devel"
+#define ORACLE_FDW_VERSION "2.3.0devel"
 
 #ifdef OCI_ORACLE
 /*
@@ -199,6 +199,7 @@ extern void oracleExplain(oracleSession *session, const char *query, int *nrows,
 extern void oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, unsigned int prefetch);
 extern int oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, struct paramDesc *paramList);
 extern int oracleFetchNext(oracleSession *session);
+extern void oracleExecuteCall(oracleSession *session, char * const stmt);
 extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len, unsigned long trunc);
 extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
