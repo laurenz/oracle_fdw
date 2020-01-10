@@ -124,6 +124,12 @@ This function can be used to execute arbitrary SQL statements on the remote
 Oracle server.  That will only work with statements that do not return results
 (typically DDL statements).
 
+Be careful when using this function, since it might disturb the transaction
+management of oracle_fdw.  Remember that running a DDL statement in Oracle
+will issue an implicit COMMIT.
+You are best advised to use this function outside of multi-statement
+transactions.
+
 3 Options
 =========
 
