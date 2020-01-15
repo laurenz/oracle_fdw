@@ -11,6 +11,9 @@ Version 2.3.0
   - Fix bad results with uncorrelated subqueries.
     This affects queries have a foreign scan with a filter based on a subplan.
     Reported by "srakazmus".
+  - Fix "Internal oracle_fdw error: encountered unknown node type 144"
+    This can happen in plans involving tables with identity columns.
+    Reported by Yang Lin.
 
 Version 2.2.0, released 2019-10-10
   Enhancements:

@@ -4570,6 +4570,7 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 		case T_CaseTestExpr:
 		case T_CoerceToDomainValue:
 		case T_CurrentOfExpr:
+		case T_NextValueExpr:
 			break;
 		case T_Var:
 			variable = (Var *)expr;
