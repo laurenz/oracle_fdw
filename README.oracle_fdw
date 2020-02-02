@@ -499,7 +499,7 @@ following:
   ALL_TAB_COLUMNS.  That includes tables, views and materialized views,
   but not synonyms.
 
-- There are three supported options for IMPORT FOREIGN SCHEMA:
+- There are four supported options for IMPORT FOREIGN SCHEMA:
   - **case**: controls case folding for table and column names during import.  
     The possible values are:
     - `keep`: leave the names as they are in Oracle, usually in upper case.
@@ -512,6 +512,9 @@ following:
     Only collations in the `pg_catalog` schema are supported.
     See the `collname` values in the `pg_collation` catalog for a list of
     possible values.
+  - **dblink**: the dblink through which the schema is accessed.
+    This name must be written exactly as it occurs in Oracle's system catalog,
+    so normally consist of uppercase letters only.
   - **readonly** (boolean): controls if imported tables can be modified.
     If set to `true`, all imported tables are created with the foreign
     table option **readonly** set to `true` (see the [Options](#3-options)

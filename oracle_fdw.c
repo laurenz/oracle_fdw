@@ -2183,7 +2183,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL, *dblink = NULL;
 	oraType type;
 	int charlen, typeprec, typescale, nullable, key, rc;
 	List *options, *result = NIL;
@@ -2287,6 +2287,17 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errmsg("invalid value for option \"%s\"", def->defname)));
 			continue;
 		}
+		else if (strcmp(def->defname, "dblink") == 0)
+		{
+			char *s = ((Value *) (def->arg))->val.str;
+			if (strchr(s, '"') != NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Double quotes are not allowed in the dblink name.")));
+			dblink = s;
+			continue;
+		}
 
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
@@ -2312,7 +2323,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	initStringInfo(&buf);
 	do {
 		/* get the next column definition */
-		rc = oracleGetImportColumn(session, stmt->remote_schema, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
+		rc = oracleGetImportColumn(session, dblink, stmt->remote_schema, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
 
 		if (rc == -1)
 		{
@@ -2331,6 +2342,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			/* finish previous CREATE FOREIGN TABLE statement */
 			appendStringInfo(&buf, ") SERVER \"%s\" OPTIONS (schema '%s', table '%s'",
 				server->servername, stmt->remote_schema, oldtabname);
+			if (dblink)
+				appendStringInfo(&buf, ", dblink '%s'", dblink);
 			if (readonly)
 				appendStringInfo(&buf, ", readonly 'true'");
 			appendStringInfo(&buf, ")");

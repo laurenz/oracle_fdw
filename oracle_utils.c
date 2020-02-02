@@ -2322,26 +2322,27 @@ void *oracleGetGeometryType(oracleSession *session)
  * 		Get the next element in the ordered list of tables and their columns for "schema".
  * 		Returns 0 if there are no more columns, -1 if the remote schema does not exist, else 1.
  */
-int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
+int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
 {
 	/* the static variables will contain data returned to the caller */
 	static char s_tabname[129], s_colname[129];
 	char typename[129] = { '\0' }, typeowner[129] = { '\0' }, isnull[2] = { '\0' };
 	int count = 0;
 	const char * const schema_query = "SELECT COUNT(*) FROM all_users WHERE username = :nsp";
-	const char * const column_query =
+	const char * const column_query_template =
 		"SELECT col.table_name, col.column_name, col.data_type, col.data_type_owner,\n"
 		"       col.char_length, col.data_precision, col.data_scale, col.nullable,\n"
 		"       CASE WHEN primkey_col.position IS NOT NULL THEN 1 ELSE 0 END AS primary_key\n"
-		"FROM all_tab_columns col,\n"
+		"FROM all_tab_columns%s col,\n"
 		"     (SELECT con.table_name, cons_col.column_name, cons_col.position\n"
-		"      FROM all_constraints con, all_cons_columns cons_col\n"
+		"      FROM all_constraints%s con, all_cons_columns%s cons_col\n"
 		"      WHERE con.owner = cons_col.owner AND con.table_name = cons_col.table_name\n"
 		"        AND con.constraint_name = cons_col.constraint_name\n"
 		"        AND con.constraint_type = 'P' AND con.owner = :nsp) primkey_col\n"
 		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
 		"  AND col.owner = :nsp\n"
 		"ORDER BY col.table_name, col.column_id";
+	char *column_query = NULL, *qdblink = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
 	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner = OCI_IND_NOTNULL,
 		ind_charlen = OCI_IND_NOTNULL, ind_precision = OCI_IND_NOTNULL, ind_scale = OCI_IND_NOTNULL,
@@ -2441,6 +2442,24 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 				oraMessage);
 		}
 
+		if (dblink == NULL)
+		{
+			column_query = oracleAlloc(strlen(column_query_template) - 6 + 1);
+			sprintf(column_query, column_query_template, "", "", "");
+		}
+		else
+		{
+			qdblink = copyOraText(dblink, strlen(dblink), 1);
+			table_suffix = oracleAlloc(strlen(qdblink) + 2);
+			table_suffix[0] = '\0';
+			strcat(table_suffix, "@");
+			strcat(table_suffix, qdblink);
+			oracleFree(qdblink);
+			column_query = oracleAlloc(strlen(column_query_template) - 6 + 3 * strlen(table_suffix) + 1);
+			sprintf(column_query, column_query_template, table_suffix, table_suffix, table_suffix);
+			oracleFree(table_suffix);
+		}
+
 		/* prepare the query */
 		if (checkerr(
 			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)column_query, (ub4) strlen(column_query),
@@ -2451,6 +2470,8 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname, 
 				"error importing foreign schema: OCIStmtPrepare failed to prepare remote query",
 				oraMessage);
 		}
+
+		oracleFree(column_query);
 
 		/* bind the parameter */
 		if (checkerr(
