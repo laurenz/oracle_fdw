@@ -181,6 +181,7 @@ struct OracleFdwOption
 #define OPT_DBSERVER "dbserver"
 #define OPT_USER "user"
 #define OPT_PASSWORD "password"
+#define OPT_DBLINK "dblink"
 #define OPT_SCHEMA "schema"
 #define OPT_TABLE "table"
 #define OPT_MAX_LONG "max_long"
@@ -205,6 +206,7 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_DBSERVER, ForeignServerRelationId, true},
 	{OPT_USER, UserMappingRelationId, true},
 	{OPT_PASSWORD, UserMappingRelationId, true},
+	{OPT_DBLINK, ForeignTableRelationId, false},
 	{OPT_SCHEMA, ForeignTableRelationId, false},
 	{OPT_TABLE, ForeignTableRelationId, true},
 	{OPT_MAX_LONG, ForeignTableRelationId, false},
@@ -525,6 +527,17 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are: on/yes/true or off/no/false")));
+		}
+
+		/* check valid values for "dblink" */
+		if (strcmp(def->defname, OPT_DBLINK) == 0)
+		{
+			char *val = ((Value *)(def->arg))->val.str;
+			if (strchr(val, '"') != NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Double quotes are not allowed in the dblink name.")));
 		}
 
 		/* check valid values for "schema" */
@@ -2463,7 +2476,7 @@ struct OracleFdwState
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
-	char *schema = NULL, *table = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
+	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
 	long max_long;
 
 	/*
@@ -2482,6 +2495,8 @@ struct OracleFdwState
 			fdwState->user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			fdwState->password = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_DBLINK) == 0)
+			dblink = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_SCHEMA) == 0)
 			schema = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_TABLE) == 0)
@@ -2539,7 +2554,7 @@ struct OracleFdwState
 	);
 
 	/* get remote table description */
-	fdwState->oraTable = oracleDescribe(fdwState->session, schema, table, pgtablename, max_long);
+	fdwState->oraTable = oracleDescribe(fdwState->session, dblink, schema, table, pgtablename, max_long);
 
 	/* add PostgreSQL data to table description */
 	getColumnData(foreigntableid, fdwState->oraTable);

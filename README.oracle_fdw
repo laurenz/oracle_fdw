@@ -192,6 +192,12 @@ Foreign table options
   queries; if you want to avoid that (or confusing Oracle error messages
   for more complicated queries), use the table option **readonly**.
 
+- **dblink** (optional)
+
+  The dblink through which the table is accessed.  This name must be written
+  exactly as it occurs in Oracle's system catalog, so normally consist of
+  uppercase letters only.
+
 - **schema** (optional)
 
   The table's schema (or owner).  Useful to access tables that do not belong

@@ -802,7 +802,7 @@ oracleIsStatementOpen(oracleSession *session)
  * 		Returns a palloc'ed data structure with the results.
  */
 struct oraTable
-*oracleDescribe(oracleSession *session, char *schema, char *table, char *pgname, long max_long)
+*oracleDescribe(oracleSession *session, char *dblink, char *schema, char *table, char *pgname, long max_long)
 {
 	struct oraTable *reply;
 	OCIStmt *stmthp;
@@ -811,7 +811,7 @@ struct oraTable
 	ub1 csfrm;
 	sb2 precision;
 	sb1 scale;
-	char *qtable, *qschema = NULL, *tablename, *query;
+	char *qtable, *qdblink = NULL, *qschema = NULL, *tablename, *query;
 	OraText *ident, *typname, *typschema;
 	char *type_name, *type_schema;
 	ub4 ncols, ident_size, typname_size, typschema_size;
@@ -820,6 +820,11 @@ struct oraTable
 	/* get a complete quoted table name */
 	qtable = copyOraText(table, strlen(table), 1);
 	length = strlen(qtable);
+	if (dblink != NULL)
+	{
+		qdblink = copyOraText(dblink, strlen(dblink), 1);
+		length += strlen(dblink) + 1;
+	}
 	if (schema != NULL)
 	{
 		qschema = copyOraText(schema, strlen(schema), 1);
@@ -833,7 +838,14 @@ struct oraTable
 		strcat(tablename, ".");
 	}
 	strcat(tablename, qtable);
+	if (dblink != NULL)
+	{
+		strcat(tablename, "@");
+		strcat(tablename, qdblink);
+	}
 	oracleFree(qtable);
+	if (dblink != NULL)
+		oracleFree(qdblink);
 	if (schema != NULL)
 		oracleFree(qschema);
 
