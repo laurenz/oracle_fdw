@@ -823,7 +823,7 @@ struct oraTable
 	if (dblink != NULL)
 	{
 		qdblink = copyOraText(dblink, strlen(dblink), 1);
-		length += strlen(dblink) + 1;
+		length += strlen(qdblink) + 1;
 	}
 	if (schema != NULL)
 	{
