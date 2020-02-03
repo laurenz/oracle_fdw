@@ -6,6 +6,9 @@ Version 2.3.0
   Enhancements:
   - Add a function "oracle_execute" to execute arbitrary SQL statements on
     Oracle.  The statements must not return a result (e.g. DDL statements).
+  - Add an option "dblink" for Oracle database links.
+    The option can be used on foreign tables or with IMPORT FOREIGN SCHEMA.
+    Patch by Nicolas Boullis.
 
   Bugfixes:
   - Fix bad results with uncorrelated subqueries.

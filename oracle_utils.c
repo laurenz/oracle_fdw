@@ -2342,7 +2342,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
 		"  AND col.owner = :nsp\n"
 		"ORDER BY col.table_name, col.column_id";
-	char *column_query = NULL, *qdblink = NULL, *table_suffix = NULL;
+	char *column_query = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
 	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner = OCI_IND_NOTNULL,
 		ind_charlen = OCI_IND_NOTNULL, ind_precision = OCI_IND_NOTNULL, ind_scale = OCI_IND_NOTNULL,
@@ -2443,22 +2443,20 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		}
 
 		if (dblink == NULL)
-		{
-			column_query = oracleAlloc(strlen(column_query_template) - 6 + 1);
-			sprintf(column_query, column_query_template, "", "", "");
-		}
+			table_suffix = "";
 		else
 		{
-			qdblink = copyOraText(dblink, strlen(dblink), 1);
+			/* we have to add the quoted datanbase link */
+			char *qdblink = copyOraText(dblink, strlen(dblink), 1);
 			table_suffix = oracleAlloc(strlen(qdblink) + 2);
-			table_suffix[0] = '\0';
-			strcat(table_suffix, "@");
+			table_suffix[0] = '@';
+			table_suffix[1] = '\0';
 			strcat(table_suffix, qdblink);
-			oracleFree(qdblink);
-			column_query = oracleAlloc(strlen(column_query_template) - 6 + 3 * strlen(table_suffix) + 1);
-			sprintf(column_query, column_query_template, table_suffix, table_suffix, table_suffix);
-			oracleFree(table_suffix);
 		}
+
+		/* construct the query by appending the dblink to the catalog tables */
+		column_query = oracleAlloc(strlen(column_query_template) - 6 + 3 * strlen(table_suffix) + 1);
+		sprintf(column_query, column_query_template, table_suffix, table_suffix, table_suffix);
 
 		/* prepare the query */
 		if (checkerr(
