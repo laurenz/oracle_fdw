@@ -297,6 +297,30 @@ SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
 (0 rows)
 
 /*
+ * Test "strip_zeros" column option.
+ */
+SELECT oracle_execute(
+          'oracle',
+          'INSERT INTO typetest1 (id, vc) VALUES (5, ''has'' || chr(0) || ''zeros'')'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+SELECT vc FROM typetest1 WHERE id = 5;  -- should fail
+ERROR:  invalid byte sequence for encoding "UTF8": 0x00
+CONTEXT:  converting column "vc" for foreign table scan of "typetest1", row 1
+ALTER FOREIGN TABLE typetest1 ALTER vc OPTIONS (ADD strip_zeros 'yes');
+SELECT vc FROM typetest1 WHERE id = 5;  -- should work
+    vc    
+----------
+ haszeros
+(1 row)
+
+ALTER FOREIGN TABLE typetest1 ALTER vc OPTIONS (DROP strip_zeros);
+DELETE FROM typetest1 WHERE id = 5;
+/*
  * Test EXPLAIN support.
  */
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;

@@ -257,6 +257,13 @@ Column options (from PostgreSQL 9.2 on)
   For UPDATE and DELETE to work, you must set this option on all columns
   that belong to the table's primary key.
 
+- **strip_zeros** (optional, defaults to "false")
+
+  If set to yes/on/true, ASCII 0 characters will be removed from the string
+  during transfer.  Such characters are valid in Oracle but not in PostgreSQL,
+  so they will cause an error when read by oracle_fdw.  This option only
+  make sense for `character`, `character varying` and `text` columns.
+
 4 Usage
 =======
 

@@ -245,6 +245,22 @@ UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
 SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
 
 /*
+ * Test "strip_zeros" column option.
+ */
+
+SELECT oracle_execute(
+          'oracle',
+          'INSERT INTO typetest1 (id, vc) VALUES (5, ''has'' || chr(0) || ''zeros'')'
+       );
+
+SELECT vc FROM typetest1 WHERE id = 5;  -- should fail
+ALTER FOREIGN TABLE typetest1 ALTER vc OPTIONS (ADD strip_zeros 'yes');
+SELECT vc FROM typetest1 WHERE id = 5;  -- should work
+ALTER FOREIGN TABLE typetest1 ALTER vc OPTIONS (DROP strip_zeros);
+
+DELETE FROM typetest1 WHERE id = 5;
+
+/*
  * Test EXPLAIN support.
  */
 

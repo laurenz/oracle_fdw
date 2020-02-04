@@ -113,6 +113,7 @@ struct oraColumn
 	Oid pgtype;              /* PostgreSQL data type */
 	int pgtypmod;            /* PostgreSQL type modifier */
 	int used;                /* is the column used in the query? */
+	int strip_zeros;         /* should ASCII zero be removed from Oracle strings? */
 	int pkey;                /* nonzero for primary keys, later set to the resjunk attribute number */
 	char *val;               /* buffer for Oracle to return results in (LOB locator for LOBs) */
 	long val_size;           /* allocated size in val */

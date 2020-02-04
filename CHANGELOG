@@ -9,6 +9,9 @@ Version 2.3.0
   - Add an option "dblink" for Oracle database links.
     The option can be used on foreign tables or with IMPORT FOREIGN SCHEMA.
     Patch by Nicolas Boullis.
+  - Add a column option "strip_zeros" that automatically strips ASCII 0
+    characters from strings.
+    Per request from Alexander Lampalzer.
 
   Bugfixes:
   - Fix bad results with uncorrelated subqueries.

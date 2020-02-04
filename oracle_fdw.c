@@ -187,6 +187,7 @@ struct OracleFdwOption
 #define OPT_MAX_LONG "max_long"
 #define OPT_READONLY "readonly"
 #define OPT_KEY "key"
+#define OPT_STRIP_ZEROS "strip_zeros"
 #define OPT_SAMPLE "sample_percent"
 #define OPT_PREFETCH "prefetch"
 
@@ -215,6 +216,7 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_PREFETCH, ForeignTableRelationId, false}
 #ifndef OLD_FDW_API
 	,{OPT_KEY, AttributeRelationId, false}
+	,{OPT_STRIP_ZEROS, AttributeRelationId, false}
 #endif	/* OLD_FDW_API */
 };
 
@@ -513,6 +515,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		if (strcmp(def->defname, OPT_READONLY) == 0
 #ifndef OLD_FDW_API
 				|| strcmp(def->defname, OPT_KEY) == 0
+				|| strcmp(def->defname, OPT_STRIP_ZEROS) == 0
 #endif	/* OLD_FDW_API */
 			)
 		{
@@ -2663,6 +2666,8 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 				/* mark the column as primary key column */
 				oraTable->cols[index-1]->pkey = 1;
 			}
+			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && optionIsTrue(((Value *)(def->arg))->val.str))
+				oraTable->cols[index-1]->strip_zeros = 1;
 		}
 #endif	/* OLD_FDW_API */
 	}
@@ -3352,7 +3357,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 	*totalrows = 0;
 
-	/* create a memory context for short-lived data in convertTuples() */
+	/* create a memory context for short-lived data in convertTuple() */
 	tmp_cxt = AllocSetContextCreate(CurrentMemoryContext,
 								"oracle_fdw temporary data",
 								ALLOCSET_SMALL_SIZES);
@@ -5200,6 +5205,7 @@ List
 		result = lappend(result, serializeOid(fdwState->oraTable->cols[i]->pgtype));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgtypmod));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->used));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->strip_zeros));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pkey));
 		result = lappend(result, serializeLong(fdwState->oraTable->cols[i]->val_size));
 		/* don't serialize val, val_len, val_len4, val_null and varno */
@@ -5339,6 +5345,8 @@ struct OracleFdwState
 		state->oraTable->cols[i]->pgtypmod = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
 		state->oraTable->cols[i]->used = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		cell = list_next(list, cell);
+		state->oraTable->cols[i]->strip_zeros = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
 		state->oraTable->cols[i]->pkey = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
@@ -5612,6 +5620,7 @@ struct OracleFdwState
 		copy->oraTable->cols[i]->pgtype = orig->oraTable->cols[i]->pgtype;
 		copy->oraTable->cols[i]->pgtypmod = orig->oraTable->cols[i]->pgtypmod;
 		copy->oraTable->cols[i]->used = 0;
+		copy->oraTable->cols[i]->strip_zeros = orig->oraTable->cols[i]->strip_zeros;
 		copy->oraTable->cols[i]->pkey = orig->oraTable->cols[i]->pkey;
 		copy->oraTable->cols[i]->val = NULL;
 		copy->oraTable->cols[i]->val_size = orig->oraTable->cols[i]->val_size;
@@ -6443,9 +6452,27 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			error_context_stack = &errcb;
 			fdw_state->columnindex = index;
 
-			/* for string types, check that the data are in the database encoding */
 			if (pgtype == BPCHAROID || pgtype == VARCHAROID || pgtype == TEXTOID)
+			{
+				/* optionally strip zero bytes from string types */
+				if (fdw_state->oraTable->cols[index]->strip_zeros)
+				{
+					char *from_p, *to_p = value;
+					long new_length = value_len;
+
+					for (from_p = value; from_p < value + value_len; ++from_p)
+						if (*from_p != '\0')
+							*to_p++ = *from_p;
+						else
+							--new_length;
+
+					value_len = new_length;
+					value[value_len] = '\0';
+				}
+
+				/* check that the string types are in the database encoding */
 				(void)pg_verify_mbstr(GetDatabaseEncoding(), value, value_len, false);
+			}
 
 			/* call the type input function */
 			switch (pgtype)

@@ -916,6 +916,7 @@ struct oraTable
 		reply->cols[i-1]->pgtype = 0;
 		reply->cols[i-1]->pgtypmod = 0;
 		reply->cols[i-1]->used = 0;
+		reply->cols[i-1]->strip_zeros = 0;
 		reply->cols[i-1]->pkey = 0;
 		reply->cols[i-1]->val = NULL;
 		reply->cols[i-1]->val_len = 0;
