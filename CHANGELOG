@@ -12,6 +12,9 @@ Version 2.3.0
   - Add a column option "strip_zeros" that automatically strips ASCII 0
     characters from strings.
     Per request from Alexander Lampalzer.
+  - New IMPORT FOREIGN SCHEMA options "max_long", "sample_percent" and
+    "prefetch".  These set the corresponding options on imported tables.
+    Suggested by "ferfebles".
 
   Bugfixes:
   - Fix bad results with uncorrelated subqueries.

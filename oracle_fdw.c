@@ -559,8 +559,11 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		{
 			char *val = ((Value *) (def->arg))->val.str;
 			char *endptr;
-			unsigned long max_long = strtoul(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || max_long < 1 || max_long > 1073741823ul)
+			unsigned long max_long;
+
+			errno = 0;
+			max_long = strtoul(val, &endptr, 0);
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || max_long < 1 || max_long > 1073741823ul)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
@@ -588,8 +591,11 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		{
 			char *val = ((Value *) (def->arg))->val.str;
 			char *endptr;
-			long prefetch = strtol(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || prefetch < 0 || prefetch > 10240 )
+			long prefetch;
+
+			errno = 0;
+			prefetch = strtol(val, &endptr, 0);
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 0 || prefetch > 10240 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
@@ -2186,7 +2192,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL, *dblink = NULL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	char *dblink = NULL, *max_long = NULL, *sample_percent = NULL, *prefetch = NULL;
 	oraType type;
 	int charlen, typeprec, typescale, nullable, key, rc;
 	List *options, *result = NIL;
@@ -2239,7 +2246,6 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are: %s", "keep, lower, smart")));
-			continue;
 		}
 		else if (strcmp(def->defname, "collation") == 0)
 		{
@@ -2271,9 +2277,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Check the \"pg_collation\" catalog for valid values.")));
 			}
-			continue;
 		}
-		else if (strcmp(def->defname, "readonly") == 0)
+		else if (strcmp(def->defname, OPT_READONLY) == 0)
 		{
 			char *s = ((Value *) (def->arg))->val.str;
 			if (pg_strcasecmp(s, "on") == 0
@@ -2288,9 +2293,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname)));
-			continue;
 		}
-		else if (strcmp(def->defname, "dblink") == 0)
+		else if (strcmp(def->defname, OPT_DBLINK) == 0)
 		{
 			char *s = ((Value *) (def->arg))->val.str;
 			if (strchr(s, '"') != NULL)
@@ -2299,13 +2303,56 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Double quotes are not allowed in the dblink name.")));
 			dblink = s;
-			continue;
 		}
+		else if (strcmp(def->defname, OPT_MAX_LONG) == 0)
+		{
+			char *endptr;
+			unsigned long max_long_val;
 
-		ereport(ERROR,
-				(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
-				errmsg("invalid option \"%s\"", def->defname),
-				errhint("Valid options in this context are: %s", "case, collation, readonly")));
+			max_long = ((Value *) (def->arg))->val.str;
+			errno = 0;
+			max_long_val = strtoul(max_long, &endptr, 0);
+			if (max_long[0] == '\0' || *endptr != '\0' || errno != 0 || max_long_val < 1 || max_long_val > 1073741823ul)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are integers between 1 and 1073741823.")));
+		}
+		else if (strcmp(def->defname, OPT_SAMPLE) == 0)
+		{
+			char *endptr;
+			double sample_percent_val;
+
+			sample_percent = ((Value *) (def->arg))->val.str;
+			errno = 0;
+			sample_percent_val = strtod(sample_percent, &endptr);
+			if (sample_percent[0] == '\0' || *endptr != '\0' || errno != 0 || sample_percent_val < 0.000001 || sample_percent_val > 100.0)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are numbers between 0.000001 and 100.")));
+		}
+		else if (strcmp(def->defname, OPT_PREFETCH) == 0)
+		{
+			char *endptr;
+			long prefetch_val;
+
+			prefetch = ((Value *) (def->arg))->val.str;
+			errno = 0;
+			prefetch_val = strtol(prefetch, &endptr, 0);
+			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 0 || prefetch_val > 10240 )
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are integers between 0 and 10240.")));
+		}
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+					errmsg("invalid option \"%s\"", def->defname),
+					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s",
+						"case, collation", OPT_READONLY, OPT_DBLINK,
+						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH)));
 	}
 
 	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
@@ -2349,6 +2396,12 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				appendStringInfo(&buf, ", dblink '%s'", dblink);
 			if (readonly)
 				appendStringInfo(&buf, ", readonly 'true'");
+			if (max_long)
+				appendStringInfo(&buf, ", max_long '%s'", max_long);
+			if (sample_percent)
+				appendStringInfo(&buf, ", sample_percent '%s'", sample_percent);
+			if (prefetch)
+				appendStringInfo(&buf, ", prefetch '%s'", prefetch);
 			appendStringInfo(&buf, ")");
 
 			result = lappend(result, pstrdup(buf.data));
