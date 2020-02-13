@@ -7,6 +7,3 @@ Help is welcome!
 
 - Add an (unsafe!) option to use READ COMMITTED instead of SERIALIZABLE
   for Oracle transactions.  See issue #250.
-
-- Add options "max_long", "sample_percent" and "prefetch" to
-  IMPORT FOREIGN SCHEMA.  See issue #350.
