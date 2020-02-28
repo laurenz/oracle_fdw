@@ -23,6 +23,9 @@ Version 2.3.0
   - Fix "Internal oracle_fdw error: encountered unknown node type 144"
     This can happen in plans involving tables with identity columns.
     Reported by Yang Lin.
+  - Don't throw an error if DML statements modify no rows.
+    This might be caused by a trigger on the Oracle side.
+    Reported by Andrey Marinchuk.
 
 Version 2.2.0, released 2019-10-10
   Enhancements:

@@ -2001,7 +2001,6 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 
 	elog(DEBUG3, "oracle_fdw: execute foreign table insert on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
-	++fdw_state->rowcount;
 	dml_in_transaction = true;
 
 	MemoryContextReset(fdw_state->temp_cxt);
@@ -2013,7 +2012,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	/* execute the INSERT statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 
-	if (rows != 1)
+	if (rows > 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
 				errmsg("INSERT on Oracle table added %d rows instead of one in iteration %lu", rows, fdw_state->rowcount)));
@@ -2023,11 +2022,16 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	/* empty the result slot */
 	ExecClearTuple(slot);
 
-	/* convert result for RETURNING to arrays of values and null indicators */
-	convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+	if (rows == 1)
+	{
+		++fdw_state->rowcount;
 
-	/* store the virtual tuple */
-	ExecStoreVirtualTuple(slot);
+		/* convert result for RETURNING to arrays of values and null indicators */
+		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+
+		/* store the virtual tuple */
+		ExecStoreVirtualTuple(slot);
+	}
 
 	return slot;
 }
@@ -2046,7 +2050,6 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 
 	elog(DEBUG3, "oracle_fdw: execute foreign table update on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
-	++fdw_state->rowcount;
 	dml_in_transaction = true;
 
 	MemoryContextReset(fdw_state->temp_cxt);
@@ -2058,7 +2061,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	/* execute the UPDATE statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 
-	if (rows != 1)
+	if (rows > 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
 				errmsg("UPDATE on Oracle table changed %d rows instead of one in iteration %lu", rows, fdw_state->rowcount),
@@ -2069,11 +2072,16 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	/* empty the result slot */
 	ExecClearTuple(slot);
 
-	/* convert result for RETURNING to arrays of values and null indicators */
-	convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+	if (rows == 1)
+	{
+		++fdw_state->rowcount;
 
-	/* store the virtual tuple */
-	ExecStoreVirtualTuple(slot);
+		/* convert result for RETURNING to arrays of values and null indicators */
+		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+
+		/* store the virtual tuple */
+		ExecStoreVirtualTuple(slot);
+	}
 
 	return slot;
 }
@@ -2092,7 +2100,6 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 
 	elog(DEBUG3, "oracle_fdw: execute foreign table delete on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
-	++fdw_state->rowcount;
 	dml_in_transaction = true;
 
 	MemoryContextReset(fdw_state->temp_cxt);
@@ -2104,7 +2111,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	/* execute the DELETE statement and store RETURNING values in oraTable's columns */
 	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
 
-	if (rows != 1)
+	if (rows > 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
 				errmsg("DELETE on Oracle table removed %d rows instead of one in iteration %lu", rows, fdw_state->rowcount),
@@ -2115,11 +2122,16 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	/* empty the result slot */
 	ExecClearTuple(slot);
 
-	/* convert result for RETURNING to arrays of values and null indicators */
-	convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+	if (rows == 1)
+	{
+		++fdw_state->rowcount;
 
-	/* store the virtual tuple */
-	ExecStoreVirtualTuple(slot);
+		/* convert result for RETURNING to arrays of values and null indicators */
+		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+
+		/* store the virtual tuple */
+		ExecStoreVirtualTuple(slot);
+	}
 
 	return slot;
 }
