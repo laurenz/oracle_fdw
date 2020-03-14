@@ -163,8 +163,7 @@ Foreign server options
 - **isolation_level** (optional, defaults to "serializable")
 
   Set the Transaction Isolation Level when connecting to the Oracle database.  
-  The value can be: serializable, read_committed, read_write(not commonly used)
-  and read_only.
+  The value can be: serializable, read_committed and read_only.
 
 User mapping options
 --------------------

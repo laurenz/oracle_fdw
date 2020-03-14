@@ -65,6 +65,11 @@ struct oracleSession
 #endif
 typedef struct oracleSession oracleSession;
 
+/* Oracle transaction isolation flags */
+#define ORA_TRANS_NEW          0x00000001
+#define ORA_TRANS_READONLY     0x00000100
+#define ORA_TRANS_SERIALIZABLE 0x00000400
+
 /* types for the Oracle table description */
 typedef enum
 {
@@ -187,7 +192,7 @@ typedef struct
 /*
  * functions defined in oracle_utils.c
  */
-extern oracleSession *oracleGetSession(const char *connectstring, char *isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel);
+extern oracleSession *oracleGetSession(const char *connectstring, unsigned int isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel);
 extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
