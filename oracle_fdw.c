@@ -179,6 +179,7 @@ struct OracleFdwOption
 
 #define OPT_NLS_LANG "nls_lang"
 #define OPT_DBSERVER "dbserver"
+#define OPT_ISOLATION_LEVEL "isolation_level"
 #define OPT_USER "user"
 #define OPT_PASSWORD "password"
 #define OPT_DBLINK "dblink"
@@ -191,6 +192,7 @@ struct OracleFdwOption
 #define OPT_SAMPLE "sample_percent"
 #define OPT_PREFETCH "prefetch"
 
+#define DEFAULT_ISOLATION_LEVEL "serializable"
 #define DEFAULT_MAX_LONG 32767
 #define DEFAULT_PREFETCH 200
 
@@ -205,6 +207,7 @@ typedef enum { CASE_KEEP, CASE_LOWER, CASE_SMART } fold_t;
 static struct OracleFdwOption valid_options[] = {
 	{OPT_NLS_LANG, ForeignDataWrapperRelationId, false},
 	{OPT_DBSERVER, ForeignServerRelationId, true},
+	{OPT_ISOLATION_LEVEL, ForeignServerRelationId, false},
 	{OPT_USER, UserMappingRelationId, true},
 	{OPT_PASSWORD, UserMappingRelationId, true},
 	{OPT_DBLINK, ForeignTableRelationId, false},
@@ -242,6 +245,7 @@ static regproc *output_funcs;
  */
 struct OracleFdwState {
 	char *dbserver;                /* Oracle connect string */
+	char *isolation_level;         /* Transaction Isolation Level */
 	char *user;                    /* Oracle username */
 	char *password;                /* Oracle password */
 	char *nls_lang;                /* Oracle locale information */
@@ -1405,6 +1409,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 	/* connect to Oracle database */
 	fdw_state->session = oracleGetSession(
 			fdw_state->dbserver,
+			fdw_state->isolation_level,
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
@@ -1840,6 +1845,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	/* connect to Oracle database */
 	fdw_state->session = oracleGetSession(
 			fdw_state->dbserver,
+			fdw_state->isolation_level,
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
@@ -1912,6 +1918,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 
 	fdw_state->session = oracleGetSession(
 			fdw_state->dbserver,
+			fdw_state->isolation_level,
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
@@ -2204,7 +2211,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL, *isolation_level = NULL;
 	char *dblink = NULL, *max_long = NULL, *sample_percent = NULL, *prefetch = NULL;
 	oraType type;
 	int charlen, typeprec, typescale, nullable, key, rc;
@@ -2233,6 +2240,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			nls_lang = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
 			dbserver = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
+			isolation_level = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_USER) == 0)
 			user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
@@ -2375,6 +2384,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	/* connect to Oracle database */
 	session = oracleGetSession(
 		dbserver,
+		isolation_level,
 		user,
 		password,
 		nls_lang,
@@ -2557,6 +2567,7 @@ struct OracleFdwState
 	char *pgtablename = get_rel_name(foreigntableid);
 	List *options;
 	ListCell *cell;
+	char *isolation_level = NULL;
 	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
 	long max_long;
 
@@ -2572,6 +2583,8 @@ struct OracleFdwState
 			fdwState->nls_lang = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
 			fdwState->dbserver = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
+			isolation_level = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_USER) == 0)
 			fdwState->user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
@@ -2589,6 +2602,12 @@ struct OracleFdwState
 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
 			fetch = ((Value *) (def->arg))->val.str;
 	}
+
+    /* set isolation_level (or use default) */
+	if (isolation_level == NULL)
+		fdwState->isolation_level = DEFAULT_ISOLATION_LEVEL;
+	else
+		fdwState->isolation_level = isolation_level;
 
 	/* convert "max_long" option to number or use default */
 	if (maxlong == NULL)
@@ -2623,6 +2642,7 @@ struct OracleFdwState
 	/* connect to Oracle database */
 	fdwState->session = oracleGetSession(
 		fdwState->dbserver,
+		fdwState->isolation_level,
 		fdwState->user,
 		fdwState->password,
 		fdwState->nls_lang,
@@ -3220,6 +3240,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 
 	/* copy outerrel's infomation to fdwstate */
 	fdwState->dbserver = fdwState_o->dbserver;
+	fdwState->isolation_level = fdwState_o->isolation_level;
 	fdwState->user     = fdwState_o->user;
 	fdwState->password = fdwState_o->password;
 	fdwState->nls_lang = fdwState_o->nls_lang;
@@ -5166,7 +5187,7 @@ oracleConnectServer(Name srvname)
 	ForeignDataWrapper *wrapper;
 	List *options;
 	ListCell *cell;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL, *isolation_level = NULL;
 
 	/* look up foreign server with this name */
 	rel = table_open(ForeignServerRelationId, AccessShareLock);
@@ -5202,6 +5223,8 @@ oracleConnectServer(Name srvname)
 			nls_lang = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
 			dbserver = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
+			isolation_level = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_USER) == 0)
 			user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
@@ -5214,6 +5237,7 @@ oracleConnectServer(Name srvname)
 	/* connect to Oracle database */
 	return oracleGetSession(
 		dbserver,
+		isolation_level,
 		user,
 		password,
 		nls_lang,
@@ -5241,6 +5265,8 @@ List
 
 	/* dbserver */
 	result = lappend(result, serializeString(fdwState->dbserver));
+	/* isolation_level */
+	result = lappend(result, serializeString(fdwState->isolation_level));
 	/* user name */
 	result = lappend(result, serializeString(fdwState->user));
 	/* password */
@@ -5357,6 +5383,10 @@ struct OracleFdwState
 
 	/* dbserver */
 	state->dbserver = deserializeString(lfirst(cell));
+	cell = list_next(list, cell);
+
+	/* isolation_level */
+	state->isolation_level = deserializeString(lfirst(cell));
 	cell = list_next(list, cell);
 
 	/* user */
@@ -5659,6 +5689,7 @@ struct OracleFdwState
 	struct OracleFdwState *copy = palloc(sizeof(struct OracleFdwState));
 
 	copy->dbserver = pstrdup(orig->dbserver);
+	copy->isolation_level = pstrdup(orig->isolation_level);
 	copy->user = pstrdup(orig->user);
 	copy->password = pstrdup(orig->password);
 	copy->nls_lang = pstrdup(orig->nls_lang);

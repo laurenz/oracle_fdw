@@ -86,7 +86,7 @@ static void setNullGeometry(oracleSession *session, ora_geometry *geom);
  * 		"curlevel" is the current PostgreSQL transaction level.
  */
 oracleSession
-*oracleGetSession(const char *connectstring, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel)
+*oracleGetSession(const char *connectstring, char *isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel)
 {
 	OCIEnv *envhp = NULL;
 	OCIError *errhp = NULL;
@@ -101,6 +101,20 @@ oracleSession
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
 	int retry = 1;
+	ub4 OCI_TRANS_CODE;
+	char msg[100];
+
+	/* convert isolation_level to ORACLE OCI definition */
+	if (isolation_level == NULL || strcmp(isolation_level, "serializable") == 0)
+		OCI_TRANS_CODE = OCI_TRANS_SERIALIZABLE;
+    else if (strcmp(isolation_level, "read_committed") == 0)
+    	OCI_TRANS_CODE = OCI_TRANS_NEW;
+    else if (strcmp(isolation_level, "read_write") == 0)
+        OCI_TRANS_CODE = OCI_TRANS_READWRITE;
+    else if (strcmp(isolation_level, "read_only") == 0)
+    	OCI_TRANS_CODE = OCI_TRANS_READONLY;
+    else
+    	OCI_TRANS_CODE = OCI_TRANS_SERIALIZABLE;
 
 	/* it's easier to deal with empty strings */
 	if (!connectstring)
@@ -481,11 +495,12 @@ oracleSession
 
 	if (connp->xact_level <= 0)
 	{
-		oracleDebug2("oracle_fdw: begin serializable remote transaction");
+		snprintf(msg, 99, "oracle_fdw: begin %s(%d) remote transaction", isolation_level, OCI_TRANS_CODE);
+	    oracleDebug2(msg);
 
-		/* start a read-only or "serializable" (= repeatable read) transaction */
+		/* start a transaction */
 		if (checkerr(
-			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_SERIALIZABLE),
+			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_CODE),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			/*

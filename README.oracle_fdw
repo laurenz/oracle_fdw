@@ -160,6 +160,12 @@ Foreign server options
   Oracle client is configured accordingly.  
   Set this to an empty string for local ("BEQUEATH") connections.
 
+- **isolation_level** (optional, defaults to "serializable")
+
+  Set the Transaction Isolation Level when connecting to the Oracle database.  
+  The value can be: serializable, read_committed, read_write(not commonly used)
+  and read_only.
+
 User mapping options
 --------------------
 

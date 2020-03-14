@@ -5,5 +5,3 @@ Help is welcome!
   established.  Otherwise, an ill-guided Oracle logon trigger could mess up
   our NLS settings.
 
-- Add an (unsafe!) option to use READ COMMITTED instead of SERIALIZABLE
-  for Oracle transactions.  See issue #250.
