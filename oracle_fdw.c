@@ -406,13 +406,14 @@ static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwStat
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
+static unsigned int getIsolationLevel(const char *isolation_level);
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
 #define ADD_REL_QUALIFIER(buf, varno)   \
 		appendStringInfo((buf), "%s%d.", REL_ALIAS_PREFIX, (varno))
 
-static unsigned int getIsolationLevel(const char *isolation_level);
+
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
