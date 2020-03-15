@@ -245,7 +245,7 @@ static regproc *output_funcs;
  */
 struct OracleFdwState {
 	char *dbserver;                /* Oracle connect string */
-	unsigned int isolation_level;  /* Transaction Isolation Level */
+	oraIsoLevel isolation_level;   /* Transaction Isolation Level */
 	char *user;                    /* Oracle username */
 	char *password;                /* Oracle password */
 	char *nls_lang;                /* Oracle locale information */
@@ -406,14 +406,12 @@ static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwStat
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
-static unsigned int getIsolationLevel(const char *isolation_level);
+static oraIsoLevel getIsolationLevel(const char *isolation_level);
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
 #define ADD_REL_QUALIFIER(buf, varno)   \
 		appendStringInfo((buf), "%s%d.", REL_ALIAS_PREFIX, (varno))
-
-
 
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
@@ -520,14 +518,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 		/* check valid values for "isolation_level" */
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-		{
-			char *val = ((Value *)(def->arg))->val.str;
-			if(getIsolationLevel(val) == -1)
-				ereport(ERROR,
-						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are: serializable/read_committed/read_only")));
-		}
+			(void)getIsolationLevel(((Value *)(def->arg))->val.str);
 
 		/* check valid values for "readonly" and "key" */
 		if (strcmp(def->defname, OPT_READONLY) == 0
@@ -2225,7 +2216,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL, *isolationlevel = NULL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
 	char *dblink = NULL, *max_long = NULL, *sample_percent = NULL, *prefetch = NULL;
 	oraType type;
 	int charlen, typeprec, typescale, nullable, key, rc;
@@ -2236,7 +2227,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	StringInfoData buf;
 	bool readonly = false, firstcol = true;
 	int collation = DEFAULT_COLLATION_OID;
-	unsigned int isolation_level_val = DEFAULT_ISOLATION_LEVEL;
+	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -2256,20 +2247,11 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
 			dbserver = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-			isolationlevel = ((Value *) (def->arg))->val.str;
+			isolation_level_val = getIsolationLevel(((Value *) (def->arg))->val.str);
 		if (strcmp(def->defname, OPT_USER) == 0)
 			user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = ((Value *) (def->arg))->val.str;
-	}
-	if (isolationlevel != NULL)
-	{
-		isolation_level_val = getIsolationLevel(isolationlevel);
-		if (isolation_level_val == -1)
-			ereport(ERROR,
-					(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-					errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
-					errhint("Valid values in this context are: serializable/read_committed/read_only")));
 	}
 
 	/* process the options of the IMPORT FOREIGN SCHEMA command */
@@ -2631,14 +2613,7 @@ struct OracleFdwState
 	if (isolationlevel == NULL)
 		fdwState->isolation_level = DEFAULT_ISOLATION_LEVEL;
 	else
-	{
 		fdwState->isolation_level = getIsolationLevel(isolationlevel);
-		if (fdwState->isolation_level == -1)
-			ereport(ERROR,
-					(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-					errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
-					errhint("Valid values in this context are: serializable/read_committed/read_only")));
-	}
 
 	/* convert "max_long" option to number or use default */
 	if (maxlong == NULL)
@@ -5218,8 +5193,8 @@ oracleConnectServer(Name srvname)
 	ForeignDataWrapper *wrapper;
 	List *options;
 	ListCell *cell;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL, *isolationlevel = NULL;
-	unsigned int isolation_level_val = DEFAULT_ISOLATION_LEVEL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	oraIsoLevel isolation_level = DEFAULT_ISOLATION_LEVEL;
 
 	/* look up foreign server with this name */
 	rel = table_open(ForeignServerRelationId, AccessShareLock);
@@ -5256,21 +5231,11 @@ oracleConnectServer(Name srvname)
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
 			dbserver = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-			isolationlevel = ((Value *) (def->arg))->val.str;
+		isolation_level = getIsolationLevel(((Value *) (def->arg))->val.str);
 		if (strcmp(def->defname, OPT_USER) == 0)
 			user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = ((Value *) (def->arg))->val.str;
-	}
-
-	if (isolationlevel != NULL)
-	{
-		isolation_level_val = getIsolationLevel(isolationlevel);
-		if (isolation_level_val == -1)
-			ereport(ERROR,
-					(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-					errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
-					errhint("Valid values in this context are: serializable/read_committed/read_only")));
 	}
 
 	/* guess a good NLS_LANG environment setting */
@@ -5279,7 +5244,7 @@ oracleConnectServer(Name srvname)
 	/* connect to Oracle database */
 	return oracleGetSession(
 		dbserver,
-		isolation_level_val,
+		isolation_level,
 		user,
 		password,
 		nls_lang,
@@ -5428,7 +5393,7 @@ struct OracleFdwState
 	cell = list_next(list, cell);
 
 	/* isolation_level */
-	state->isolation_level = (unsigned int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+	state->isolation_level = (oraIsoLevel)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 	cell = list_next(list, cell);
 
 	/* user */
@@ -6693,22 +6658,28 @@ fold_case(char *name, fold_t foldcase, int collation)
 
 /*
  * getIsolationLevel
- *		convert string isolation_level to int.
- *      return -1 means invalid isolation level value
+ *		Converts Oracle isolation level string to oraIsoLevel.
+ *      Throws an error for invalid values.
  */
-unsigned int 
+unsigned int
 getIsolationLevel(const char *isolation_level)
 {
-	unsigned int val = -1;
-	if (isolation_level != NULL)
-	{
-		if (strcmp(isolation_level, "serializable") == 0)
-			val = ORA_TRANS_SERIALIZABLE;
-		else if (strcmp(isolation_level, "read_committed") == 0)
-			val = ORA_TRANS_READ_COMMITTED;
-		else if (strcmp(isolation_level, "read_only") == 0)
-			val = ORA_TRANS_READ_ONLY;
-	}
+	oraIsoLevel val;
+
+	Assert(isolation_level);
+
+	if (strcmp(isolation_level, "serializable") == 0)
+		val = ORA_TRANS_SERIALIZABLE;
+	else if (strcmp(isolation_level, "read_committed") == 0)
+		val = ORA_TRANS_READ_COMMITTED;
+	else if (strcmp(isolation_level, "read_only") == 0)
+		val = ORA_TRANS_READ_ONLY;
+	else
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+				errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
+				errhint("Valid values in this context are: serializable/read_committed/read_only")));
+
 	return val;
 }
 

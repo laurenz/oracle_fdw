@@ -65,11 +65,6 @@ struct oracleSession
 #endif
 typedef struct oracleSession oracleSession;
 
-/* Oracle transaction isolation flags */
-#define ORA_TRANS_READ_COMMITTED 0x00000001
-#define ORA_TRANS_READ_ONLY      0x00000100
-#define ORA_TRANS_SERIALIZABLE   0x00000400
-
 /* types for the Oracle table description */
 typedef enum
 {
@@ -189,10 +184,18 @@ typedef struct
 	double *coord;   /* unpacked SDO_ORDINATES entries */
 } ora_geometry;
 
+/* Oracle transaction isolation levels */
+typedef enum
+{
+	ORA_TRANS_READ_COMMITTED,
+	ORA_TRANS_READ_ONLY,
+	ORA_TRANS_SERIALIZABLE
+} oraIsoLevel;
+
 /*
  * functions defined in oracle_utils.c
  */
-extern oracleSession *oracleGetSession(const char *connectstring, unsigned int isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel);
+extern oracleSession *oracleGetSession(const char *connectstring, oraIsoLevel isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel);
 extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);

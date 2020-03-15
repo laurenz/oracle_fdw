@@ -15,6 +15,9 @@ Version 2.3.0
   - New IMPORT FOREIGN SCHEMA options "max_long", "sample_percent" and
     "prefetch".  These set the corresponding options on imported tables.
     Suggested by "ferfebles".
+  - Add support for isolation levels other than SERIALIZABLE.
+    This is mostly because Oracle's implementation of SERIALIZABLE is si buggy.
+    Patch by Jet C.X. Zhang.
 
   Bugfixes:
   - Fix bad results with uncorrelated subqueries.

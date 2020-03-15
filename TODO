@@ -4,4 +4,3 @@ Help is welcome!
 - Set parameters like NLS_DATE_FORMAT *after* the Oracle connection has been
   established.  Otherwise, an ill-guided Oracle logon trigger could mess up
   our NLS settings.
-

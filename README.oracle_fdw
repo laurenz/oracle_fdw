@@ -160,10 +160,25 @@ Foreign server options
   Oracle client is configured accordingly.  
   Set this to an empty string for local ("BEQUEATH") connections.
 
-- **isolation_level** (optional, defaults to "serializable")
+- **isolation_level** (optional, defaults to `serializable`)
 
-  Set the Transaction Isolation Level when connecting to the Oracle database.  
-  The value can be: serializable, read_committed and read_only.
+  The transaction isolation level to use at the Oracle database.  
+  The value can be `serializable`, `read_committed` or `read_only`.
+
+  Note that the Oracle table can be queried more than once during a single
+  PostgreSQL statement (for example, during a nested loop join).  To make
+  sure that no inconsistencies caused by race conditions with concurrent
+  transactions can occur, the transaction isolation level must guarantee
+  read stability.  
+  This is only guaranteed with Oracle's SERIALIZABLE or READ ONLY isolation
+  levels.
+
+  Unfortunately Oracle's implementation of SERIALIZABLE is rather bad and
+  causes serialization errors (ORA-08177) in unexpected situations, like
+  inserts into the table.  
+  Using READ COMMITTED transactions works around this problem, but **there
+  is a risk of inconsistencies**.  If you want to use it, check your
+  execution plans if the foreign scan could be executed more than once.
 
 User mapping options
 --------------------
@@ -448,7 +463,7 @@ Transactions are forwarded to Oracle, so BEGIN, COMMIT, ROLLBACK and
 SAVEPOINT work as expected.  Prepared statements involving Oracle are
 not supported.  See the [Internals](#7-internals) section for details.
 
-Since oracle_fdw uses serialized transactions, it is possible that
+Since oracle_fdw uses serialized transactions by default, it is possible that
 data modifying statements lead to a serialization failure:
 
     ORA-08177: can't serialize access for this transaction
@@ -457,6 +472,9 @@ This can happen if concurrent transactions modify the table and gets more
 likely in long running transactions.  Such errors can be identified by their
 SQLSTATE (40001). An application using oracle_fdw should retry transactions
 that fail with this error.
+
+It is possible to use a different transaction isolation level, see
+[Foreign server options](foreign-server-options) for a discussion.
 
 EXPLAIN
 -------

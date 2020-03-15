@@ -86,7 +86,7 @@ static void setNullGeometry(oracleSession *session, ora_geometry *geom);
  * 		"curlevel" is the current PostgreSQL transaction level.
  */
 oracleSession
-*oracleGetSession(const char *connectstring, unsigned int isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel)
+*oracleGetSession(const char *connectstring, oraIsoLevel isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel)
 {
 	OCIEnv *envhp = NULL;
 	OCIError *errhp = NULL;
@@ -101,24 +101,19 @@ oracleSession
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
 	int retry = 1;
-	ub4 OCI_TRANS_CODE = -1;
-	char msg[100];
+	ub4 isolevel;
 
-	/* 
-	 * Convert isolation_level to ORACLE OCI definition
-	 * Although we define the same value as Oracle defines, 
-	 * but we cannot assure the Oracle's definition will never changed.  
-	 */
+	/* convert isolation_level to Oracle OCI value */
 	switch(isolation_level)
 	{
 		case ORA_TRANS_SERIALIZABLE:
-			OCI_TRANS_CODE = OCI_TRANS_SERIALIZABLE;
+			isolevel = OCI_TRANS_SERIALIZABLE;
 			break;
 		case ORA_TRANS_READ_COMMITTED:
-			OCI_TRANS_CODE = OCI_TRANS_NEW;
+			isolevel = OCI_TRANS_NEW;
 			break;
 		case ORA_TRANS_READ_ONLY:
-			OCI_TRANS_CODE = OCI_TRANS_READONLY;
+			isolevel = OCI_TRANS_READONLY;
 			break;
 	}
 
@@ -501,12 +496,11 @@ oracleSession
 
 	if (connp->xact_level <= 0)
 	{
-		snprintf(msg, 99, "oracle_fdw: begin (%d) remote transaction", OCI_TRANS_CODE);
-	    oracleDebug2(msg);
+		oracleDebug2("oracle_fdw: begin remote transaction");
 
 		/* start a transaction */
 		if (checkerr(
-			OCITransStart(svchp, errhp, (uword)0, OCI_TRANS_CODE),
+			OCITransStart(svchp, errhp, (uword)0, isolevel),
 			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			/*
