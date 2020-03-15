@@ -517,6 +517,17 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 					errhint("Valid options in this context are: %s", buf.data)));
 		}
 
+		/* check valid values for "isolation_level" */
+		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
+		{
+			char *val = ((Value *)(def->arg))->val.str;
+			if(getIsolationLevel(val) == -1)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are: serializable/read_committed/read_only")));
+		}
+
 		/* check valid values for "readonly" and "key" */
 		if (strcmp(def->defname, OPT_READONLY) == 0
 #ifndef OLD_FDW_API
@@ -2250,9 +2261,15 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = ((Value *) (def->arg))->val.str;
 	}
-
 	if (isolationlevel != NULL)
+	{
 		isolation_level_val = getIsolationLevel(isolationlevel);
+		if (isolation_level_val == -1)
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+					errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
+					errhint("Valid values in this context are: serializable/read_committed/read_only")));
+	}
 
 	/* process the options of the IMPORT FOREIGN SCHEMA command */
 	foreach(cell, stmt->options)
@@ -2613,7 +2630,14 @@ struct OracleFdwState
 	if (isolationlevel == NULL)
 		fdwState->isolation_level = DEFAULT_ISOLATION_LEVEL;
 	else
+	{
 		fdwState->isolation_level = getIsolationLevel(isolationlevel);
+		if (fdwState->isolation_level == -1)
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+					errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
+					errhint("Valid values in this context are: serializable/read_committed/read_only")));
+	}
 
 	/* convert "max_long" option to number or use default */
 	if (maxlong == NULL)
@@ -5239,7 +5263,14 @@ oracleConnectServer(Name srvname)
 	}
 
 	if (isolationlevel != NULL)
+	{
 		isolation_level_val = getIsolationLevel(isolationlevel);
+		if (isolation_level_val == -1)
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+					errmsg("invalid value for option \"%s\"", OPT_ISOLATION_LEVEL),
+					errhint("Valid values in this context are: serializable/read_committed/read_only")));
+	}
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
@@ -6660,6 +6691,27 @@ fold_case(char *name, fold_t foldcase, int collation)
 #endif  /* IMPORT_API */
 
 /*
+ * getIsolationLevel
+ *		convert string isolation_level to int.
+ *      return -1 means invalid isolation level value
+ */
+unsigned int 
+getIsolationLevel(const char *isolation_level)
+{
+	unsigned int val = -1;
+	if (isolation_level != NULL)
+	{
+		if (strcmp(isolation_level, "serializable") == 0)
+			val = ORA_TRANS_SERIALIZABLE;
+		else if (strcmp(isolation_level, "read_committed") == 0)
+			val = ORA_TRANS_READ_COMMITTED;
+		else if (strcmp(isolation_level, "read_only") == 0)
+			val = ORA_TRANS_READ_ONLY;
+	}
+	return val;
+}
+
+/*
  * oracleGetShareFileName
  * 		Returns the (palloc'ed) absolute path of a file in the "share" directory.
  */
@@ -6899,24 +6951,4 @@ initializePostGIS()
 		elog(DEBUG1, "oracle_fdw: PostGIS is installed, GEOMETRYOID = %d", GEOMETRYOID);
 	}
 	ReleaseSysCacheList(catlist);
-}
-
-/*
- * getIsolationLevel
- *		convert string isolation_level to int.
- */
-unsigned int 
-getIsolationLevel(const char *isolation_level)
-{
-	unsigned int val = 0;
-	if (isolation_level != NULL)
-	{
-		if (strcmp(isolation_level, "serializable") == 0)
-			val = ORA_TRANS_SERIALIZABLE;
-		else if (strcmp(isolation_level, "read_committed") == 0)
-			val = ORA_TRANS_NEW;
-		else if (strcmp(isolation_level, "read_only") == 0)
-			val = ORA_TRANS_READONLY;
-	}
-	return val;
 }

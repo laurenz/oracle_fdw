@@ -467,6 +467,46 @@ INSERT INTO shorty3 (id, c) VALUES (1002, 'ro');
 
 SELECT id, c FROM shorty3 WHERE id = 1002;
 
+-- testcase for OPTION isolation_level =
+CREATE SERVER oracle4 FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level);
+
+CREATE SERVER oracle4 FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level '');
+
+-- testcase for OPTION isolation_level = unknow
+CREATE SERVER oracle4 FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'unknow');
+
+CREATE USER MAPPING FOR PUBLIC SERVER oracle4 OPTIONS (user 'SCOTT', password 'tiger');
+
+CREATE FOREIGN TABLE shorty4 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   character(10)
+) SERVER oracle4 OPTIONS (table 'TYPETEST1');
+
+SELECT id, c FROM shorty4 WHERE id IN (1000, 1001);
+
+CREATE SERVER oracle4 FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
+
+CREATE USER MAPPING FOR PUBLIC SERVER oracle4 OPTIONS (user 'SCOTT', password 'tiger');
+
+CREATE FOREIGN TABLE shorty4 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   c   character(10)
+) SERVER oracle4 OPTIONS (table 'TYPETEST1');
+
+SELECT id, c FROM shorty4 WHERE id IN (1000, 1001);
+
+ALTER SERVER oracle4 OPTIONS (isolation_level 'read_only');
+
+SELECT id, c FROM shorty4 WHERE id IN (1000, 1001);
+
+INSERT INTO shorty4 (id, c) VALUES (1002, 'ro');
+
+ALTER SERVER oracle4 OPTIONS (SET isolation_level 'unknow');
+
+SELECT id, c FROM shorty4 WHERE id IN (1000, 1001);
+
+INSERT INTO shorty4 (id, c) VALUES (1002, 'ro');
+
 DELETE FROM shorty1 WHERE id = 1000;
 
 DELETE FROM shorty2 WHERE id = 1001;

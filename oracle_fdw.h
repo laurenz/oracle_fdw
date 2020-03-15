@@ -66,9 +66,9 @@ struct oracleSession
 typedef struct oracleSession oracleSession;
 
 /* Oracle transaction isolation flags */
-#define ORA_TRANS_NEW          0x00000001
-#define ORA_TRANS_READONLY     0x00000100
-#define ORA_TRANS_SERIALIZABLE 0x00000400
+#define ORA_TRANS_READ_COMMITTED 0x00000001
+#define ORA_TRANS_READ_ONLY      0x00000100
+#define ORA_TRANS_SERIALIZABLE   0x00000400
 
 /* types for the Oracle table description */
 typedef enum

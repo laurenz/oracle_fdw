@@ -101,7 +101,7 @@ oracleSession
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
 	int retry = 1;
-	ub4 OCI_TRANS_CODE;
+	ub4 OCI_TRANS_CODE = -1;
 	char msg[100];
 
 	/* 
@@ -109,14 +109,18 @@ oracleSession
 	 * Although we define the same value as Oracle defines, 
 	 * but we cannot assure the Oracle's definition will never changed.  
 	 */
-	if (isolation_level == ORA_TRANS_SERIALIZABLE)
-		OCI_TRANS_CODE = OCI_TRANS_SERIALIZABLE;
-    else if (isolation_level == ORA_TRANS_NEW)
-    	OCI_TRANS_CODE = OCI_TRANS_NEW;
-    else if (isolation_level == ORA_TRANS_READONLY)
-        OCI_TRANS_CODE = OCI_TRANS_READONLY;
-    else
-    	OCI_TRANS_CODE = OCI_TRANS_SERIALIZABLE;
+	switch(isolation_level)
+	{
+		case ORA_TRANS_SERIALIZABLE:
+			OCI_TRANS_CODE = OCI_TRANS_SERIALIZABLE;
+			break;
+		case ORA_TRANS_READ_COMMITTED:
+			OCI_TRANS_CODE = OCI_TRANS_NEW;
+			break;
+		case ORA_TRANS_READ_ONLY:
+			OCI_TRANS_CODE = OCI_TRANS_READONLY;
+			break;
+	}
 
 	/* it's easier to deal with empty strings */
 	if (!connectstring)
