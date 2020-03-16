@@ -474,7 +474,7 @@ SQLSTATE (40001). An application using oracle_fdw should retry transactions
 that fail with this error.
 
 It is possible to use a different transaction isolation level, see
-[Foreign server options](foreign-server-options) for a discussion.
+[Foreign server options](#foreign-server-options) for a discussion.
 
 EXPLAIN
 -------
