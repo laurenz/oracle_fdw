@@ -8,7 +8,7 @@ SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
-CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '');
+CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed');
 
 CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 
@@ -134,6 +134,14 @@ CREATE FOREIGN TABLE longy (
  * Empty the table and INSERT some samples.
  */
 
+-- will fail with a read-only transaction
+ALTER SERVER oracle OPTIONS (SET isolation_level 'read_only');
+SELECT oracle_close_connections();
+DELETE FROM typetest1;
+
+-- use the default SERIALIZABLE isolation level from now on
+ALTER SERVER oracle OPTIONS (DROP isolation_level);
+SELECT oracle_close_connections();
 DELETE FROM typetest1;
 
 INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
