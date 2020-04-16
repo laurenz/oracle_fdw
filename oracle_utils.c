@@ -101,7 +101,7 @@ oracleSession
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
 	int retry = 1;
-	ub4 isolevel;
+	ub4 isolevel = OCI_TRANS_SERIALIZABLE;
 
 	/* convert isolation_level to Oracle OCI value */
 	switch(isolation_level)
