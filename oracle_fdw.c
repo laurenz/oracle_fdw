@@ -5792,6 +5792,7 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
 					errmsg("cannot update or insert BFILE column in Oracle foreign table")));
+			break;
 		case ORA_TYPE_GEOMETRY:
 			param->bindType = BIND_GEOMETRY;
 			break;

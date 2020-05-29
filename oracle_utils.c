@@ -1189,7 +1189,8 @@ struct oraTable
 					reply->cols[i-1]->val_size = max_long + 4;
 					break;
 				}
-				/* for other types, fall through */
+				else
+					/* fall through */
 			default:
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
 				reply->cols[i-1]->val_size = 0;

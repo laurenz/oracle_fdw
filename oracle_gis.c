@@ -645,6 +645,7 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 			return POLYGONTYPE;
 		case 4:
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type COLLECTION not supported");
+			break;
 		case 5:
 			return MULTIPOINTTYPE;
 		case 6:
@@ -653,8 +654,10 @@ ewkbType(oracleSession *session, ora_geometry *geom)
 			return MULTIPOLYGONTYPE;
 		case 8:
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type SOLID not supported");
+			break;
 		case 9:
 			oracleError(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: geometry type MULTISOLID not supported");
+			break;
 		default:
 			oracleError_i(FDW_ERROR, "error converting SDO_GEOMETRY to geometry: unknown geometry type %u", gtype);
 	}
@@ -691,7 +694,7 @@ setType(oracleSession *session, ora_geometry *geom, const char *data)
 		case MULTIPOLYGONTYPE:
 			gtype += 7;
 			break;
-#define UNSUPPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geometry type "#T" not supported");
+#define UNSUPPORTED_TYPE( T ) case T ## TYPE: oracleError(FDW_ERROR, "error converting geometry to SDO_GEOMETRY: geometry type "#T" not supported"); break;
 		UNSUPPORTED_TYPE(COLLECTION)
 		UNSUPPORTED_TYPE(CIRCSTRING)
 		UNSUPPORTED_TYPE(COMPOUND)
