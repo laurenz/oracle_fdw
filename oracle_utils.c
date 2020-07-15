@@ -1399,7 +1399,7 @@ setOracleEnvironment(char *nls_lang)
 
 /*
  * oracleQueryPlan
- * 		This is a utility function called by oracleEstimate and oracleExplain.
+ * 		This is a utility function called by oracleExplain.
  * 		First the "query" is described explicitly.
  * 		This will parse the query and add it to the library cache.
  * 		Then a "desc_query" is executed against V$SQL_PLAN to extract
