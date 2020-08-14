@@ -4,6 +4,8 @@
 SET client_min_messages = INFO;
 /* analyze table for reliable output */
 ANALYZE typetest1;
+/* default setting sometimes leads to merge joins */
+SET enable_mergejoin = off;
 /*
  * Cases that should be pushed down.
  */
@@ -33,7 +35,7 @@ SELECT length(t1.lb), length(t2.lc) FROM typetest1  t1 JOIN typetest1  t2 ON (t1
  Sort
    Sort Key: t1.id, t2.id
    ->  Foreign Scan
-         Oracle query: SELECT /*6e91b6e90a89982ce6d2cbdf018128e9*/ r1."LB", r1."ID", r2."LC", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON ((r1."ID" + r2."ID") = 2))
+         Oracle query: SELECT /*1bb15ce645685d51d0d1a69e67295126*/ r1."LB", r2."LC", r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON ((r1."ID" + r2."ID") = 2))
 (4 rows)
 
 SELECT length(t1.lb), length(t2.lc) FROM typetest1  t1 JOIN typetest1  t2 ON (t1.id + t2.id = 2) ORDER BY t1.id, t2.id;
@@ -127,7 +129,7 @@ SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d = t2.d O
  Sort
    Sort Key: t1.id, t2.id
    ->  Foreign Scan
-         Oracle query: SELECT /*8cfad8830fdd7c0b2616a8b988b7abb5*/ r2."ID", r1."ID" FROM ("TYPETEST1" r2 LEFT JOIN "TYPETEST1" r1 ON (r1."D" = r2."D"))
+         Oracle query: SELECT /*60c7fea5e3f46dc2acdc8ab8bb7ef8ad*/ r1."ID", r2."ID" FROM ("TYPETEST1" r2 LEFT JOIN "TYPETEST1" r1 ON (r1."D" = r2."D"))
 (4 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d = t2.d ORDER BY t1.id, t2.id;
@@ -796,16 +798,18 @@ WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1 
 -- whole-row and system columns, not pushed down
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                              QUERY PLAN                                                               
----------------------------------------------------------------------------------------------------------------------------------------
- Merge Join
-   Merge Cond: (t1.id = t2.id)
-   ->  Foreign Scan on shorty t1
-         Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
-   ->  Materialize
-         ->  Foreign Scan on longy t2
-               Oracle query: SELECT /*da071f7557e81ab866e2d1958a6029cd*/ r2."ID" FROM "TYPETEST1" r2 ORDER BY r2."ID" ASC NULLS LAST
-(7 rows)
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.id
+   ->  Hash Join
+         Hash Cond: (t1.id = t2.id)
+         ->  Foreign Scan on shorty t1
+               Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+         ->  Hash
+               ->  Foreign Scan on longy t2
+                     Oracle query: SELECT /*da071f7557e81ab866e2d1958a6029cd*/ r2."ID" FROM "TYPETEST1" r2 ORDER BY r2."ID" ASC NULLS LAST
+(9 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
              t1             |      ctid      
@@ -817,17 +821,18 @@ SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY 
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                              QUERY PLAN                                                               
----------------------------------------------------------------------------------------------------------------------------------------
- Merge Left Join
-   Merge Cond: (t1.id = t2.id)
-   ->  Foreign Scan on shorty t1
-         Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
-   ->  Sort
-         Sort Key: t2.id
-         ->  Foreign Scan on longy t2
-               Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
-(8 rows)
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.id
+   ->  Hash Left Join
+         Hash Cond: (t1.id = t2.id)
+         ->  Foreign Scan on shorty t1
+               Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+         ->  Hash
+               ->  Foreign Scan on longy t2
+                     Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
+(9 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
              t1             |      ctid      
@@ -839,19 +844,18 @@ SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY 
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                                 QUERY PLAN                                                                  
----------------------------------------------------------------------------------------------------------------------------------------------
+                                                                    QUERY PLAN                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: t1.id
-   ->  Merge Right Join
-         Merge Cond: (t1.id = t2.id)
-         ->  Foreign Scan on shorty t1
-               Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
-         ->  Sort
-               Sort Key: t2.id
-               ->  Foreign Scan on longy t2
-                     Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
-(10 rows)
+   ->  Hash Left Join
+         Hash Cond: (t2.id = t1.id)
+         ->  Foreign Scan on longy t2
+               Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
+         ->  Hash
+               ->  Foreign Scan on shorty t1
+                     Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+(9 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
              t1             |      ctid      
@@ -867,15 +871,14 @@ SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id ORDER BY 
 ---------------------------------------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: t1.id
-   ->  Merge Full Join
-         Merge Cond: (t1.id = t2.id)
+   ->  Hash Full Join
+         Hash Cond: (t1.id = t2.id)
          ->  Foreign Scan on shorty t1
                Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
-         ->  Sort
-               Sort Key: t2.id
+         ->  Hash
                ->  Foreign Scan on longy t2
                      Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
-(10 rows)
+(9 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
              t1             |      ctid      

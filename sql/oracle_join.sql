@@ -6,6 +6,9 @@ SET client_min_messages = INFO;
 /* analyze table for reliable output */
 ANALYZE typetest1;
 
+/* default setting sometimes leads to merge joins */
+SET enable_mergejoin = off;
+
 /*
  * Cases that should be pushed down.
  */
