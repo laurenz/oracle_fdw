@@ -162,7 +162,8 @@ oracleSession
 
 		/* create environment handle */
 		if (checkerr(
-			OCIEnvCreate((OCIEnv **) &envhp, (ub4)OCI_OBJECT,
+			OCIEnvCreate((OCIEnv **) &envhp,
+				(ub4)OCI_OBJECT | OCI_NCHAR_LITERAL_REPLACE_ON,
 				(dvoid *) 0, (dvoid * (*)(dvoid *,size_t)) 0,
 				(dvoid * (*)(dvoid *, dvoid *, size_t)) 0,
 				(void (*)(dvoid *, dvoid *)) 0, (size_t) 0, (dvoid **) 0),
@@ -1666,6 +1667,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 	static sb4 dummy_size = 4;
 	static sb2 dummy_null;
 	ub4 prefetch_rows = prefetch;
+	const ub1 nchar = SQLCS_NCHAR;
 
 	/* figure out if the query is FOR UPDATE */
 	is_select = (strncmp(query, "SELECT", 6) == 0);
@@ -1736,6 +1738,16 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				{
 					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIDefineByPos failed to define result value",
+						oraMessage);
+				}
+
+				if (checkerr(
+					OCIAttrSet((void *)defnhp, OCI_HTYPE_DEFINE, (void *)&nchar, 0,
+						OCI_ATTR_CHARSET_FORM, session->envp->errhp),
+					(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				{
+					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIAttrSet failed to set charset form on result value",
 						oraMessage);
 				}
 
@@ -1831,6 +1843,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 	sword result;
 	ub4 rowcount;
 	int param_count = 0;
+	const ub1 nchar = SQLCS_NCHAR;
 
 	for (param=paramList; param; param=param->next)
 		++param_count;
@@ -1957,6 +1970,16 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIBindByName failed to bind parameter",
+				oraMessage);
+		}
+
+		if (checkerr(
+			OCIAttrSet((void *)param->bindh, OCI_HTYPE_BIND, (void *)&nchar, 0,
+				OCI_ATTR_CHARSET_FORM, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error executing query: OCIAttrSet failed to set charset form on bind parameter",
 				oraMessage);
 		}
 
