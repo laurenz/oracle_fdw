@@ -29,6 +29,10 @@ Version 2.3.0
   - Don't throw an error if DML statements modify no rows.
     This might be caused by a trigger on the Oracle side.
     Reported by Andrey Marinchuk.
+  - Fix NCHAR and NVARCHAR2 handling.
+    With single-byte Oracle character sets, this bug led to replacement
+    characters being used for characters not in the database character set.
+    Reported by "srakazmus", and Christian Ullrich helped with the fix.
 
 Version 2.2.0, released 2019-10-10
   Enhancements:
