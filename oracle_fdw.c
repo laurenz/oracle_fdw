@@ -1900,6 +1900,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
  */
 void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 {
+	ModifyTable *plan = castNode(ModifyTable, mtstate->ps.plan);
 	EState *estate = mtstate->ps.state;
 	struct OracleFdwState *fdw_state;
 	StringInfoData buf;
@@ -1908,6 +1909,12 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	int i;
 
 	elog(DEBUG3, "oracle_fdw: execute foreign table COPY on %d", RelationGetRelid(rinfo->ri_RelationDesc));
+
+	/* we don't support INSERT ... ON CONFLICT */
+	if (plan && plan->onConflictAction != ONCONFLICT_NONE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+				errmsg("INSERT with ON CONFLICT clause is not supported")));
 
 	fdw_state = getFdwState(RelationGetRelid(rinfo->ri_RelationDesc), NULL);
 
