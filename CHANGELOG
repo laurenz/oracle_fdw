@@ -33,6 +33,8 @@ Version 2.3.0
     With single-byte Oracle character sets, this bug led to replacement
     characters being used for characters not in the database character set.
     Reported by "srakazmus", and Christian Ullrich helped with the fix.
+  - Report a proper error for INSERT ... ON CONFLICT on partitioned tables.
+    Report and fix by Ian Barwick.
 
 Version 2.2.0, released 2019-10-10
   Enhancements:
