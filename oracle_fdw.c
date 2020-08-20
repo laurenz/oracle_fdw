@@ -1931,26 +1931,23 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 			GetCurrentTransactionNestLevel()
 		);
 
-	if (hasTrigger(rinfo->ri_RelationDesc, CMD_INSERT))
-	{
-		/* all attributes are needed for the RETURNING clause */
-		for (i=0; i<fdw_state->oraTable->ncols; ++i)
-			if (fdw_state->oraTable->cols[i]->pgname != NULL)
-			{
-				/* throw an error if it is a LONG or LONG RAW column */
-				if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
-						|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG)
-					ereport(ERROR,
-							(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
-							errmsg("columns with Oracle type LONG or LONG RAW cannot be used in RETURNING clause"),
-							errdetail("Column \"%s\" of foreign table \"%s\" is of Oracle type LONG%s.",
-								fdw_state->oraTable->cols[i]->pgname,
-								fdw_state->oraTable->pgname,
-								fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG ? "" : " RAW")));
+	/* all attributes are needed for the RETURNING clause */
+	for (i=0; i<fdw_state->oraTable->ncols; ++i)
+		if (fdw_state->oraTable->cols[i]->pgname != NULL)
+		{
+			/* throw an error if it is a LONG or LONG RAW column */
+			if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
+						 errmsg("columns with Oracle type LONG or LONG RAW cannot be used in RETURNING clause"),
+						 errdetail("Column \"%s\" of foreign table \"%s\" is of Oracle type LONG%s.",
+								   fdw_state->oraTable->cols[i]->pgname,
+								   fdw_state->oraTable->pgname,
+								   fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG ? "" : " RAW")));
 
-				fdw_state->oraTable->cols[i]->used = 1;
-			}
-	}
+			fdw_state->oraTable->cols[i]->used = 1;
+		}
 
 	/* construct an INSERT query */
 	initStringInfo(&buf);
