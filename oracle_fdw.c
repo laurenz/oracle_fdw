@@ -1708,7 +1708,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 	table_close(rel, NoLock);
 
-	/* mark all attributes for which we need a RETURNING clause */
+	/* mark all attributes for which we need to return column values */
 	if (has_trigger)
 	{
 		/* all attributes are needed for the RETURNING clause */
@@ -1720,7 +1720,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 						|| fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONG)
 					ereport(ERROR,
 							(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
-							errmsg("columns with Oracle type LONG or LONG RAW cannot be used in RETURNING clause"),
+							errmsg("columns with Oracle type LONG or LONG RAW cannot be used with triggers"),
 							errdetail("Column \"%s\" of foreign table \"%s\" is of Oracle type LONG%s.",
 								fdwState->oraTable->cols[i]->pgname,
 								fdwState->oraTable->pgname,
@@ -1938,9 +1938,17 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 			GetCurrentTransactionNestLevel()
 		);
 
-	if (hasTrigger(rinfo->ri_RelationDesc, CMD_INSERT))
+	/*
+	 * We need to fetch all attributes if there is an AFTER INSERT trigger
+	 * or if the foreign table is a partition, and the statement is
+	 * INSERT ... RETURNING on the partitioned table.
+	 * We could figure out what columns to return in the second case,
+	 * but let's keep it simple for now.
+	 */
+	if (hasTrigger(rinfo->ri_RelationDesc, CMD_INSERT)
+		|| (estate->es_plannedstmt != NULL && estate->es_plannedstmt->hasReturning))
 	{
-		/* all attributes are needed for the RETURNING clause */
+		/* mark all attributes for returning */
 		for (i=0; i<fdw_state->oraTable->ncols; ++i)
 			if (fdw_state->oraTable->cols[i]->pgname != NULL)
 			{
@@ -1949,7 +1957,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 						|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG)
 					ereport(ERROR,
 							(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
-							errmsg("columns with Oracle type LONG or LONG RAW cannot be used in RETURNING clause"),
+							errmsg("columns with Oracle type LONG or LONG RAW cannot be used with triggers or in RETURNING clause"),
 							errdetail("Column \"%s\" of foreign table \"%s\" is of Oracle type LONG%s.",
 								fdw_state->oraTable->cols[i]->pgname,
 								fdw_state->oraTable->pgname,

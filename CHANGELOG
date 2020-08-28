@@ -35,6 +35,9 @@ Version 2.3.0
     Reported by "srakazmus", and Christian Ullrich helped with the fix.
   - Report a proper error for INSERT ... ON CONFLICT on partitioned tables.
     Report and fix by Ian Barwick.
+  - Fix INSERT ... RETURNING if a table partition is a foreign table.
+    It used to return NULL values by mistake.
+    Report and analysis by Ian Barwick.
 
 Version 2.2.0, released 2019-10-10
   Enhancements:

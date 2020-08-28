@@ -351,6 +351,15 @@ INSERT INTO party (id, lc, lr, lb)
 SELECT id, lr, lb, c FROM typetest1 ORDER BY id;
 ROLLBACK;
 
+BEGIN;
+CREATE TABLE shortpart (
+   id integer NOT NULL,
+   c  character(10)
+) PARTITION BY LIST (id);
+ALTER TABLE shortpart ATTACH PARTITION shorty FOR VALUES IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
+INSERT INTO shortpart (id, c) VALUES (6, 'returnme') RETURNING *;
+ROLLBACK;
+
 /*
  * Test triggers on foreign tables.
  */
