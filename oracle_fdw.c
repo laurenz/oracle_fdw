@@ -879,7 +879,10 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	fdwState->startup_cost = 10000.0;
 
 	/* if baserel->pages > 0, there was an ANALYZE; use the row count estimate */
+#if PG_VERSION_NUM < 140000
+	/* before v14, baserel->tuples == 0 for tables that have never been vacuumed */
 	if (baserel->pages > 0)
+#endif  /* PG_VERSION_NUM */
 		ntuples = baserel->tuples;
 
 	/* estimale selectivity locally for all conditions */
@@ -1071,7 +1074,11 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 		return;
 
 	/* estimate the number of result rows for the join */
+#if PG_VERSION_NUM < 140000
 	if (outerrel->pages > 0 && innerrel->pages > 0)
+#else
+	if (outerrel->tuples >= 0 && innerrel->tuples >= 0)
+#endif  /* PG_VERSION_NUM */
 	{
 		/* both relations have been ANALYZEd, so there should be useful statistics */
 		joinclauses_selectivity = clauselist_selectivity(root, fdwState->joinclauses, 0, JOIN_INNER, extra->sjinfo);
