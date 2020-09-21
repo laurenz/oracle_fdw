@@ -8,11 +8,7 @@
 #include "postgres.h"
 
 #include "fmgr.h"
-#if PG_VERSION_NUM < 90300
-#include "access/htup.h"
-#else
 #include "access/htup_details.h"
-#endif  /* PG_VERSION_NUM */
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
@@ -92,18 +88,6 @@
 #define WIDTH_THRESHOLD 1024
 #endif  /* WIDTH_THRESHOLD */
 
-#if PG_VERSION_NUM < 90200
-#define OLD_FDW_API
-#else
-#undef OLD_FDW_API
-#endif  /* PG_VERSION_NUM */
-
-#if PG_VERSION_NUM >= 90300
-#define WRITE_API
-#else
-#undef WRITE_API
-#endif  /* PG_VERSION_NUM */
-
 #if PG_VERSION_NUM >= 90500
 #define IMPORT_API
 
@@ -133,11 +117,6 @@
 /* backport macro from V11 */
 #define TupleDescAttr(tupdesc, i) ((tupdesc)->attrs[(i)])
 #endif  /* PG_VERSION_NUM */
-
-/* older versions don't have JSONOID */
-#ifndef JSONOID
-#define JSONOID InvalidOid
-#endif
 
 /* list API has changed in v13 */
 #if PG_VERSION_NUM < 130000
@@ -216,16 +195,13 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_MAX_LONG, ForeignTableRelationId, false},
 	{OPT_READONLY, ForeignTableRelationId, false},
 	{OPT_SAMPLE, ForeignTableRelationId, false},
-	{OPT_PREFETCH, ForeignTableRelationId, false}
-#ifndef OLD_FDW_API
-	,{OPT_KEY, AttributeRelationId, false}
-	,{OPT_STRIP_ZEROS, AttributeRelationId, false}
-#endif	/* OLD_FDW_API */
+	{OPT_PREFETCH, ForeignTableRelationId, false},
+	{OPT_KEY, AttributeRelationId, false},
+	{OPT_STRIP_ZEROS, AttributeRelationId, false}
 };
 
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
 
-#ifdef WRITE_API
 /*
  * Array to hold the type output functions during table modification.
  * It is ok to hold this cache in a static variable because there cannot
@@ -233,7 +209,6 @@ static struct OracleFdwOption valid_options[] = {
  */
 
 static regproc *output_funcs;
-#endif  /* WRITE_API */
 
 /*
  * FDW-specific information for RelOptInfo.fdw_private and ForeignScanState.fdw_state.
@@ -309,9 +284,6 @@ extern PGDLLEXPORT void _PG_init(void);
 /*
  * FDW callback routines
  */
-#ifdef OLD_FDW_API
-static FdwPlan *oraclePlanForeignScan(Oid foreigntableid, PlannerInfo *root, RelOptInfo *baserel);
-#else
 static void oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
 static void oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid);
 #ifdef JOIN_API
@@ -323,13 +295,11 @@ static ForeignScan *oracleGetForeignPlan(PlannerInfo *root, RelOptInfo *foreignr
 #endif  /* PG_VERSION_NUM */
 );
 static bool oracleAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockNumber *totalpages);
-#endif  /* OLD_FDW_API */
 static void oracleExplainForeignScan(ForeignScanState *node, ExplainState *es);
 static void oracleBeginForeignScan(ForeignScanState *node, int eflags);
 static TupleTableSlot *oracleIterateForeignScan(ForeignScanState *node);
 static void oracleEndForeignScan(ForeignScanState *node);
 static void oracleReScanForeignScan(ForeignScanState *node);
-#ifdef WRITE_API
 static void oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relation target_relation);
 static List *oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelation, int subplan_index);
 static void oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, int eflags);
@@ -343,7 +313,6 @@ static TupleTableSlot *oracleExecForeignDelete(EState *estate, ResultRelInfo *ri
 static void oracleEndForeignModify(EState *estate, ResultRelInfo *rinfo);
 static void oracleExplainForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, struct ExplainState *es);
 static int oracleIsForeignRelUpdatable(Relation rel);
-#endif  /* WRITE_API */
 #ifdef IMPORT_API
 static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid);
 #endif  /* IMPORT_API */
@@ -363,10 +332,8 @@ static List *build_tlist_to_deparse(RelOptInfo *foreignrel);
 static struct oraTable *build_join_oratable(struct OracleFdwState *fdwState, List *fdw_scan_tlist);
 #endif  /* JOIN_API */
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
-#ifndef OLD_FDW_API
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 static void appendAsType(StringInfoData *dest, const char *s, Oid type);
-#endif  /* OLD_FDW_API */
 static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
 static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid);
@@ -380,19 +347,15 @@ static Const *serializeLong(long i);
 static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
-#ifndef OLD_FDW_API
 static bool optionIsTrue(const char *value);
 static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
-#endif  /* OLD_FDW_API */
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static char *deparseInterval(Datum datum);
-#ifdef WRITE_API
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
 static void addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
 static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable, oracleSession *session);
-#endif  /* WRITE_API */
 static void transactionCallback(XactEvent event, void *arg);
 static void exitHook(int code, Datum arg);
 static void oracleDie(SIGNAL_ARGS);
@@ -422,9 +385,6 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 {
 	FdwRoutine *fdwroutine = makeNode(FdwRoutine);
 
-#ifdef OLD_FDW_API
-	fdwroutine->PlanForeignScan = oraclePlanForeignScan;
-#else
 	fdwroutine->GetForeignRelSize = oracleGetForeignRelSize;
 	fdwroutine->GetForeignPaths = oracleGetForeignPaths;
 #ifdef JOIN_API
@@ -432,13 +392,11 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 #endif  /* JOIN_API */
 	fdwroutine->GetForeignPlan = oracleGetForeignPlan;
 	fdwroutine->AnalyzeForeignTable = oracleAnalyzeForeignTable;
-#endif  /* OLD_FDW_API */
 	fdwroutine->ExplainForeignScan = oracleExplainForeignScan;
 	fdwroutine->BeginForeignScan = oracleBeginForeignScan;
 	fdwroutine->IterateForeignScan = oracleIterateForeignScan;
 	fdwroutine->ReScanForeignScan = oracleReScanForeignScan;
 	fdwroutine->EndForeignScan = oracleEndForeignScan;
-#ifdef WRITE_API
 	fdwroutine->AddForeignUpdateTargets = oracleAddForeignUpdateTargets;
 	fdwroutine->PlanForeignModify = oraclePlanForeignModify;
 	fdwroutine->BeginForeignModify = oracleBeginForeignModify;
@@ -452,7 +410,6 @@ oracle_fdw_handler(PG_FUNCTION_ARGS)
 	fdwroutine->EndForeignModify = oracleEndForeignModify;
 	fdwroutine->ExplainForeignModify = oracleExplainForeignModify;
 	fdwroutine->IsForeignRelUpdatable = oracleIsForeignRelUpdatable;
-#endif  /* WRITE_API */
 #ifdef IMPORT_API
 	fdwroutine->ImportForeignSchema = oracleImportForeignSchema;
 #endif  /* IMPORT_API */
@@ -522,10 +479,8 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 		/* check valid values for "readonly" and "key" */
 		if (strcmp(def->defname, OPT_READONLY) == 0
-#ifndef OLD_FDW_API
 				|| strcmp(def->defname, OPT_KEY) == 0
 				|| strcmp(def->defname, OPT_STRIP_ZEROS) == 0
-#endif	/* OLD_FDW_API */
 			)
 		{
 			char *val = ((Value *)(def->arg))->val.str;
@@ -755,82 +710,6 @@ _PG_init(void)
 	on_proc_exit(&exitHook, PointerGetDatum(NULL));
 }
 
-#ifdef OLD_FDW_API
-/*
- * oraclePlanForeignScan
- * 		Get an OracleFdwState for this foreign scan.
- * 		A FdwPlan is created and the state is are stored
- * 		("serialized") in its fdw_private field.
- */
-FdwPlan *
-oraclePlanForeignScan(Oid foreigntableid,
-					PlannerInfo *root,
-					RelOptInfo *baserel)
-{
-	struct OracleFdwState *fdwState;
-	FdwPlan *fdwplan;
-	List *fdw_private;
-	List *local_conds = NIL, *remote_conds = NIL;  /* ignored */
-	int i;
-
-	elog(DEBUG1, "oracle_fdw: plan foreign table scan on %d", foreigntableid);
-
-	/* get connection options, connect and get the remote table description */
-	fdwState = getFdwState(foreigntableid, NULL);
-
-	/*
-	 * Store the table OID in each table column.
-	 * This is used to construct unique table aliases.
-	 */
-	for (i=0; i<fdwState->oraTable->ncols; ++i){
-		fdwState->oraTable->cols[i]->varno = baserel->relid;
-	}
-
-	/*
-	 * Those conditions that can be pushed down will be collected into
-	 * an Oracle WHERE clause.
-	 */
-	fdwState->where_clause = deparseWhereConditions(
-								fdwState,
-								baserel,
-								&local_conds,
-								&remote_conds
-							);
-
-	/* construct Oracle query and get the list of parameters and actions for RestrictInfos */
-	fdwState->query = createQuery(fdwState, baserel, false, NIL);
-	elog(DEBUG1, "oracle_fdw: remote query is: %s", fdwState->query);
-
-	/* release Oracle session (will be cached) */
-	pfree(fdwState->session);
-	fdwState->session = NULL;
-
-	/* get PostgreSQL column data types, check that they match Oracle's */
-	for (i=0; i<fdwState->oraTable->ncols; ++i)
-		if (fdwState->oraTable->cols[i]->used)
-			checkDataType(
-				fdwState->oraTable->cols[i]->oratype,
-				fdwState->oraTable->cols[i]->scale,
-				fdwState->oraTable->cols[i]->pgtype,
-				fdwState->oraTable->pgname,
-				fdwState->oraTable->cols[i]->pgname
-			);
-
-	/* use a random "high" value for cost */
-	fdwState->startup_cost = fdwState->total_cost = 10000.0;
-
-	/* "serialize" all necessary information in the private area */
-	fdw_private = serializePlanData(fdwState);
-
-	/* construct FdwPlan */
-	fdwplan = makeNode(FdwPlan);
-	fdwplan->startup_cost = fdwState->startup_cost;
-	fdwplan->total_cost = fdwState->total_cost;
-	fdwplan->fdw_private = fdw_private;
-
-	return fdwplan;
-}
-#else
 /*
  * oracleGetForeignRelSize
  * 		Get an OracleFdwState for this foreign scan.
@@ -1297,7 +1176,6 @@ oracleAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc *func, BlockN
 
 	return true;
 }
-#endif  /* OLD_FDW_API */
 
 /*
  * oracleExplainForeignScan
@@ -1340,14 +1218,10 @@ void
 oracleBeginForeignScan(ForeignScanState *node, int eflags)
 {
 	ForeignScan *fsplan = (ForeignScan *)node->ss.ps.plan;
-#ifdef OLD_FDW_API
-	List *fdw_private = ((FdwPlan *)fsplan->fdwplan)->fdw_private;
-#else
 	List *fdw_private = fsplan->fdw_private;
 	List *exec_exprs;
 	ListCell *cell;
 	int index;
-#endif  /* OLD_FDW_API */
 	struct paramDesc *paramDesc;
 	struct OracleFdwState *fdw_state;
 
@@ -1355,7 +1229,6 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 	fdw_state = deserializePlanData(fdw_private);
 	node->fdw_state = (void *)fdw_state;
 
-#ifndef OLD_FDW_API
 	/* create an ExprState tree for the parameter expressions */
 #if PG_VERSION_NUM < 100000
 	exec_exprs = (List *)ExecInitExpr((Expr *)fsplan->fdw_exprs, (PlanState *)node);
@@ -1396,7 +1269,6 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		paramDesc->next = fdw_state->paramList;
 		fdw_state->paramList = paramDesc;
 	}
-#endif  /* OLD_FDW_API */
 
 	/* add a fake parameter ":now" if that string appears in the query */
 	if (strstr(fdw_state->query, ":now") != NULL)
@@ -1426,11 +1298,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 			fdw_state->password,
 			fdw_state->nls_lang,
 			fdw_state->oraTable->pgname,
-#ifdef WRITE_API
 			GetCurrentTransactionNestLevel()
-#else
-			1
-#endif  /* WRITE_API */
 		);
 
 	/* initialize row count to zero */
@@ -1533,7 +1401,6 @@ oracleReScanForeignScan(ForeignScanState *node)
 	fdw_state->rowcount = 0;
 }
 
-#ifdef WRITE_API
 /*
  * oracleAddForeignUpdateTargets
  * 		Add the primary key columns as resjunk entries.
@@ -2224,7 +2091,6 @@ oracleIsForeignRelUpdatable(Relation rel)
 
 	return (1 << CMD_UPDATE) | (1 << CMD_INSERT) | (1 << CMD_DELETE);
 }
-#endif  /* WRITE_API */
 
 #ifdef IMPORT_API
 /*
@@ -2675,11 +2541,7 @@ struct OracleFdwState
 		fdwState->password,
 		fdwState->nls_lang,
 		pgtablename,
-#ifdef WRITE_API
 		GetCurrentTransactionNestLevel()
-#else
-		1
-#endif  /* WRITE_API */
 	);
 
 	/* get remote table description */
@@ -2747,10 +2609,8 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 	for (i=0; i<tupdesc->natts; ++i)
 	{
 		Form_pg_attribute att_tuple = TupleDescAttr(tupdesc, i);
-#ifndef OLD_FDW_API
 		List *options;
 		ListCell *option;
-#endif  /* OLD_FDW_API */
 
 		/* ignore dropped columns */
 		if (att_tuple->attisdropped)
@@ -2766,7 +2626,6 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 			oraTable->cols[index-1]->pgname = pstrdup(NameStr(att_tuple->attname));
 		}
 
-#ifndef OLD_FDW_API
 		/* loop through column options */
 		options = GetForeignColumnOptions(foreigntableid, att_tuple->attnum);
 		foreach(option, options)
@@ -2782,7 +2641,6 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && optionIsTrue(((Value *)(def->arg))->val.str))
 				oraTable->cols[index-1]->strip_zeros = 1;
 		}
-#endif	/* OLD_FDW_API */
 	}
 
 	table_close(rel, NoLock);
@@ -3447,7 +3305,6 @@ build_join_oratable(struct OracleFdwState *fdwState, List *fdw_scan_tlist)
 }
 #endif  /* JOIN_API */
 
-#ifndef OLD_FDW_API
 /*
  * acquireSampleRowsFunc
  * 		Perform a sequential scan on the Oracle table and return a sampe of rows.
@@ -3628,7 +3485,6 @@ appendAsType(StringInfoData *dest, const char *s, Oid type)
 			appendStringInfo(dest, "%s", s);
 	}
 }
-#endif  /* OLD_FDW_API */
 
 /*
  * This macro is used by deparseExpr to identify PostgreSQL
@@ -3651,10 +3507,8 @@ char *
 deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
 {
 	char *opername, *left, *right, *arg, oprkind;
-#ifndef OLD_FDW_API
 	char parname[10];
 	Param *param;
-#endif
 	Const *constant;
 	OpExpr *oper;
 	ScalarArrayOpExpr *arrayoper;
@@ -3715,10 +3569,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 			break;
 		case T_Param:
-#ifdef OLD_FDW_API
-			/* don't try to push down parameters with 9.1 */
-			return NULL;
-#else
 			param = (Param *)expr;
 
 			/* don't try to handle interval parameters */
@@ -3746,7 +3596,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			appendAsType(&result, parname, param->paramtype);
 
 			break;
-#endif  /* OLD_FDW_API */
 		case T_Var:
 			variable = (Var *)expr;
 			var_table = NULL;
@@ -3840,10 +3689,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			else
 			{
 				/* treat it like a parameter */
-#ifdef OLD_FDW_API
-				/* don't try to push down parameters with 9.1 */
-				return NULL;
-#else
 				/* don't try to handle type interval */
 				if (! canHandleType(variable->vartype) || variable->vartype == INTERVALOID)
 					return NULL;
@@ -3866,7 +3711,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 				/* parameters will be called :p1, :p2 etc. */
 				initStringInfo(&result);
 				appendStringInfo(&result, ":p%d", index);
-#endif  /* OLD_FDW_API */
 			}
 
 			break;
@@ -5541,7 +5385,6 @@ deserializeLong(Const *constant)
 		return (long)DatumGetInt64(constant->constvalue);
 }
 
-#ifndef OLD_FDW_API
 /*
  * optionIsTrue
  * 		Returns true if the string is "true", "on" or "yes".
@@ -5585,7 +5428,6 @@ find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
 	/* We didn't find any suitable equivalence class expression */
 	return NULL;
 }
-#endif  /* OLD_FDW_API */
 
 /*
  * deparseDate
@@ -5705,7 +5547,6 @@ char
 	return s.data;
 }
 
-#ifdef WRITE_API
 /*
  * copyPlanData
  * 		Create a deep copy of the argument, copy only those fields needed for planning.
@@ -6209,7 +6050,6 @@ appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState)
 			appendStringInfo(sql, "%s", paramName);
 		}
 }
-#endif  /* WRITE_API */
 
 /*
  * transactionCallback
@@ -6220,7 +6060,6 @@ transactionCallback(XactEvent event, void *arg)
 {
 	switch(event)
 	{
-#ifdef WRITE_API
 		case XACT_EVENT_PRE_COMMIT:
 #if PG_VERSION_NUM >= 90500
 		case XACT_EVENT_PARALLEL_PRE_COMMIT:
@@ -6233,7 +6072,6 @@ transactionCallback(XactEvent event, void *arg)
 					(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
 					errmsg("cannot prepare a transaction that used remote tables")));
 			break;
-#endif  /* WRITE_API */
 		case XACT_EVENT_COMMIT:
 		case XACT_EVENT_PREPARE:
 #if PG_VERSION_NUM >= 90500
@@ -6307,16 +6145,12 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 	TimestampTz tstamp;
 	bool is_null;
 	bool first_param = true;
-#ifndef OLD_FDW_API
 	MemoryContext oldcontext;
-#endif  /* OLD_FDW_API */
 	StringInfoData info;  /* list of parameters for DEBUG message */
 	initStringInfo(&info);
 
-#ifndef OLD_FDW_API
 	/* switch to short lived memory context */
 	oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
-#endif  /* OLD_FDW_API */
 
 	/* iterate parameter list and fill values */
 	for (param=paramList; param; param=param->next)
@@ -6384,10 +6218,8 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 		}
 	}
 
-#ifndef OLD_FDW_API
 	/* reset memory context */
 	MemoryContextSwitchTo(oldcontext);
-#endif  /* OLD_FDW_API */
 
 	return info.data;
 }
@@ -6731,9 +6563,7 @@ void
 oracleRegisterCallback(void *arg)
 {
 	RegisterXactCallback(transactionCallback, arg);
-#ifdef WRITE_API
 	RegisterSubXactCallback(subtransactionCallback, arg);
-#endif  /* WRITE_API */
 }
 
 /*
@@ -6744,9 +6574,7 @@ void
 oracleUnregisterCallback(void *arg)
 {
 	UnregisterXactCallback(transactionCallback, arg);
-#ifdef WRITE_API
 	UnregisterSubXactCallback(subtransactionCallback, arg);
-#endif  /* WRITE_API */
 }
 
 /*
