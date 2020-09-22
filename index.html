@@ -142,7 +142,7 @@ for easy and efficient access to Oracle databases.</p>
 
 <p>Features:</p>
 <ul>
-	<li>Uses the standard compliant SQL/MED environment of PostgreSQL 9.1 and above</li>
+	<li>Uses the standard compliant SQL/MED environment of PostgreSQL 9.3 and above</li>
 	<li>Supports translation of Oracle data types to similar PostgreSQL data types</li>
 	<li><tt>WHERE</tt> conditions and <tt>ORDER BY</tt> expressions are propagated to Oracle where possible</li>
 	<li>Only the required Oracle table columns are fetched</li>
@@ -154,8 +154,8 @@ for easy and efficient access to Oracle databases.</p>
 	<li>Oracle connections are cached for the duration of the PostgreSQL session</li>
 	<li>Supports Oracle external authentication to avoid storing passwords in the database</li>
 	<li>Uses Oracle prefetching for high performance</li>
-	<li>Supports gathering statistics with <tt>ANALYZE</tt> from PostgreSQL 9.2 on</li>
-	<li>Supports <tt>INSERT</tt>, <tt>UPDATE</tt> and <tt>DELETE</tt> from PostgreSQL 9.3 on</li>
+	<li>Supports gathering statistics with <tt>ANALYZE</tt></li>
+	<li>Supports <tt>INSERT</tt>, <tt>UPDATE</tt> and <tt>DELETE</tt></li>
 	<li>Efficient mapping between <tt>MDSYS.SDO_GEOMETRY</tt> and PostGIS <tt>geometry</tt></li>
 	<li>Supports <tt>IMPORT FOREIGN SCHEMA</tt> from PostgreSQL 9.5 on</li>
 	<li>Propagates 2-way joins between foreign tables to Oracle from PostgreSQL 9.6 on</li>
@@ -163,7 +163,7 @@ for easy and efficient access to Oracle databases.</p>
 
 <p>Requirements:</p>
 <ul>
-	<li>PostgreSQL 9.1 or better</li>
+	<li>PostgreSQL 9.3 or better</li>
 	<li>Oracle client 11.2 or better</li>
 	<li>For <tt>EXPLAIN VERBOSE</tt>, <tt>SELECT</tt> privileges on <tt>V$SQL</tt> and <tt>V$SQL_PLAN</tt></li>
 </ul>
