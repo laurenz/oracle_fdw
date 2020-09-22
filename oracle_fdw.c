@@ -6519,7 +6519,7 @@ fold_case(char *name, fold_t foldcase, int collation)
 unsigned int
 getIsolationLevel(const char *isolation_level)
 {
-	oraIsoLevel val;
+	oraIsoLevel val = 0;
 
 	Assert(isolation_level);
 
