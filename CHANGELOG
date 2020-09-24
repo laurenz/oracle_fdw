@@ -1,9 +1,10 @@
-Version 2.3.0
+Version 2.3.0, released 2020-09-24
   Note: When upgrading from an older version of oracle_fdw, make sure to run
         ALTER EXTENSION oracle_fdw UPDATE;
         after installing the extension.
 
   Enhancements:
+  - Support PostgreSQL v13.  Support for 9.2 and 9.1 is dropped.
   - Add a function "oracle_execute" to execute arbitrary SQL statements on
     Oracle.  The statements must not return a result (e.g. DDL statements).
   - Add an option "dblink" for Oracle database links.
@@ -16,7 +17,7 @@ Version 2.3.0
     "prefetch".  These set the corresponding options on imported tables.
     Suggested by "ferfebles".
   - Add support for isolation levels other than SERIALIZABLE.
-    This is mostly because Oracle's implementation of SERIALIZABLE is si buggy.
+    This is mostly because Oracle's implementation of SERIALIZABLE is so buggy.
     Patch by Jet C.X. Zhang.
 
   Bugfixes:
