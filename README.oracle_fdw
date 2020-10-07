@@ -238,11 +238,7 @@ Foreign table options
 - **readonly** (optional, defaults to "false")
 
   INSERT, UPDATE and DELETE is only allowed on tables where this option is
-  not set to yes/on/true.  Since these statements can only be executed from
-  PostgreSQL 9.3 on, setting this option has no effect on earlier versions.
-  It might still be a good idea to set it in PostgreSQL 9.2 and earlier
-  on tables that you do not wish to be changed, to be prepared for an upgrade
-  to PostgreSQL 9.3 or later.
+  not set to yes/on/true.
 
 - **sample_percent** (optional, defaults to "100")
 
@@ -267,8 +263,8 @@ Foreign table options
   Higher values can speed up performance, but will use more memory on the
   PostgreSQL server.
 
-Column options (from PostgreSQL 9.2 on)
----------------------------------------
+Column options
+--------------
 
 - **key** (optional, defaults to "false")
 
@@ -391,10 +387,10 @@ of WHERE clauses*, can greatly reduce the number of rows retrieved from Oracle
 and may enable Oracle's optimizer to choose a good plan for accessing the
 required tables.
 
-Similarly, ORDER BY clauses will be pushed down to Oracle from PostgreSQL 9.2
-on wherever possible. Note that no ORDER BY condition that sorts by a character
-string will be pushed down as the sort orders in PostgreSQL an Oracle cannot be
-guaranteed to be the same.
+Similarly, ORDER BY clauses will be pushed down to Oracle wherever possible.
+Note that no ORDER BY condition that sorts by a character string will be
+pushed down as the sort orders in PostgreSQL an Oracle cannot be guaranteed
+to be the same.
 
 To make use of that, try to use simple conditions for the foreign table.
 Choose PostgreSQL column data types that correspond to Oracle's types,
@@ -428,10 +424,10 @@ collected with ANALYZE for PostgreSQL to determine the best join strategy.
 Modifying foreign data
 ----------------------
 
-From PostgreSQL 9.3 on, oracle_fdw supports INSERT, UPDATE and DELETE on
-foreign tables.  This is allowed by default (also in databases upgraded
-from an earlier PostgreSQL release) and can be disabled by setting the
-**readonly** table option.
+oracle_fdw supports INSERT, UPDATE and DELETE on foreign tables.
+This is allowed by default (also in databases upgraded from an earlier
+PostgreSQL release) and can be disabled by setting the **readonly**
+table option.
 
 For UPDATE and DELETE to work, the columns corresponding to the primary
 key columns of the Oracle table must have the **key** column option set.
@@ -486,8 +482,8 @@ Oracle server 9i or older, see [Problems](#8-problems)).
 ANALYZE
 -------
 
-From PostgreSQL version 9.2 on, you can use ANALYZE to gather statistics
-on a foreign table.  This is supported by oracle_fdw.  
+You can use ANALYZE to gather statistics on a foreign table.
+This is supported by oracle_fdw.
 
 Without statistics, PostgreSQL has no way to estimate the row count for
 queries on a foreign table, which can cause bad execution plans to be chosen.
@@ -586,9 +582,7 @@ see the [Problems](#8-problems) section for details.
 oracle_fdw should compile and run on any platform supported by PostgreSQL and
 Oracle client, although I could only test it on Linux and Windows.
 
-PostgreSQL 9.1 or better is required.  
-Support for ANALYZE is available from PostgreSQL 9.2 on.  
-Support for INSERT, UPDATE and DELETE is available from PostgreSQL 9.3 on.
+PostgreSQL 9.3 or better is required.
 
 Due to an API break in a PostgreSQL minor release, the following PostgreSQL
 versions cannot be used: 9.6.0 to 9.6.8 and 10.0 to 10.3
@@ -728,8 +722,8 @@ Unless you are developing oracle_fdw or want to test its functionality
 on an exotic platform, you don't have to do this.
 
 For the regression tests to work, you must have a PostgreSQL cluster
-(9.3 or better) and an Oracle server (10.2 or better with Locator or Spatial)
-running, and the oracle_fdw binaries must be installed.  
+and an Oracle server (10.2 or better with Locator or Spatial) running,
+and the oracle_fdw binaries must be installed.  
 The regression tests will create a database called `contrib_regression` and
 run a number of tests.  For the PostGIS regression tests to succeed,
 the PostGIS binaries must be installed.
