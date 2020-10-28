@@ -1712,6 +1712,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 			if (is_select)
 			{
 				ub2 type;
+				oraType oracle_type = oraTable->cols[i]->oratype;
 
 				/* figure out in which format we want the results */
 				type = getOraType(oraTable->cols[i]->oratype);
@@ -1741,10 +1742,15 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 						oraMessage);
 				}
 
-				if (checkerr(
-					OCIAttrSet((void *)defnhp, OCI_HTYPE_DEFINE, (void *)&nchar, 0,
-						OCI_ATTR_CHARSET_FORM, session->envp->errhp),
-					(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+				/*
+				 * Use the more expensive character set conversion only for columns
+				 * using a national character set, where it is needed.
+				 */
+				if ((oracle_type == ORA_TYPE_NVARCHAR2 || oracle_type == ORA_TYPE_NCHAR)
+					&& checkerr(
+						OCIAttrSet((void *)defnhp, OCI_HTYPE_DEFINE, (void *)&nchar, 0,
+							OCI_ATTR_CHARSET_FORM, session->envp->errhp),
+						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 				{
 					oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIAttrSet failed to set charset form on result value",
@@ -1973,6 +1979,14 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 				oraMessage);
 		}
 
+		/*
+		 * Always use the more expensive character conversion, although this is
+		 * only required when we are dealing with "national character sets" on
+		 * the Oracle side.
+		 * There is room for improvement here, but that would require tracking
+		 * if the parameter corresponds to such a column in an Oracle table.
+		 * And DML performance is already something where we are not great...
+		 */
 		if (checkerr(
 			OCIAttrSet((void *)param->bindh, OCI_HTYPE_BIND, (void *)&nchar, 0,
 				OCI_ATTR_CHARSET_FORM, session->envp->errhp),

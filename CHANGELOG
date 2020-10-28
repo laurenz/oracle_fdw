@@ -1,3 +1,10 @@
+Version 2.3.1
+
+  Bugfixes:
+  - Fix a performance regression introduced in 2.3.0 by the fix for NCHAR
+    and NVARCHAR2 columns.
+    Reported by Phil Florent.
+
 Version 2.3.0, released 2020-09-24
   Note: When upgrading from an older version of oracle_fdw, make sure to run
         ALTER EXTENSION oracle_fdw UPDATE;
