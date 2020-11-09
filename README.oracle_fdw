@@ -59,17 +59,20 @@ Then configure oracle_fdw as PostgreSQL superuser like this:
     pgdb=# CREATE EXTENSION oracle_fdw;
     pgdb=# CREATE SERVER oradb FOREIGN DATA WRAPPER oracle_fdw
               OPTIONS (dbserver '//dbserver.mydomain.com:1521/ORADB');
-    pgdb=# GRANT USAGE ON FOREIGN SERVER oradb TO pguser;
-
 
 (You can use other naming methods or local connections, see the description of
 the option **dbserver** below.)
+
+It is a good idea to use a superuser only where really necessary, so let's
+allow a normal user to use the foreign server (this is not required for the
+example to work, but I recommend it):
+
+    pgdb=# GRANT USAGE ON FOREIGN SERVER oradb TO pguser;
 
 Then you can connect to PostgreSQL as `pguser` and define:
 
     pgdb=> CREATE USER MAPPING FOR pguser SERVER oradb
               OPTIONS (user 'orauser', password 'orapwd');
-
 
 (You can use external authentication to avoid storing Oracle passwords;
 see below.)
