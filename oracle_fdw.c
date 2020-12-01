@@ -352,6 +352,7 @@ static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static char *deparseInterval(Datum datum);
+static char *convertUUID(char *uuid);
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
 static void addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
@@ -2850,7 +2851,7 @@ deparseFromExprForRel(struct OracleFdwState *fdwState, StringInfo buf, RelOptInf
  * 		This function is used to deparse JOIN ... ON clauses.
  */
 static void
-appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, List **params_list) 
+appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, List **params_list)
 {
 	ListCell *lc;
 	bool is_first = true;
@@ -3494,7 +3495,7 @@ appendAsType(StringInfoData *dest, const char *s, Oid type)
 			|| (x) == VARCHAROID || (x) == NAMEOID || (x) == INT8OID || (x) == INT2OID \
 			|| (x) == INT4OID || (x) == OIDOID || (x) == FLOAT4OID || (x) == FLOAT8OID \
 			|| (x) == NUMERICOID || (x) == DATEOID || (x) == TIMESTAMPOID || (x) == TIMESTAMPTZOID \
-			|| (x) == INTERVALOID)
+			|| (x) == INTERVALOID || (x) == UUIDOID)
 
 /*
  * deparseExpr
@@ -4474,6 +4475,7 @@ static char
 		case BPCHAROID:
 		case VARCHAROID:
 		case NAMEOID:
+		case UUIDOID:
 			str = DatumGetCString(OidFunctionCall1(typoutput, datum));
 
 			/*
@@ -4482,6 +4484,10 @@ static char
 			 */
 			if (str[0] == '\0')
 				return NULL;
+
+			/* strip "-" from "uuid" values */
+			if (type == UUIDOID)
+				convertUUID(str);
 
 			/* quote string */
 			initStringInfo(&result);
@@ -5505,10 +5511,10 @@ deparseTimestamp(Datum datum, bool hasTimezone)
 }
 
 /*
- * deparsedeparseInterval
+ * deparseInterval
  * 		Render a PostgreSQL timestamp so that Oracle can parse it.
  */
-char 
+char
 *deparseInterval(Datum datum)
 {
 	struct pg_tm tm;
@@ -5545,6 +5551,32 @@ char
 	appendStringInfo(&s, "INTERVAL '%s%d %02d:%02d:%02d.%06d' DAY(9) TO SECOND(6)", sign, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, fsec);
 
 	return s.data;
+}
+
+/*
+ * convertUUID
+ * 		Strip "-" from a PostgreSQL "uuid" so that Oracle can parse it.
+ * 		In addition, convert the string to upper case.
+ * 		This modifies the argument in place!
+ */
+char
+*convertUUID(char *uuid)
+{
+	char *p = uuid, *q = uuid, c;
+
+	while (*p != '\0')
+	{
+		if (*p == '-')
+			++p;
+		c = *(p++);
+		if (c >= 'a' && c <= 'f')
+			*(q++) = c - ('a' - 'A');
+		else
+			*(q++) = c;
+	}
+	*q = '\0';
+
+	return uuid;
 }
 
 /*
@@ -5682,7 +5714,6 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 	Datum datum;
 	bool isnull;
 	int32 value_len;
-	char *p, *q;
 	struct pg_tm datetime_tm;
 	fsec_t datetime_fsec;
 	StringInfoData s;
@@ -5803,13 +5834,7 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 				{
 					case UUIDOID:
 						/* remove the minus signs for UUIDs */
-						for (p = q = param->value; *p != '\0'; ++p, ++q)
-						{
-							if (*p == '-')
-								++p;
-							*q = *p;
-						}
-						*q = '\0';
+						convertUUID(param->value);
 						break;
 					case BOOLOID:
 						/* convert booleans to numbers */
