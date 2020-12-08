@@ -15,7 +15,7 @@
 #include <sys/types.h>
 
 /* oracle_fdw version */
-#define ORACLE_FDW_VERSION "2.3.1devel"
+#define ORACLE_FDW_VERSION "2.4.0devel"
 
 #ifdef OCI_ORACLE
 /*
