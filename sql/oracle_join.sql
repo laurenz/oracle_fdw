@@ -252,11 +252,6 @@ WHERE (a.c = a.vc) = (b.id IS NOT NULL);
 /*
  * Cost estimates.
  */
--- delete statistics
-DELETE FROM pg_statistic WHERE starelid = 'typetest1'::regclass;
-UPDATE pg_class SET relpages = 0, reltuples = 0.0 WHERE oid = 'typetest1'::regclass;
--- default costs
-EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
 -- gather statistics
 ANALYZE typetest1;
 -- costs with statistics

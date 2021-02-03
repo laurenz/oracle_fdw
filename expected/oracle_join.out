@@ -1365,17 +1365,6 @@ WHERE (a.c = a.vc) = (b.id IS NOT NULL);
 /*
  * Cost estimates.
  */
--- delete statistics
-DELETE FROM pg_statistic WHERE starelid = 'typetest1'::regclass;
-UPDATE pg_class SET relpages = 0, reltuples = 0.0 WHERE oid = 'typetest1'::regclass;
--- default costs
-EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
-                                                                    QUERY PLAN                                                                     
----------------------------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan  (cost=10000.00..20000.00 rows=1000 width=8)
-   Oracle query: SELECT /*e4c88236bdfe66c8af8d114b6f7fa761*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."C" = r2."C"))
-(2 rows)
-
 -- gather statistics
 ANALYZE typetest1;
 -- costs with statistics
