@@ -3959,6 +3959,10 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 						return NULL;
 #endif
 
+					/* punt on anything but ArrayExpr (e.g, parameters) */
+					if (arraycoerce->arg->type != T_ArrayExpr)
+						return NULL;
+
 					/* the actual array is here */
 					rightexpr = arraycoerce->arg;
 

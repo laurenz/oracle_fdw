@@ -600,3 +600,44 @@ ORDER BY id;
   3
 (2 rows)
 
+/*
+ * Test type coerced array parameters (bug #452)
+ */
+PREPARE stmt(varchar[]) AS SELECT id FROM typetest1 WHERE vc = ANY ($1);
+EXECUTE stmt('{varlena,nonsense}');
+ id 
+----
+  1
+(1 row)
+
+EXECUTE stmt('{varlena,nonsense}');
+ id 
+----
+  1
+(1 row)
+
+EXECUTE stmt('{varlena,nonsense}');
+ id 
+----
+  1
+(1 row)
+
+EXECUTE stmt('{varlena,nonsense}');
+ id 
+----
+  1
+(1 row)
+
+EXECUTE stmt('{varlena,nonsense}');
+ id 
+----
+  1
+(1 row)
+
+EXECUTE stmt('{varlena,nonsense}');
+ id 
+----
+  1
+(1 row)
+
+DEALLOCATE stmt;

@@ -435,3 +435,16 @@ DROP FOREIGN TABLE badtypes;
 SELECT id FROM typetest1
 WHERE vc NOT IN (SELECT * FROM (VALUES ('short'), ('other')) AS q)
 ORDER BY id;
+
+/*
+ * Test type coerced array parameters (bug #452)
+ */
+
+PREPARE stmt(varchar[]) AS SELECT id FROM typetest1 WHERE vc = ANY ($1);
+EXECUTE stmt('{varlena,nonsense}');
+EXECUTE stmt('{varlena,nonsense}');
+EXECUTE stmt('{varlena,nonsense}');
+EXECUTE stmt('{varlena,nonsense}');
+EXECUTE stmt('{varlena,nonsense}');
+EXECUTE stmt('{varlena,nonsense}');
+DEALLOCATE stmt;
