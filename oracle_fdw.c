@@ -159,6 +159,7 @@ struct OracleFdwOption
 #define OPT_NLS_LANG "nls_lang"
 #define OPT_DBSERVER "dbserver"
 #define OPT_ISOLATION_LEVEL "isolation_level"
+#define OPT_NCHAR "nchar"
 #define OPT_USER "user"
 #define OPT_PASSWORD "password"
 #define OPT_DBLINK "dblink"
@@ -187,6 +188,7 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_NLS_LANG, ForeignDataWrapperRelationId, false},
 	{OPT_DBSERVER, ForeignServerRelationId, true},
 	{OPT_ISOLATION_LEVEL, ForeignServerRelationId, false},
+	{OPT_NCHAR, ForeignServerRelationId, false},
 	{OPT_USER, UserMappingRelationId, true},
 	{OPT_PASSWORD, UserMappingRelationId, true},
 	{OPT_DBLINK, ForeignTableRelationId, false},
@@ -224,6 +226,7 @@ struct OracleFdwState {
 	char *user;                    /* Oracle username */
 	char *password;                /* Oracle password */
 	char *nls_lang;                /* Oracle locale information */
+	bool have_nchar;               /* needs support for national character conversion */
 	oracleSession *session;        /* encapsulates the active Oracle session */
 	char *query;                   /* query we issue against Oracle */
 	List *params;                  /* list of parameters needed for the query */
@@ -478,10 +481,11 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
 			(void)getIsolationLevel(((Value *)(def->arg))->val.str);
 
-		/* check valid values for "readonly" and "key" */
+		/* check valid values for "readonly", "key", "strip_zeros" and "nchar" */
 		if (strcmp(def->defname, OPT_READONLY) == 0
 				|| strcmp(def->defname, OPT_KEY) == 0
 				|| strcmp(def->defname, OPT_STRIP_ZEROS) == 0
+				|| strcmp(def->defname, OPT_NCHAR) == 0
 			)
 		{
 			char *val = ((Value *)(def->arg))->val.str;
@@ -1298,6 +1302,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
+			(int)fdw_state->have_nchar,
 			fdw_state->oraTable->pgname,
 			GetCurrentTransactionNestLevel()
 		);
@@ -1729,6 +1734,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
+			(int)fdw_state->have_nchar,
 			fdw_state->oraTable->pgname,
 			GetCurrentTransactionNestLevel()
 		);
@@ -1809,6 +1815,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
+			(int)fdw_state->have_nchar,
 			fdw_state->oraTable->pgname,
 			GetCurrentTransactionNestLevel()
 		);
@@ -2117,6 +2124,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	bool readonly = false, firstcol = true;
 	int collation = DEFAULT_COLLATION_OID;
 	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
+	bool have_nchar = false;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -2141,6 +2149,15 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_NCHAR) == 0)
+		{
+			char *nchar = ((Value *) (def->arg))->val.str;
+
+			if (pg_strcasecmp(nchar, "on") == 0
+					|| pg_strcasecmp(nchar, "yes") == 0
+					|| pg_strcasecmp(nchar, "true") == 0)
+				have_nchar = true;
+		}
 	}
 
 	/* process the options of the IMPORT FOREIGN SCHEMA command */
@@ -2283,6 +2300,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		user,
 		password,
 		nls_lang,
+		(int)have_nchar,
 		NULL,
 		1
 	);
@@ -2463,7 +2481,8 @@ struct OracleFdwState
 	List *options;
 	ListCell *cell;
 	char *isolationlevel = NULL;
-	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL, *sample = NULL, *fetch = NULL;
+	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL,
+		 *sample = NULL, *fetch = NULL, *nchar = NULL;
 	long max_long;
 
 	/*
@@ -2496,6 +2515,8 @@ struct OracleFdwState
 			sample = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
 			fetch = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_NCHAR) == 0)
+			nchar = ((Value *) (def->arg))->val.str;
 	}
 
     /* set isolation_level (or use default) */
@@ -2525,6 +2546,15 @@ struct OracleFdwState
 	else
 		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
 
+	/* convert "nchar" option to boolean (or use "false") */
+	if (nchar != NULL
+		&& (pg_strcasecmp(nchar, "on") == 0
+			|| pg_strcasecmp(nchar, "yes") == 0
+			|| pg_strcasecmp(nchar, "true") == 0))
+		fdwState->have_nchar = true;
+	else
+		fdwState->have_nchar = false;
+
 	/* check if options are ok */
 	if (table == NULL)
 		ereport(ERROR,
@@ -2541,6 +2571,7 @@ struct OracleFdwState
 		fdwState->user,
 		fdwState->password,
 		fdwState->nls_lang,
+		(int)fdwState->have_nchar,
 		pgtablename,
 		GetCurrentTransactionNestLevel()
 	);
@@ -3131,6 +3162,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	fdwState->user     = fdwState_o->user;
 	fdwState->password = fdwState_o->password;
 	fdwState->nls_lang = fdwState_o->nls_lang;
+	fdwState->have_nchar = fdwState_o->have_nchar;
 
 	foreach(lc, pull_var_clause((Node *)joinrel->reltarget->exprs, PVC_RECURSE_PLACEHOLDERS))
 	{
@@ -5071,6 +5103,7 @@ oracleConnectServer(Name srvname)
 	ListCell *cell;
 	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
 	oraIsoLevel isolation_level = DEFAULT_ISOLATION_LEVEL;
+	bool have_nchar = false;
 
 	/* look up foreign server with this name */
 	rel = table_open(ForeignServerRelationId, AccessShareLock);
@@ -5107,11 +5140,20 @@ oracleConnectServer(Name srvname)
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
 			dbserver = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-		isolation_level = getIsolationLevel(((Value *) (def->arg))->val.str);
+			isolation_level = getIsolationLevel(((Value *) (def->arg))->val.str);
 		if (strcmp(def->defname, OPT_USER) == 0)
 			user = ((Value *) (def->arg))->val.str;
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = ((Value *) (def->arg))->val.str;
+		if (strcmp(def->defname, OPT_NCHAR) == 0)
+		{
+			char *nchar = ((Value *) (def->arg))->val.str;
+
+			if ((pg_strcasecmp(nchar, "on") == 0
+				|| pg_strcasecmp(nchar, "yes") == 0
+				|| pg_strcasecmp(nchar, "true") == 0))
+			have_nchar = true;
+		}
 	}
 
 	/* guess a good NLS_LANG environment setting */
@@ -5124,6 +5166,7 @@ oracleConnectServer(Name srvname)
 		user,
 		password,
 		nls_lang,
+		(int)have_nchar,
 		NULL,
 		1
 	);
@@ -5150,6 +5193,8 @@ List
 	result = lappend(result, serializeString(fdwState->dbserver));
 	/* isolation_level */
 	result = lappend(result, serializeInt((int)fdwState->isolation_level));
+	/* have_nchar */
+	result = lappend(result, serializeInt((int)fdwState->have_nchar));
 	/* user name */
 	result = lappend(result, serializeString(fdwState->user));
 	/* password */
@@ -5270,6 +5315,10 @@ struct OracleFdwState
 
 	/* isolation_level */
 	state->isolation_level = (oraIsoLevel)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+	cell = list_next(list, cell);
+
+	/* have_nchar */
+	state->have_nchar = (bool)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 	cell = list_next(list, cell);
 
 	/* user */
@@ -5596,6 +5645,7 @@ struct OracleFdwState
 
 	copy->dbserver = pstrdup(orig->dbserver);
 	copy->isolation_level = orig->isolation_level;
+	copy->have_nchar = orig->have_nchar;
 	copy->user = pstrdup(orig->user);
 	copy->password = pstrdup(orig->password);
 	copy->nls_lang = pstrdup(orig->nls_lang);

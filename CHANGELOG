@@ -13,6 +13,12 @@ Version 2.4.0
   Enhancements:
   - Support push-down of "uuid" values.
     Per request from Asish Kumar Gaddipati.
+  - Introduce a server option "nchar", turned "off" by default.
+    This option, if set, enables the fix for NCHAR and NVARCHAR2 columns
+    introduced in 2.2.0.
+    We don't want that by default, since it causes a noticable performance
+    hit and makes UPDATEs with long strings fail with ORA-01461.
+    Problem reports by "threenotrump", "CHunter" and Phil Florent.
 
 Version 2.3.0, released 2020-09-24
   Note: When upgrading from an older version of oracle_fdw, make sure to run

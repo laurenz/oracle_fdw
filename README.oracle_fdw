@@ -183,6 +183,18 @@ Foreign server options
   is a risk of inconsistencies**.  If you want to use it, check your
   execution plans if the foreign scan could be executed more than once.
 
+- **nchar** (boolean, optional, defaults to `off`)
+
+  Setting this option to `on` chooses a more expensive character conversion
+  on the Oracle side.  This is required if you are using a single-byte
+  Oracle database character set, but have NCHAR or NVARCHAR2 columns
+  containing contain characters that cannot be represented in the database
+  character set.
+
+  This has a noticable performance impact, and it causes ORA-01461 errors
+  with UPDATE statements that set strings over 2000 bytes (or 16383 if you
+  have MAX_STRING_SIZE = EXTENDED).  This error seems to be an Oracle bug.
+
 User mapping options
 --------------------
 

@@ -86,7 +86,9 @@ static void setNullGeometry(oracleSession *session, ora_geometry *geom);
  * 		"curlevel" is the current PostgreSQL transaction level.
  */
 oracleSession
-*oracleGetSession(const char *connectstring, oraIsoLevel isolation_level, char *user, char *password, const char *nls_lang, const char *tablename, int curlevel)
+*oracleGetSession(
+	const char *connectstring, oraIsoLevel isolation_level, char *user, char *password,
+	const char *nls_lang, int have_nchar, const char *tablename, int curlevel)
 {
 	OCIEnv *envhp = NULL;
 	OCIError *errhp = NULL;
@@ -147,6 +149,7 @@ oracleSession
 
 	if (envhp == NULL)
 	{
+		ub4 handle_mode;
 		/*
 		 * Create environment and error handle.
 		 */
@@ -160,10 +163,15 @@ oracleSession
 		/* set Oracle environment */
 		setOracleEnvironment(nlscopy);
 
+		/* use OCI_NCHAR_LITERAL_REPLACE_ON only if we have to convert national characters */
+		if (have_nchar)
+			handle_mode = OCI_OBJECT | OCI_NCHAR_LITERAL_REPLACE_ON;
+		else
+			handle_mode = OCI_OBJECT;
+
 		/* create environment handle */
 		if (checkerr(
-			OCIEnvCreate((OCIEnv **) &envhp,
-				(ub4)OCI_OBJECT | OCI_NCHAR_LITERAL_REPLACE_ON,
+			OCIEnvCreate((OCIEnv **) &envhp, handle_mode,
 				(dvoid *) 0, (dvoid * (*)(dvoid *,size_t)) 0,
 				(dvoid * (*)(dvoid *, dvoid *, size_t)) 0,
 				(void (*)(dvoid *, dvoid *)) 0, (size_t) 0, (dvoid **) 0),
@@ -540,6 +548,7 @@ oracleSession
 	session->srvp = srvp;
 	session->connp = connp;
 	session->stmthp = NULL;
+	session->have_nchar = have_nchar;
 
 	/* set savepoints up to the current level */
 	oracleSetSavepoint(session, curlevel);
@@ -1743,10 +1752,11 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				}
 
 				/*
-				 * Use the more expensive character set conversion only for columns
-				 * using a national character set, where it is needed.
+				 * Use the more expensive character set conversion only if requested and only
+				 * for columns with a national character set.
 				 */
-				if ((oracle_type == ORA_TYPE_NVARCHAR2 || oracle_type == ORA_TYPE_NCHAR)
+				if (session->have_nchar
+					&& (oracle_type == ORA_TYPE_NVARCHAR2 || oracle_type == ORA_TYPE_NCHAR)
 					&& checkerr(
 						OCIAttrSet((void *)defnhp, OCI_HTYPE_DEFINE, (void *)&nchar, 0,
 							OCI_ATTR_CHARSET_FORM, session->envp->errhp),
@@ -1980,17 +1990,14 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		}
 
 		/*
-		 * Always use the more expensive character conversion, although this is
-		 * only required when we are dealing with "national character sets" on
-		 * the Oracle side.
-		 * There is room for improvement here, but that would require tracking
-		 * if the parameter corresponds to such a column in an Oracle table.
-		 * And DML performance is already something where we are not great...
+		 * Use the expensive character conversion only if we are dealing with
+		 * "national character sets" on the Oracle side.
 		 */
-		if (checkerr(
-			OCIAttrSet((void *)param->bindh, OCI_HTYPE_BIND, (void *)&nchar, 0,
-				OCI_ATTR_CHARSET_FORM, session->envp->errhp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		if (session->have_nchar
+			&& checkerr(
+				OCIAttrSet((void *)param->bindh, OCI_HTYPE_BIND, (void *)&nchar, 0,
+					OCI_ATTR_CHARSET_FORM, session->envp->errhp),
+				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 				"error executing query: OCIAttrSet failed to set charset form on bind parameter",
