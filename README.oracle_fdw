@@ -191,9 +191,10 @@ Foreign server options
   containing contain characters that cannot be represented in the database
   character set.
 
-  This has a noticable performance impact, and it causes ORA-01461 errors
-  with UPDATE statements that set strings over 2000 bytes (or 16383 if you
-  have MAX_STRING_SIZE = EXTENDED).  This error seems to be an Oracle bug.
+  Setting `nchar` to `on` has a noticable performance impact, and it causes
+  ORA-01461 errors with UPDATE statements that set strings over 2000 bytes
+  (or 16383 if you have MAX_STRING_SIZE = EXTENDED).
+  This error seems to be an Oracle bug.
 
 User mapping options
 --------------------
