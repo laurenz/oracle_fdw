@@ -18,6 +18,8 @@
 
 # Regression test results
 results
+regression.out
+regression.diffs
 
 # dependency tracking
 .deps
