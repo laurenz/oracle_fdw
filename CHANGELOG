@@ -4,11 +4,16 @@ Version 2.4.0
   - Fix a performance regression introduced in 2.3.0 by the fix for NCHAR
     and NVARCHAR2 columns.
     Reported by Phil Florent.
-  - Fix a crash with type coerced array parameters
+  - Fix a crash with type coerced array parameters.
     This can make queries fail with a WHERE condition like
        WHERE varcharcol = ANY ($1);
     where $1 is a text[].
     Reported by "samuelchoi16".
+  - Fix numeric precision in IMPORT FOREIGN SCHEMA.
+    In Oracle the precision of a NUMBER can be less than the scale,
+    but that is not allowed in PostgreSQL.
+    That leads to errors during IMPORT.
+    Reported by Alberto Dell'Era.
 
   Enhancements:
   - Support push-down of "uuid" values.

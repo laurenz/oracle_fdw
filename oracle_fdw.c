@@ -2400,7 +2400,14 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 							appendStringInfo(&buf, "numeric(%d)", typeprec);
 					}
 					else
-						appendStringInfo(&buf, "numeric(%d, %d)", typeprec, typescale);
+						/*
+						 * in Oracle, precision can be less than scale
+						 * (numbers like 0.023), but we have to increase
+						 * the precision for such columns in PostgreSQL.
+						 */
+						appendStringInfo(&buf, "numeric(%d, %d)",
+							(typeprec < typescale) ? typescale : typeprec,
+							typescale);
 					break;
 				case ORA_TYPE_FLOAT:
 					if (typeprec < 54)
