@@ -42,6 +42,9 @@
 #include "nodes/pg_list.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
+#if PG_VERSION_NUM >= 130000
+#include "optimizer/paths.h"
+#endif  /* PG_VERSION_NUM */
 #include "optimizer/planmain.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/tlist.h"
@@ -351,7 +354,10 @@ static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
 static bool optionIsTrue(const char *value);
+#if PG_VERSION_NUM < 130000
+/* this function is not exported before v13 */
 static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
+#endif  /* PG_VERSION_NUM */
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static char *deparseInterval(Datum datum);
@@ -5466,10 +5472,13 @@ optionIsTrue(const char *value)
 		return false;
 }
 
+#if PG_VERSION_NUM < 130000
 /*
  * find_em_expr_for_rel
  * 		Find an equivalence class member expression, all of whose Vars come from
  * 		the indicated relation.
+ * 		This is copied from the PostgreSQL source, because before v13 it was
+ * 		not exported.
  */
 Expr *
 find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
@@ -5494,6 +5503,7 @@ find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
 	/* We didn't find any suitable equivalence class expression */
 	return NULL;
 }
+#endif  /* PG_VERSION_NUM */
 
 /*
  * deparseDate
