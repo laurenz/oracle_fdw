@@ -767,7 +767,7 @@ EXPLAIN (COSTS off) UPDATE typetest1 t1 SET c = NULL FROM typetest1 t2 WHERE t1.
    ->  Hash Join
          Hash Cond: ((t1.vc)::text = (t2.vc)::text)
          ->  Foreign Scan on typetest1 t1
-               Oracle query: SELECT /*5acd3c53c4e9053a5bdcc9573c1042a7*/ r1."ID", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 FOR UPDATE
+               Oracle query: SELECT /*c13ac569a47338d276eb9e46bd7421a7*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 FOR UPDATE
          ->  Hash
                ->  Foreign Scan on typetest1 t2
                      Oracle query: SELECT /*68723df18097bd201061b3198f3aad61*/ r2."ID", r2."C", r2."NC", r2."VC", r2."NVC", r2."LC", r2."R", r2."U", r2."LB", r2."LR", r2."B", r2."NUM", r2."FL", r2."DB", r2."D", r2."TS", r2."IDS", r2."IYM" FROM "TYPETEST1" r2 WHERE (r2."NUM" = 3.14159)

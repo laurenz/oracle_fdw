@@ -41,6 +41,9 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
 #include "optimizer/cost.h"
+#if PG_VERSION_NUM >= 140000
+#include "optimizer/appendinfo.h"
+#endif  /* PG_VERSION_NUM */
 #include "optimizer/pathnode.h"
 #if PG_VERSION_NUM >= 130000
 #include "optimizer/paths.h"
@@ -306,7 +309,11 @@ static void oracleBeginForeignScan(ForeignScanState *node, int eflags);
 static TupleTableSlot *oracleIterateForeignScan(ForeignScanState *node);
 static void oracleEndForeignScan(ForeignScanState *node);
 static void oracleReScanForeignScan(ForeignScanState *node);
+#if PG_VERSION_NUM < 140000
 static void oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relation target_relation);
+#else
+static void oracleAddForeignUpdateTargets(PlannerInfo *root, Index rtindex, RangeTblEntry *target_rte, Relation target_relation);
+#endif
 static List *oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelation, int subplan_index);
 static void oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, int eflags);
 #if PG_VERSION_NUM >= 110000
@@ -1047,9 +1054,15 @@ ForeignScan
 		scan_relid = foreignrel->relid;
 
 		/* check if the foreign scan is for an UPDATE or DELETE */
+#if PG_VERSION_NUM < 140000
 		if (foreignrel->relid == root->parse->resultRelation &&
 			(root->parse->commandType == CMD_UPDATE ||
 			root->parse->commandType == CMD_DELETE))
+#else
+		if (bms_is_member(foreignrel->relid, root->all_result_relids) &&
+			(root->parse->commandType == CMD_UPDATE ||
+			root->parse->commandType == CMD_DELETE))
+#endif  /* PG_VERSION_NUM */
 		{
 			/* we need the table's primary key columns */
 			need_keys = true;
@@ -1418,7 +1431,16 @@ oracleReScanForeignScan(ForeignScanState *node)
  * 		Add the primary key columns as resjunk entries.
  */
 void
-oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relation target_relation)
+oracleAddForeignUpdateTargets(
+#if PG_VERSION_NUM < 140000
+	Query *parsetree,
+#else
+	PlannerInfo *root,
+	Index rtindex,
+#endif
+	RangeTblEntry *target_rte,
+	Relation target_relation
+)
 {
 	Oid relid = RelationGetRelid(target_relation);
 	TupleDesc tupdesc = target_relation->rd_att;
@@ -1447,10 +1469,12 @@ oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relat
 				if (optionIsTrue(((Value *)(def->arg))->val.str))
 				{
 					Var *var;
+#if PG_VERSION_NUM < 140000
 					TargetEntry *tle;
 
 					/* Make a Var representing the desired value */
-					var = makeVar(parsetree->resultRelation,
+					var = makeVar(
+							parsetree->resultRelation,
 							attrno,
 							att->atttypid,
 							att->atttypmod,
@@ -1465,6 +1489,18 @@ oracleAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *target_rte, Relat
 
 					/* ... and add it to the query's targetlist */
 					parsetree->targetList = lappend(parsetree->targetList, tle);
+#else
+					/* Make a Var representing the desired value */
+					var = makeVar(
+							rtindex,
+							attrno,
+							att->atttypid,
+							att->atttypmod,
+							att->attcollation,
+							0);
+
+					add_row_identity_var(root, var, rtindex, NameStr(att->attname));
+#endif  /* PG_VERSION_NUM */
 
 					has_key = true;
 				}
@@ -1727,7 +1763,11 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	struct paramDesc *param;
 	HeapTuple tuple;
 	int i;
+#if PG_VERSION_NUM < 140000
 	Plan *subplan = mtstate->mt_plans[subplan_index]->plan;
+#else
+	Plan *subplan = outerPlanState(mtstate)->plan;
+#endif
 
 	elog(DEBUG1, "oracle_fdw: begin foreign table modify on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 

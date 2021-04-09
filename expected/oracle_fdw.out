@@ -243,7 +243,6 @@ WITH upd (id, c, lb, d, ts) AS
                     ts = ts + '1 day'
    WHERE id < 3 RETURNING id + 1, c, lb, d, ts)
 SELECT * FROM upd ORDER BY id;
-WARNING:  column number 19 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
  id |     c      |      lb      |     d      |                 ts                  
 ----+------------+--------------+------------+-------------------------------------
   2 | fixed chau | \xdeadbeef00 | 10-21-1968 | Tue Jan 27 15:02:54.893532 2009 PST
@@ -343,12 +342,12 @@ DELETE FROM typetest1 WHERE id = 5;
  * Test EXPLAIN support.
  */
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;
-                                                                                                                                 QUERY PLAN                                                                                                                                  
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                      QUERY PLAN                                                                                                                                      
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1
    Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p7 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*3f20c4dd8d9918f2fe414510067e0a60*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
+         Oracle query: SELECT /*15030992d3ac8035d2b16b61b10953ec*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
 (4 rows)
 
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
