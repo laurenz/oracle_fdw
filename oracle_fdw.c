@@ -1841,7 +1841,21 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	if (plan && plan->onConflictAction != ONCONFLICT_NONE)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
-				errmsg("INSERT with ON CONFLICT clause is not supported")));
+				 errmsg("INSERT with ON CONFLICT clause is not supported")));
+
+	/*
+	 * If the foreign table we are about to insert routed rows into is also an
+	 * UPDATE subplan result rel that will be updated later, proceeding with
+	 * the INSERT will result in the later UPDATE incorrectly modifying those
+	 * routed rows, so prevent the INSERT --- it would be nice if we could
+	 * handle this case; but for now, throw an error for safety.
+	 */
+	if (plan && plan->operation == CMD_UPDATE &&
+		(rinfo->ri_usesFdwDirectModify ||
+		 rinfo->ri_FdwState))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("cannot route tuples into foreign table to be updated")));
 
 	fdw_state = getFdwState(RelationGetRelid(rinfo->ri_RelationDesc), NULL);
 
