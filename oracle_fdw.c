@@ -246,6 +246,7 @@ struct OracleFdwState {
 	unsigned int prefetch;         /* number of rows to prefetch */
 	char *order_clause;            /* for sort-pushdown */
 	char *where_clause;            /* deparsed where clause */
+	char *limit_clause;            /* deparsed limit clause */
 
 	/*
 	 * Restriction clauses, divided into safe and unsafe to pushdown subsets.
@@ -387,6 +388,7 @@ static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwStat
 static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
 static oraIsoLevel getIsolationLevel(const char *isolation_level);
+char * deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel);
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
@@ -729,6 +731,69 @@ _PG_init(void)
 }
 
 /*
+ * Deparse LIMIT clause translated for ORACLE into FETCH FIRST N ROWS ONLY
+ * If OFFSET is set then do not append clause at all, the limit +offset
+ * will be applied localy.
+ */
+char *
+deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel)
+{
+	StringInfoData limit_clause;
+
+	initStringInfo(&limit_clause);
+
+	if (root->parse->limitCount != NULL && root->parse->limitOffset == NULL)
+	{
+		if (IsA(root->parse->limitCount, Const) && !((Const *) root->parse->limitCount)->constisnull)
+		{
+			int limit_at_end = false;
+
+			/*
+			 * we must be sure that there is no ORDER BY clause that
+			 * appears after the LIMIT clause otherwise we will have
+			 * wrong results.
+			 */
+			if (root->parse->sortClause != NULL)
+			{
+				ListCell   *lc;
+				foreach (lc, root->processed_tlist)
+				{
+					Node *ptl = (Node *) lfirst(lc);
+					if (IsA(ptl, TargetEntry))
+					{
+						TargetEntry *tge = (TargetEntry *) ptl;
+						/* Aggregate function are pushed down so it is safe to continue */
+						if (IsA(tge->expr, Aggref))
+							continue;
+						if (tge->ressortgroupref > 0 &&
+								tge->resorigcol == 0 &&
+								(tge->resname &&
+									strcmp(tge->resname, "agg_target") != 0)
+						)
+							limit_at_end = true;
+					}
+				}
+			}
+			if (!limit_at_end)
+			{
+				char *limit_val;
+
+				appendStringInfoString(&limit_clause, " FETCH FIRST ");
+				limit_val = deparseExpr(
+							fdwState->session, baserel,
+							(Expr *) root->parse->limitCount,
+							fdwState->oraTable,
+							&(fdwState->params)
+						);
+				appendStringInfo(&limit_clause, "%s", limit_val);
+				appendStringInfoString(&limit_clause, " ROWS ONLY");
+			}
+		}
+	}
+	return limit_clause.data;
+}
+
+/*
  * oracleGetForeignRelSize
  * 		Get an OracleFdwState for this foreign scan.
  * 		Construct the remote SQL query.
@@ -767,7 +832,6 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 								&(fdwState->local_conds),
 								&(fdwState->remote_conds)
 							);
-
 	/* release Oracle session (will be cached) */
 	pfree(fdwState->session);
 	fdwState->session = NULL;
@@ -885,6 +949,18 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 	/* set order clause */
 	if (usable_pathkeys != NIL)
 		fdwState->order_clause = orderedquery.data;
+	else
+	{
+		/* Add LIMIT (FETCH N FIRST ROW ONLY) expression. */
+		if (!root->parse->sortClause)
+		{
+			if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
+					||  (list_length(root->parse->rtable) == 1) )
+			{
+				fdwState->limit_clause = deparseLimit(root, fdwState, baserel);
+			}
+		}
+	}
 
 	/* add the only path */
 	add_path(baserel,
@@ -2834,6 +2910,10 @@ char
 	/* append ORDER BY clause if all its expressions can be pushed down */
 	if (fdwState->order_clause)
 		appendStringInfo(&query, " ORDER BY%s", fdwState->order_clause);
+
+	/* append LIMIT clause if there is no order by clause */
+	if (fdwState->limit_clause)
+		appendStringInfo(&query, "%s", fdwState->limit_clause);
 
 	/* append FOR UPDATE if if the scan is for a modification */
 	if (modify)
