@@ -456,9 +456,10 @@ DEALLOCATE stmt;
 -- The LIMIT clause must be pushed down
 EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 LIMIT 2;
 SELECT d FROM typetest1 LIMIT 2;
--- With an ORDER BY clause the LIMIT clause must NOT be pushed down
 EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 ORDER BY d LIMIT 2;
 SELECT d FROM typetest1 ORDER BY d LIMIT 2;
+EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 GROUP BY d LIMIT 2;
+SELECT d FROM typetest1 GROUP BY d LIMIT 2;
 -- With an OFFSET clause the limit clause must NOT be pushed down
 EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 LIMIT 1 OFFSET 1;
 SELECT d FROM typetest1 ORDER BY d LIMIT 1 OFFSET 1;
