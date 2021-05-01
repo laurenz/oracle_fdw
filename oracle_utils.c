@@ -64,6 +64,7 @@ static ora_geometry null_geometry = { NULL, NULL, -1, NULL, -1, NULL };
 /*
  * Helper functions
  */
+static void getServerVersion(oracleSession *session);
 static void oracleSetSavepoint(oracleSession *session, int nest_level);
 static void setOracleEnvironment(char *nls_lang);
 static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
@@ -549,6 +550,9 @@ oracleSession
 	session->connp = connp;
 	session->stmthp = NULL;
 	session->have_nchar = have_nchar;
+
+	/* get the server version */
+	getServerVersion(session);
 
 	/* set savepoints up to the current level */
 	oracleSetSavepoint(session, curlevel);
@@ -2333,6 +2337,20 @@ oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_p
 void
 oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch)
 {
+	*major = session->server_version[0];
+	*minor = session->server_version[1];
+	*update = session->server_version[2];
+	*patch = session->server_version[3];
+	*port_patch = session->server_version[4];
+}
+
+/*
+ * getServerVersion
+ * 		Retrieves the server version and sets it in "session"
+ */
+void
+getServerVersion(oracleSession *session)
+{
 	OraText version_text[1000];
 	ub4 version;
 
@@ -2346,11 +2364,11 @@ oracleServerVersion(oracleSession *session, int *major, int *minor, int *update,
 			oraMessage);
 	}
 
-	*major = (version >> 24) & 0x000000FF;
-	*minor = (version >> 20) & 0x0000000F;
-	*update = (version >> 12) & 0x000000FF;
-	*patch = (version >> 8) & 0x0000000F;
-	*port_patch = (version >> 0) & 0x000000FF;
+	session->server_version[0] = (version >> 24) & 0x000000FF;
+	session->server_version[1] = (version >> 20) & 0x0000000F;
+	session->server_version[2] = (version >> 12) & 0x000000FF;
+	session->server_version[3] = (version >> 8) & 0x0000000F;
+	session->server_version[4] = (version >> 0) & 0x000000FF;
 }
 
 /*

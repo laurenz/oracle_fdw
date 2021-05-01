@@ -62,6 +62,7 @@ struct oracleSession
 	struct connEntry *connp;
 	OCIStmt *stmthp;
 	int have_nchar;
+	int server_version[5];
 };
 #endif
 typedef struct oracleSession oracleSession;
