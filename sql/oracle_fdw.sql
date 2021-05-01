@@ -8,7 +8,7 @@ SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
-CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true');
+CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '//192.168.1.26:1521/orcl', isolation_level 'read_committed', nchar 'true');
 
 CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 
@@ -460,6 +460,6 @@ EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 ORDER BY d LIMIT 2;
 SELECT d FROM typetest1 ORDER BY d LIMIT 2;
 EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 GROUP BY d LIMIT 2;
 SELECT d FROM typetest1 GROUP BY d LIMIT 2;
--- With an OFFSET clause the limit clause must NOT be pushed down
+-- With an OFFSET clause the limit clause is pushed down using ROWNUM
 EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 LIMIT 1 OFFSET 1;
 SELECT d FROM typetest1 ORDER BY d LIMIT 1 OFFSET 1;

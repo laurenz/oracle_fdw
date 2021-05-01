@@ -104,6 +104,9 @@ oracleSession
 	ub4 is_connected;
 	int retry = 1;
 	ub4 isolevel = OCI_TRANS_SERIALIZABLE;
+	int major, minor, update, patch, port_patch;
+	char *err;
+	char version[8] = {0};
 
 	/* convert isolation_level to Oracle OCI value */
 	switch(isolation_level)
@@ -549,6 +552,13 @@ oracleSession
 	session->connp = connp;
 	session->stmthp = NULL;
 	session->have_nchar = have_nchar;
+
+	/* get the server version */
+	oracleServerVersion(session, &major, &minor, &update, &patch, &port_patch);
+	snprintf(version, 7, "%d.%d", major, minor);
+	session->oraShortVersion = strtof(version, &err);
+	if (err == version) /* conversion error */
+		session->oraShortVersion = 0;
 
 	/* set savepoints up to the current level */
 	oracleSetSavepoint(session, curlevel);
@@ -3246,4 +3256,13 @@ setNullGeometry(oracleSession *session, ora_geometry *geom)
 
 	geom->geometry = null_geometry.geometry;
 	geom->indicator = null_geometry.indicator;
+}
+
+int
+min_oracle_version(oracleSession *session, float refversion)
+{
+	if (session && (session->oraShortVersion >= refversion))
+		return 1;
+
+	return 0;
 }

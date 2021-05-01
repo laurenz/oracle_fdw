@@ -352,7 +352,7 @@ static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *e
 static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
-static char *deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds);
+static char *deparseWhereConditions(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds);
 static char *guessNlsLang(char *nls_lang);
 static oracleSession *oracleConnectServer(Name srvname);
 static List *serializePlanData(struct OracleFdwState *fdwState);
@@ -748,15 +748,18 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 		{
 			char *limit_val;
 
-			appendStringInfoString(&limit_clause, " FETCH FIRST ");
-			limit_val = deparseExpr(
-						fdwState->session, baserel,
-						(Expr *) root->parse->limitCount,
-						fdwState->oraTable,
-						&(fdwState->params)
-					);
-			appendStringInfo(&limit_clause, "%s", limit_val);
-			appendStringInfoString(&limit_clause, " ROWS ONLY");
+			if (min_oracle_version(fdwState->session, 10.2) > 0)
+			{
+				appendStringInfoString(&limit_clause, " FETCH FIRST ");
+				limit_val = deparseExpr(
+							fdwState->session, baserel,
+							(Expr *) root->parse->limitCount,
+							fdwState->oraTable,
+							&(fdwState->params)
+						);
+				appendStringInfo(&limit_clause, "%s", limit_val);
+				appendStringInfoString(&limit_clause, " ROWS ONLY");
+			}
 		}
 	}
 	return limit_clause.data;
@@ -795,15 +798,12 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	 * Those conditions that can be pushed down will be collected into
 	 * an Oracle WHERE clause.
 	 */
-	fdwState->where_clause = deparseWhereConditions(
+	fdwState->where_clause = deparseWhereConditions(	root,
 								fdwState,
 								baserel,
 								&(fdwState->local_conds),
 								&(fdwState->remote_conds)
 							);
-	/* release Oracle session (will be cached) */
-	pfree(fdwState->session);
-	fdwState->session = NULL;
 
 	/* use a random "high" value for cost */
 	fdwState->startup_cost = 10000.0;
@@ -850,6 +850,8 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 	List *usable_pathkeys = NIL;
 	ListCell *cell;
 	char *delim = " ";
+
+	elog(DEBUG1, "oracle_fdw: plan foreign paths");
 
 	initStringInfo(&orderedquery);
 
@@ -919,10 +921,22 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 	if (usable_pathkeys != NIL)
 		fdwState->order_clause = orderedquery.data;
 
-	/* Add LIMIT (FETCH N FIRST ROW ONLY) expression. */
-	if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
-			||  (list_length(root->parse->rtable) == 1) )
-		fdwState->limit_clause = deparseLimit(root, fdwState, baserel);
+	/*
+	 * Add LIMIT (FETCH N FIRST ROW ONLY) expression for Oracle
+	 * version >= 12.2. For prior Oracle version the LIMIT clause
+	 * with ROWNUM is added in function deparseWhereConditions(),
+	 * same if there is an OFFSET clause.
+	 */
+	if (min_oracle_version(fdwState->session, 10.2) > 0 && root->parse->limitOffset == NULL)
+	{
+		if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
+				||  (list_length(root->parse->rtable) == 1) )
+			fdwState->limit_clause = deparseLimit(root, fdwState, baserel);
+	}
+
+	/* release Oracle session (will be cached) */
+	pfree(fdwState->session);
+	fdwState->session = NULL;
 
 	/* add the only path */
 	add_path(baserel,
@@ -2589,6 +2603,8 @@ struct OracleFdwState
 	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL,
 		 *sample = NULL, *fetch = NULL, *nchar = NULL;
 	long max_long;
+
+	elog(DEBUG1, "oracle_fdw: get foreign state");
 
 	/*
 	 * Get all relevant options from the foreign table, the user mapping,
@@ -5043,7 +5059,7 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
  * 		an Oracle WHERE clause that is returned.
  */
 char *
-deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds)
+deparseWhereConditions(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds)
 {
 	List *conditions = baserel->baserestrictinfo;
 	ListCell *cell;
@@ -5061,7 +5077,8 @@ deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, Lis
 					fdwState->oraTable,
 					&(fdwState->params)
 				);
-		if (where != NULL) {
+		if (where != NULL)
+		{
 			*remote_conds = lappend(*remote_conds, ((RestrictInfo *)lfirst(cell))->clause);
 
 			/* append new WHERE clause to query string */
@@ -5072,6 +5089,56 @@ deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, Lis
 		else
 			*local_conds = lappend(*local_conds, ((RestrictInfo *)lfirst(cell))->clause);
 	}
+
+	/*
+	 * Add the LIMIT clause in the form of a ROWNUM condition for
+	 * Oracle version prior to 10.2 or that there is an OFFSET
+	 * clause. Otherwise add LIMIT as a FETCH N FIRST ROW ONLY
+	 * expression after ORDER BY, * see oracleGetForeignPaths().
+	 */
+	if (min_oracle_version(fdwState->session, 10.2) == 0 ||
+			(root->parse->limitCount != NULL && root->parse->limitOffset != NULL))
+	{
+		if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
+				||  (list_length(root->parse->rtable) == 1) )
+		{
+			if (root->parse->limitCount != NULL)
+			{
+				if (IsA(root->parse->limitCount, Const) &&
+						!((Const *) root->parse->limitCount)->constisnull)
+				{
+					char *limit_val;
+					limit_val = deparseExpr(
+								fdwState->session, baserel,
+								(Expr *) root->parse->limitCount,
+								fdwState->oraTable,
+								&(fdwState->params)
+							);
+					if (root->parse->limitOffset == NULL)
+						appendStringInfo(&where_clause, " %s ROWNUM <= %s",
+												keyword, limit_val);
+					else
+					{
+						char *offset_val;
+						offset_val = deparseExpr(
+									fdwState->session, baserel,
+									(Expr *) root->parse->limitOffset,
+									fdwState->oraTable,
+									&(fdwState->params)
+								);
+						appendStringInfo(&where_clause,
+										" %s ROWNUM >= %d AND ROWNUM <= %d",
+										keyword,
+										pg_atoi(offset_val, sizeof(int32), ' '),
+										pg_atoi(offset_val, sizeof(int32), ' ')
+											+ pg_atoi(limit_val, sizeof(int32), ' ')
+										);
+					}
+				}
+			}
+		}
+	}
+
 	return where_clause.data;
 }
 
@@ -5213,6 +5280,8 @@ oracleConnectServer(Name srvname)
 	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
 	oraIsoLevel isolation_level = DEFAULT_ISOLATION_LEVEL;
 	bool have_nchar = false;
+
+	elog(DEBUG1, "oracle_fdw: oracleConnectServer");
 
 	/* look up foreign server with this name */
 	rel = table_open(ForeignServerRelationId, AccessShareLock);
