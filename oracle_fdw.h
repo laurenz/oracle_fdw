@@ -39,6 +39,7 @@ struct srvEntry
 	OCIServer *srvhp;
 	struct srvEntry *next;
 	struct connEntry *connlist;
+	int server_version[5];
 };
 
 struct envEntry

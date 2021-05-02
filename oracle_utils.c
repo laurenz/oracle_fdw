@@ -64,7 +64,7 @@ static ora_geometry null_geometry = { NULL, NULL, -1, NULL, -1, NULL };
 /*
  * Helper functions
  */
-static void getServerVersion(oracleSession *session);
+static void getServerVersion(struct srvEntry *srvp, OCIError *errhp);
 static void oracleSetSavepoint(oracleSession *session, int nest_level);
 static void setOracleEnvironment(char *nls_lang);
 static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
@@ -103,7 +103,7 @@ oracleSession
 	struct connEntry *connp;
 	char pid[30], *nlscopy = NULL;
 	ub4 is_connected;
-	int retry = 1;
+	int retry = 1, i;
 	ub4 isolevel = OCI_TRANS_SERIALIZABLE;
 
 	/* convert isolation_level to Oracle OCI value */
@@ -479,6 +479,9 @@ oracleSession
 				oraMessage);
 		}
 
+		/* store the server version in the service handle cache */
+		getServerVersion(srvp, errhp);
+
 		/* add session handle to cache */
 		if ((connp = malloc(sizeof(struct connEntry))) == NULL)
 		{
@@ -550,9 +553,8 @@ oracleSession
 	session->connp = connp;
 	session->stmthp = NULL;
 	session->have_nchar = have_nchar;
-
-	/* get the server version */
-	getServerVersion(session);
+	for (i=0; i<5; ++i)
+		session->server_version[i] = srvp->server_version[i];
 
 	/* set savepoints up to the current level */
 	oracleSetSavepoint(session, curlevel);
@@ -2346,29 +2348,29 @@ oracleServerVersion(oracleSession *session, int *major, int *minor, int *update,
 
 /*
  * getServerVersion
- * 		Retrieves the server version and sets it in "session"
+ * 		Retrieves the server version and stores it in the service handle cache.
  */
 void
-getServerVersion(oracleSession *session)
+getServerVersion(struct srvEntry *srvp, OCIError *errhp)
 {
 	OraText version_text[1000];
 	ub4 version;
 
 	/* get version information from remote server */
 	if (checkerr(
-		OCIServerRelease(session->srvp->srvhp, session->envp->errhp, version_text, 1000, OCI_HTYPE_SERVER, &version),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		OCIServerRelease(srvp->srvhp, errhp, version_text, 1000, OCI_HTYPE_SERVER, &version),
+		(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
 			"error getting server version: OCIServerRelease failed to retrieve version",
 			oraMessage);
 	}
 
-	session->server_version[0] = (version >> 24) & 0x000000FF;
-	session->server_version[1] = (version >> 20) & 0x0000000F;
-	session->server_version[2] = (version >> 12) & 0x000000FF;
-	session->server_version[3] = (version >> 8) & 0x0000000F;
-	session->server_version[4] = (version >> 0) & 0x000000FF;
+	srvp->server_version[0] = (version >> 24) & 0x000000FF;
+	srvp->server_version[1] = (version >> 20) & 0x0000000F;
+	srvp->server_version[2] = (version >> 12) & 0x000000FF;
+	srvp->server_version[3] = (version >> 8) & 0x0000000F;
+	srvp->server_version[4] = (version >> 0) & 0x000000FF;
 }
 
 /*
