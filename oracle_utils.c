@@ -3267,3 +3267,20 @@ setNullGeometry(oracleSession *session, ora_geometry *geom)
 	geom->geometry = null_geometry.geometry;
 	geom->indicator = null_geometry.indicator;
 }
+
+/*
+ * min_oracle_version:
+ * 		Verify that the Oracle server version correspond
+ * 		to a minimum major and minor number.
+ */
+int
+min_oracle_version(oracleSession *session, int major, int minor)
+{
+	if (session->server_version[0] > major
+			|| (session->server_version[0] == major
+				&& session->server_version[1] > minor))
+	       return 1;
+
+	return 0;
+}
+

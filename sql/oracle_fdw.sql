@@ -448,3 +448,19 @@ EXECUTE stmt('{varlena,nonsense}');
 EXECUTE stmt('{varlena,nonsense}');
 EXECUTE stmt('{varlena,nonsense}');
 DEALLOCATE stmt;
+
+
+/*
+ * Test pushdown of LIMIT clause.
+ */
+
+-- The limit clause must be pushed down (not prior Oracle 12)
+EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 LIMIT 2;
+SELECT d FROM typetest1 LIMIT 2;
+EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 ORDER BY d LIMIT 2;
+SELECT d FROM typetest1 ORDER BY d LIMIT 2;
+-- With an OFFET clause the limit clause must NOT be pushed down
+EXPLAIN (VERBOSE on, COSTS off) SELECT d FROM typetest1 LIMIT 1 OFFSET 1;
+SELECT d FROM typetest1 ORDER BY d LIMIT 1 OFFSET 1;
+EXPLAIN (VERBOSE on, COSTS off) SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
+SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
