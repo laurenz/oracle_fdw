@@ -736,8 +736,8 @@ _PG_init(void)
 
 /*
  * Deparse LIMIT clause translated for ORACLE into FETCH FIRST N ROWS ONLY
- * If OFFSET is set then do not append clause at all, the limit +offset
- * will be applied localy.
+ * If OFFSET is set then current offset value is added to the LIMIT value
+ * so that it will give the Oracle optimizer the right clue.
  */
 char *
 deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel)
@@ -746,52 +746,33 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 
 	initStringInfo(&limit_clause);
 
-	if (root->parse->limitCount != NULL && root->parse->limitOffset == NULL)
+	if (root->parse->limitCount != NULL && !root->parse->groupClause)
 	{
 		if (IsA(root->parse->limitCount, Const) && !((Const *) root->parse->limitCount)->constisnull)
 		{
-			int limit_at_end = false;
+			char *limit_val;
+			char *offset_val;
 
-			/*
-			 * we must be sure that there is no ORDER BY clause that
-			 * appears after the LIMIT clause otherwise we will have
-			 * wrong results.
-			 */
-			if (root->parse->sortClause != NULL)
+			appendStringInfoString(&limit_clause, " FETCH FIRST ");
+			limit_val = deparseExpr(
+						fdwState->session, baserel,
+						(Expr *) root->parse->limitCount,
+						fdwState->oraTable,
+						&(fdwState->params)
+					);
+			if (root->parse->limitOffset != NULL)
 			{
-				ListCell   *lc;
-				foreach (lc, root->processed_tlist)
-				{
-					Node *ptl = (Node *) lfirst(lc);
-					if (IsA(ptl, TargetEntry))
-					{
-						TargetEntry *tge = (TargetEntry *) ptl;
-						/* Aggregate function are pushed down so it is safe to continue */
-						if (IsA(tge->expr, Aggref))
-							continue;
-						if (tge->ressortgroupref > 0 &&
-								tge->resorigcol == 0 &&
-								(tge->resname &&
-									strcmp(tge->resname, "agg_target") != 0)
-						)
-							limit_at_end = true;
-					}
-				}
-			}
-			if (!limit_at_end)
-			{
-				char *limit_val;
-
-				appendStringInfoString(&limit_clause, " FETCH FIRST ");
-				limit_val = deparseExpr(
+				offset_val = deparseExpr(
 							fdwState->session, baserel,
-							(Expr *) root->parse->limitCount,
+							(Expr *) root->parse->limitOffset,
 							fdwState->oraTable,
 							&(fdwState->params)
 						);
-				appendStringInfo(&limit_clause, "%s", limit_val);
-				appendStringInfoString(&limit_clause, " ROWS ONLY");
+				appendStringInfo(&limit_clause, "%s+%s", limit_val, offset_val);
 			}
+			else
+				appendStringInfo(&limit_clause, "%s", limit_val);
+			appendStringInfoString(&limit_clause, " ROWS ONLY");
 		}
 	}
 	return limit_clause.data;
@@ -951,10 +932,9 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 		fdwState->order_clause = orderedquery.data;
 
 	/*
-	 * Add LIMIT (FETCH N FIRST ROW ONLY) expression if not OFFSET clause
-	 * is used and that oracle version >= 12.
+	 * Add LIMIT (FETCH N FIRST ROW ONLY) expression if oracle version >= 12.
 	 */
-	if (root->parse->limitOffset == NULL && min_oracle_version(fdwState->session, 12, 0))
+	if (min_oracle_version(fdwState->session, 12, 0))
 	{
 		if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
 				||  (list_length(root->parse->rtable) == 1) )
