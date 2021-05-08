@@ -773,9 +773,12 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 			else
 				appendStringInfo(&limit_clause, "%s", limit_val);
 			appendStringInfoString(&limit_clause, " ROWS ONLY");
+
+			return limit_clause.data;
 		}
 	}
-	return limit_clause.data;
+
+	return NULL;
 }
 
 /*
