@@ -754,20 +754,10 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 			char *offset_val;
 
 			appendStringInfoString(&limit_clause, " FETCH FIRST ");
-			limit_val = deparseExpr(
-						fdwState->session, baserel,
-						(Expr *) root->parse->limitCount,
-						fdwState->oraTable,
-						&(fdwState->params)
-					);
-			if (root->parse->limitOffset != NULL)
+			limit_val = datumToString(((Const *) root->parse->limitCount)->constvalue, ((Const *) root->parse->limitCount)->consttype);
+			if (IsA(root->parse->limitOffset, Const) && !((Const *) root->parse->limitOffset)->constisnull)
 			{
-				offset_val = deparseExpr(
-							fdwState->session, baserel,
-							(Expr *) root->parse->limitOffset,
-							fdwState->oraTable,
-							&(fdwState->params)
-						);
+				offset_val = datumToString(((Const *) root->parse->limitOffset)->constvalue, ((Const *) root->parse->limitOffset)->consttype);
 				appendStringInfo(&limit_clause, "%s+%s", limit_val, offset_val);
 			}
 			else
