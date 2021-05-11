@@ -752,19 +752,37 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 		{
 			char *limit_val;
 			char *offset_val;
+			int add_limit_clause = true;
+			ListCell   *lc;
 
-			appendStringInfoString(&limit_clause, " FETCH FIRST ");
-			limit_val = datumToString(((Const *) root->parse->limitCount)->constvalue, ((Const *) root->parse->limitCount)->consttype);
-			if (IsA(root->parse->limitOffset, Const) && !((Const *) root->parse->limitOffset)->constisnull)
+			/* we don't append the LIMIT clause if there is aggregate function used */
+			foreach (lc, root->processed_tlist)
 			{
-				offset_val = datumToString(((Const *) root->parse->limitOffset)->constvalue, ((Const *) root->parse->limitOffset)->consttype);
-				appendStringInfo(&limit_clause, "%s+%s", limit_val, offset_val);
+				Node *ptl = (Node *) lfirst(lc);
+				if (IsA(ptl, TargetEntry))
+				{
+					TargetEntry *tge = (TargetEntry *) ptl;
+					if (IsA(tge->expr, Aggref))
+						add_limit_clause = false;
+				}
 			}
-			else
-				appendStringInfo(&limit_clause, "%s", limit_val);
-			appendStringInfoString(&limit_clause, " ROWS ONLY");
 
-			return limit_clause.data;
+			if (add_limit_clause)
+			{
+				appendStringInfoString(&limit_clause, " FETCH FIRST ");
+				limit_val = datumToString(((Const *) root->parse->limitCount)->constvalue, ((Const *) root->parse->limitCount)->consttype);
+				if (root->parse->limitOffset != NULL && IsA(root->parse->limitOffset, Const)
+						&& !((Const *) root->parse->limitOffset)->constisnull)
+				{
+					offset_val = datumToString(((Const *) root->parse->limitOffset)->constvalue, ((Const *) root->parse->limitOffset)->consttype);
+					appendStringInfo(&limit_clause, "%s+%s", limit_val, offset_val);
+				}
+				else
+					appendStringInfo(&limit_clause, "%s", limit_val);
+				appendStringInfoString(&limit_clause, " ROWS ONLY");
+
+				return limit_clause.data;
+			}
 		}
 	}
 
