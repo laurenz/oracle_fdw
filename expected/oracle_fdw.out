@@ -5,7 +5,7 @@
 SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
-CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '//192.168.1.34:1521/orcl', isolation_level 'read_committed', nchar 'true');
+CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true');
 CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 -- drop the Oracle tables if they exist
 DO
@@ -746,4 +746,14 @@ SELECT count(*) FROM typetest1 LIMIT 1;
 -------
      3
 (1 row)
+
+-- The LIMIT clause must not be pushed if there is a local WHERE condition
+EXPLAIN (COSTS OFF) SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Foreign Scan on typetest1
+         Filter: ((vc)::text < 'u'::text)
+         Oracle query: SELECT /*072b982b9aa0c38d3ad556626000d2d7*/ r1."ID", r1."VC" FROM "TYPETEST1" r1
+(4 rows)
 

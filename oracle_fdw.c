@@ -943,9 +943,10 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 		fdwState->order_clause = orderedquery.data;
 
 	/*
-	 * Add LIMIT (FETCH N FIRST ROW ONLY) expression if oracle version >= 12.
+	 * Add LIMIT (FETCH N FIRST ROW ONLY) expression if oracle version >= 12
+	 * and if there is not local WHERE condition.
 	 */
-	if (min_oracle_version(fdwState->session, 12, 0))
+	if (min_oracle_version(fdwState->session, 12, 0) && list_length(fdwState->local_conds) == 0)
 	{
 		if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
 				||  (list_length(root->parse->rtable) == 1) )
