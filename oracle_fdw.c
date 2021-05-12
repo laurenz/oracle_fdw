@@ -246,6 +246,7 @@ struct OracleFdwState {
 	unsigned int prefetch;         /* number of rows to prefetch */
 	char *order_clause;            /* for sort-pushdown */
 	char *where_clause;            /* deparsed where clause */
+	char *limit_clause;            /* deparsed limit clause */
 
 	/*
 	 * Restriction clauses, divided into safe and unsafe to pushdown subsets.
@@ -387,6 +388,7 @@ static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwStat
 static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
 static oraIsoLevel getIsolationLevel(const char *isolation_level);
+static char *deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel);
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
@@ -742,7 +744,7 @@ void
 oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 {
 	struct OracleFdwState *fdwState;
-	int i;
+	int i, major, minor, update, patch, port_patch;
 	double ntuples = -1;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan");
@@ -771,6 +773,17 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 								&(fdwState->local_conds),
 								&(fdwState->remote_conds)
 							);
+
+	/* try to push down LIMIT from Oracle 12.2 on */
+	oracleServerVersion(fdwState->session, &major, &minor, &update, &patch, &port_patch);
+	if (major > 12 || (major == 12 && minor > 1))
+	{
+		if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
+				||  (list_length(root->parse->rtable) == 1) )
+		{
+			fdwState->limit_clause = deparseLimit(root, fdwState, baserel);
+		}
+	}
 
 	/* release Oracle session (will be cached) */
 	pfree(fdwState->session);
@@ -2838,6 +2851,10 @@ char
 	/* append ORDER BY clause if all its expressions can be pushed down */
 	if (fdwState->order_clause)
 		appendStringInfo(&query, " ORDER BY%s", fdwState->order_clause);
+
+	/* append FETCH FIRST n ROWS ONLY if the LIMIT can be pushed down */
+	if (fdwState->limit_clause)
+		appendStringInfo(&query, " %s", fdwState->limit_clause);
 
 	/* append FOR UPDATE if if the scan is for a modification */
 	if (modify)
@@ -6690,6 +6707,62 @@ getIsolationLevel(const char *isolation_level)
 				errhint("Valid values in this context are: serializable/read_committed/read_only")));
 
 	return val;
+}
+
+/*
+ * deparseLimit
+ * 		Deparse LIMIT clause into FETCH FIRST N ROWS ONLY.
+ * 		If OFFSET is set, the offset value is added to the LIMIT value
+ * 		to give the Oracle optimizer the right clue.
+ */
+char *
+deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel)
+{
+	StringInfoData limit_clause;
+	char *limit_val, *offset_val = NULL;
+
+	/* don't push down LIMIT if the query has a GROUP BY clause or aggregates */
+	if (root->parse->groupClause != NULL || root->parse->hasAggs)
+		return NULL;
+
+	/* only push down LIMIT if all WHERE conditions can be pushed down */
+	if (fdwState->local_conds != NIL)
+		return NULL;
+
+	/* only push down constant LIMITs that are not NULL */
+	if (root->parse->limitCount != NULL && IsA(root->parse->limitCount, Const))
+	{
+		Const *limit = (Const *)root->parse->limitCount;
+
+		if (limit->constisnull)
+			return NULL;
+
+		limit_val = datumToString(limit->constvalue, limit->consttype);
+	}
+	else
+		return NULL;
+
+	/* only consider OFFSETS that are non-NULL constants */
+	if (root->parse->limitOffset != NULL && IsA(root->parse->limitOffset, Const))
+	{
+		Const *offset = (Const *)root->parse->limitOffset;
+
+		if (! offset->constisnull)
+			offset_val = datumToString(offset->constvalue, offset->consttype);
+	}
+
+	initStringInfo(&limit_clause);
+
+	if (offset_val)
+		appendStringInfo(&limit_clause,
+						 "FETCH FIRST %s+%s ROWS ONLY",
+						 limit_val, offset_val);
+	else
+		appendStringInfo(&limit_clause,
+						 "FETCH FIRST %s ROWS ONLY",
+						 limit_val);
+
+	return limit_clause.data;
 }
 
 /*

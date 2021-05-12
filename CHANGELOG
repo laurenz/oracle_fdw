@@ -24,6 +24,9 @@ Version 2.4.0
     We don't want that by default, since it causes a noticable performance
     hit and makes UPDATEs with long strings fail with ORA-01461.
     Problem reports by "threenotrump", "CHunter" and Phil Florent.
+  - Push down LIMIT clauses if possible.
+    These are pushed down as FETCH FIRST n ROWS ONLY from Oracle 12.2 on.
+    Based on a patch by Gilles Darold, per request from Ilia Sazonov.
 
 Version 2.3.0, released 2020-09-24
   Note: When upgrading from an older version of oracle_fdw, make sure to run
