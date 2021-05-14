@@ -165,6 +165,9 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    '-6 months'
 );
 
+-- change the "boolean" in Oracle to "2"
+SELECT oracle_execute('oracle', 'UPDATE typetest1 SET b = 2 WHERE id = 1');
+
 INSERT INTO shorty (id, c) VALUES (2, NULL);
 
 INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (

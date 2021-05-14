@@ -6538,6 +6538,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 
 			values[j] = PointerGetDatum(result);
 		}
+		else if (pgtype == BOOLOID)
+			values[j] = BoolGetDatum(value[0] != '0' || value_len > 1);
 		else
 		{
 			regproc typinput;

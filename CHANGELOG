@@ -14,6 +14,11 @@ Version 2.4.0
     but that is not allowed in PostgreSQL.
     That leads to errors during IMPORT.
     Reported by Alberto Dell'Era.
+  - Translate Oracle NUMBER to "boolean" correctly.
+    The documentation says that numbers greater than 0 are mapped to
+    TRUE, but oracle_fdw gagged on numbers greater than 1 with errors like
+      ERROR:  invalid input syntax for type boolean: "2"
+    Reported by Maris Zinbergs.
 
   Enhancements:
   - Support push-down of "uuid" values.
