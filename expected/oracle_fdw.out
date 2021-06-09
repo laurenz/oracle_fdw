@@ -746,3 +746,8 @@ SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
   3
 (1 row)
 
+/* test ANALYZE */
+ANALYZE typetest1;
+ANALYZE longy;
+-- bug reported by Jan
+ANALYZE shorty;

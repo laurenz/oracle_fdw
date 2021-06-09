@@ -19,6 +19,10 @@ Version 2.4.0
     TRUE, but oracle_fdw gagged on numbers greater than 1 with errors like
       ERROR:  invalid input syntax for type boolean: "2"
     Reported by Maris Zinbergs.
+  - Fix crash during ANALYZE of certain foreign tables.
+    If the Oracle table has more columns than the foreign table,
+    ANALYZE on the foreign table caused a crash.
+    Reported by Jan.
 
   Enhancements:
   - Support push-down of "uuid" values.

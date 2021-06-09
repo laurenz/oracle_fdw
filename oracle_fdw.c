@@ -3514,7 +3514,8 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 	/* get PostgreSQL column data types, check that they match Oracle's */
 	for (i=0; i<fdw_state->oraTable->ncols; ++i)
-		if (fdw_state->oraTable->cols[i]->used)
+		if (fdw_state->oraTable->cols[i]->pgname != NULL
+				&& fdw_state->oraTable->cols[i]->used)
 			checkDataType(
 				fdw_state->oraTable->cols[i]->oratype,
 				fdw_state->oraTable->cols[i]->scale,

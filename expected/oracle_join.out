@@ -798,18 +798,16 @@ WITH t (t1_id, t2_id) AS (SELECT t1.id, t2.id FROM typetest1  t1 JOIN typetest1 
 -- whole-row and system columns, not pushed down
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                                 QUERY PLAN                                                                  
----------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: t1.id
-   ->  Hash Join
-         Hash Cond: (t1.id = t2.id)
-         ->  Foreign Scan on shorty t1
-               Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
-         ->  Hash
-               ->  Foreign Scan on longy t2
-                     Oracle query: SELECT /*da071f7557e81ab866e2d1958a6029cd*/ r2."ID" FROM "TYPETEST1" r2 ORDER BY r2."ID" ASC NULLS LAST
-(9 rows)
+                                                              QUERY PLAN                                                               
+---------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Join Filter: (t1.id = t2.id)
+   ->  Foreign Scan on shorty t1
+         Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+   ->  Materialize
+         ->  Foreign Scan on longy t2
+               Oracle query: SELECT /*da071f7557e81ab866e2d1958a6029cd*/ r2."ID" FROM "TYPETEST1" r2 ORDER BY r2."ID" ASC NULLS LAST
+(7 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
              t1             |      ctid      
@@ -821,18 +819,16 @@ SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY 
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                                 QUERY PLAN                                                                  
----------------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: t1.id
-   ->  Hash Left Join
-         Hash Cond: (t1.id = t2.id)
-         ->  Foreign Scan on shorty t1
-               Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
-         ->  Hash
-               ->  Foreign Scan on longy t2
-                     Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
-(9 rows)
+                                                              QUERY PLAN                                                               
+---------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop Left Join
+   Join Filter: (t1.id = t2.id)
+   ->  Foreign Scan on shorty t1
+         Oracle query: SELECT /*4a0c21310af0d9bb95d002d0ed8f5b9f*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+   ->  Materialize
+         ->  Foreign Scan on longy t2
+               Oracle query: SELECT /*6d4435ad754d35ca0ba5c53fccf72be5*/ r2."ID" FROM "TYPETEST1" r2
+(7 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
              t1             |      ctid      

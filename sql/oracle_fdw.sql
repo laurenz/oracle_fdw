@@ -474,3 +474,10 @@ SELECT 12 - count(*) FROM typetest1 LIMIT 1;
 -- no LIMIT push-down if there is a local WHERE condition
 EXPLAIN (COSTS OFF) SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
 SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
+
+/* test ANALYZE */
+
+ANALYZE typetest1;
+ANALYZE longy;
+-- bug reported by Jan
+ANALYZE shorty;
