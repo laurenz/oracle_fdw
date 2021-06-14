@@ -462,6 +462,8 @@ EXPLAIN (COSTS off) SELECT d FROM typetest1 LIMIT 2;
 SELECT d FROM typetest1 LIMIT 2;
 EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY d LIMIT 2;
 SELECT d FROM typetest1 ORDER BY d LIMIT 2;
+-- the limit clause is not pushed down because the order by is not
+EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY lc LIMIT 2;
 -- with an OFFSET clause, the offset value is added to the limit
 EXPLAIN (COSTS off) SELECT * FROM qtest LIMIT 1 OFFSET 2;
 SELECT * FROM qtest LIMIT 1 OFFSET 2;

@@ -269,6 +269,11 @@ struct OracleFdwState {
 	RelOptInfo *innerrel;
 	JoinType    jointype;
 	List       *joinclauses;
+	/*
+	 * original query has an order by clause? Mainly used to prevent pushing
+	 * down the limit clause even if there is no oder by claused pushed down
+	 */
+	bool have_orderby;
 };
 
 /*
@@ -852,6 +857,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 		 */
 		can_pushdown = !pathkey_ec->ec_has_volatile
 				&& ((em_expr = find_em_expr_for_rel(pathkey_ec, baserel)) != NULL);
+		fdwState->have_orderby = can_pushdown;
 
 		if (can_pushdown)
 		{
@@ -2853,7 +2859,7 @@ char
 		appendStringInfo(&query, " ORDER BY%s", fdwState->order_clause);
 
 	/* append FETCH FIRST n ROWS ONLY if the LIMIT can be pushed down */
-	if (fdwState->limit_clause)
+	if (fdwState->limit_clause && (!fdwState->have_orderby || fdwState->order_clause))
 		appendStringInfo(&query, " %s", fdwState->limit_clause);
 
 	/* append FOR UPDATE if if the scan is for a modification */
