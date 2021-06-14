@@ -650,7 +650,7 @@ DEALLOCATE stmt;
 /*
  * Test push-down of the LIMIT clause.
  */
--- the limit clause is pushed down with and without ORDER BY
+-- the LIMIT clause is pushed down with and without ORDER BY
 EXPLAIN (COSTS off) SELECT d FROM typetest1 LIMIT 2;
                                                       QUERY PLAN                                                      
 ----------------------------------------------------------------------------------------------------------------------
@@ -680,6 +680,17 @@ SELECT d FROM typetest1 ORDER BY d LIMIT 2;
  03-15-0044 BC
  10-21-1968
 (2 rows)
+
+-- the LIMIT clause is not pushed down because the ORDER BY is not
+EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY lc LIMIT 2;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: lc
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*b69b8f67724d8bdbad41bf5a9345cc14*/ r1."LC", r1."D" FROM "TYPETEST1" r1
+(5 rows)
 
 -- with an OFFSET clause, the offset value is added to the limit
 EXPLAIN (COSTS off) SELECT * FROM qtest LIMIT 1 OFFSET 2;

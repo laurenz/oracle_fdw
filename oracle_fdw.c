@@ -244,7 +244,8 @@ struct OracleFdwState {
 	int columnindex;               /* currently processed column for error context */
 	MemoryContext temp_cxt;        /* short-lived memory for data modification */
 	unsigned int prefetch;         /* number of rows to prefetch */
-	char *order_clause;            /* for sort-pushdown */
+	char *order_clause;            /* for ORDER BY pushdown */
+	List *usable_pathkeys;         /* for ORDER BY pushdown */
 	char *where_clause;            /* deparsed where clause */
 	char *limit_clause;            /* deparsed limit clause */
 
@@ -388,6 +389,7 @@ static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwStat
 static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
 static oraIsoLevel getIsolationLevel(const char *isolation_level);
+static bool pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *fdwState);
 static char *deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel);
 
 #define REL_ALIAS_PREFIX    "r"
@@ -746,6 +748,7 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	struct OracleFdwState *fdwState;
 	int i, major, minor, update, patch, port_patch;
 	double ntuples = -1;
+	bool order_by_local;
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan");
 
@@ -774,12 +777,20 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 								&(fdwState->remote_conds)
 							);
 
+	/*
+	 * Determine whether we can potentially push query pathkeys to the remote
+	 * side, avoiding a local sort.
+	 */
+	order_by_local = !pushdownOrderBy(root, baserel, fdwState);
+
 	/* try to push down LIMIT from Oracle 12.2 on */
 	oracleServerVersion(fdwState->session, &major, &minor, &update, &patch, &port_patch);
 	if (major > 12 || (major == 12 && minor > 1))
 	{
-		if ((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
-				||  (list_length(root->parse->rtable) == 1) )
+		/* but not if ORDER BY cannot be pushed down */
+		if (!order_by_local &&
+			((list_length(root->canon_pathkeys) <= 1 && !root->cte_plan_ids)
+				||  (list_length(root->parse->rtable) == 1)))
 		{
 			fdwState->limit_clause = deparseLimit(root, fdwState, baserel);
 		}
@@ -826,83 +837,6 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 {
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)baserel->fdw_private;
 
-	/*
-	 * Determine whether we can potentially push query pathkeys to the remote
-	 * side, avoiding a local sort.
-	 */
-	StringInfoData orderedquery;
-	List *usable_pathkeys = NIL;
-	ListCell *cell;
-	char *delim = " ";
-
-	initStringInfo(&orderedquery);
-
-	foreach(cell, root->query_pathkeys)
-	{
-		PathKey *pathkey = (PathKey *)lfirst(cell);
-		EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
-		Expr *em_expr = NULL;
-		char *sort_clause;
-		Oid em_type;
-		bool can_pushdown;
-
-		/*
-		 * deparseExpr would detect volatile expressions as well, but
-		 * ec_has_volatile saves some cycles.
-		 */
-		can_pushdown = !pathkey_ec->ec_has_volatile
-				&& ((em_expr = find_em_expr_for_rel(pathkey_ec, baserel)) != NULL);
-
-		if (can_pushdown)
-		{
-			em_type = exprType((Node *)em_expr);
-
-			/* expressions of a type different from this are not safe to push down into ORDER BY clauses */
-			if (em_type != INT8OID && em_type != INT2OID && em_type != INT4OID && em_type != OIDOID
-					&& em_type != FLOAT4OID && em_type != FLOAT8OID && em_type != NUMERICOID && em_type != DATEOID
-					&& em_type != TIMESTAMPOID && em_type != TIMESTAMPTZOID && em_type != INTERVALOID)
-				can_pushdown = false;
-		}
-
-		if (can_pushdown &&
-			((sort_clause = deparseExpr(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params))) != NULL)){
-			/* keep usable_pathkeys for later use. */
-			usable_pathkeys = lappend(usable_pathkeys, pathkey);
-
-			/* create orderedquery */
-			appendStringInfoString(&orderedquery, delim);
-			appendStringInfoString(&orderedquery, sort_clause);
-			delim = ", ";
-
-			if (pathkey->pk_strategy == BTLessStrategyNumber)
-				appendStringInfoString(&orderedquery, " ASC");
-			else
-				appendStringInfoString(&orderedquery, " DESC");
-
-			if (pathkey->pk_nulls_first)
-				appendStringInfoString(&orderedquery, " NULLS FIRST");
-			else
-				appendStringInfoString(&orderedquery, " NULLS LAST");
-		}
-		else
-		{
-			/*
-			 * The planner and executor don't have any clever strategy for
-			 * taking data sorted by a prefix of the query's pathkeys and
-			 * getting it to be sorted by all of those pathekeys.  We'll just
-			 * end up resorting the entire data set.  So, unless we can push
-			 * down all of the query pathkeys, forget it.
-			 */
-			list_free(usable_pathkeys);
-			usable_pathkeys = NIL;
-			break;
-		}
-	}
-
-	/* set order clause */
-	if (usable_pathkeys != NIL)
-		fdwState->order_clause = orderedquery.data;
-
 	/* add the only path */
 	add_path(baserel,
 		(Path *)create_foreignscan_path(
@@ -914,7 +848,7 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 					baserel->rows,
 					fdwState->startup_cost,
 					fdwState->total_cost,
-					usable_pathkeys,
+					fdwState->usable_pathkeys,
 					baserel->lateral_relids,
 #if PG_VERSION_NUM >= 90500
 					NULL,  /* no extra plan */
@@ -5333,7 +5267,10 @@ List
 		result = lappend(result, serializeInt((int)param->colnum));
 		/* don't serialize value, node and bindh */
 	}
-	/* don't serialize params, startup_cost, total_cost, rowcount, columnindex, temp_cxt, order_clause and where_clause */
+	/*
+	 * Don't serialize params, startup_cost, total_cost, rowcount, columnindex,
+	 * temp_cxt, order_clause, usable_pathkeys and where_clause.
+	 */
 
 	return result;
 }
@@ -5391,12 +5328,13 @@ struct OracleFdwState
 	/* these fields are not needed during execution */
 	state->startup_cost = 0;
 	state->total_cost = 0;
+	state->order_clause = NULL;
+	state->usable_pathkeys = NULL;
 	/* these are not serialized */
 	state->rowcount = 0;
 	state->columnindex = 0;
 	state->params = NULL;
 	state->temp_cxt = NULL;
-	state->order_clause = NULL;
 
 	/* dbserver */
 	state->dbserver = deserializeString(lfirst(cell));
@@ -6710,6 +6648,96 @@ getIsolationLevel(const char *isolation_level)
 				errhint("Valid values in this context are: serializable/read_committed/read_only")));
 
 	return val;
+}
+
+/*
+ * pushdownOrderBy
+ * 		Attempt to push down the ORDER BY clause.
+ * 		If the complete clause can be pushed down, save "order_clause"
+ * 		and "usable_pathkeys" in "fdwState" and return "true"
+ * 		(this will also return "true" if there is no ORDER BY clause).
+ */
+bool
+pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *fdwState)
+{
+	StringInfoData orderedquery;
+	List *usable_pathkeys = NIL;
+	ListCell *cell;
+	char *delim = " ";
+
+	initStringInfo(&orderedquery);
+
+	foreach(cell, root->query_pathkeys)
+	{
+		PathKey *pathkey = (PathKey *)lfirst(cell);
+		EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
+		Expr *em_expr = NULL;
+		char *sort_clause;
+		Oid em_type;
+		bool can_pushdown;
+
+		/*
+		 * deparseExpr would detect volatile expressions as well, but
+		 * ec_has_volatile saves some cycles.
+		 */
+		can_pushdown = !pathkey_ec->ec_has_volatile
+				&& ((em_expr = find_em_expr_for_rel(pathkey_ec, baserel)) != NULL);
+
+		if (can_pushdown)
+		{
+			em_type = exprType((Node *)em_expr);
+
+			/* expressions of a type different from this are not safe to push down into ORDER BY clauses */
+			if (em_type != INT8OID && em_type != INT2OID && em_type != INT4OID && em_type != OIDOID
+					&& em_type != FLOAT4OID && em_type != FLOAT8OID && em_type != NUMERICOID && em_type != DATEOID
+					&& em_type != TIMESTAMPOID && em_type != TIMESTAMPTZOID && em_type != INTERVALOID)
+				can_pushdown = false;
+		}
+
+		if (can_pushdown &&
+			((sort_clause = deparseExpr(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params))) != NULL)){
+			/* keep usable_pathkeys for later use. */
+			usable_pathkeys = lappend(usable_pathkeys, pathkey);
+
+			/* create orderedquery */
+			appendStringInfoString(&orderedquery, delim);
+			appendStringInfoString(&orderedquery, sort_clause);
+			delim = ", ";
+
+			if (pathkey->pk_strategy == BTLessStrategyNumber)
+				appendStringInfoString(&orderedquery, " ASC");
+			else
+				appendStringInfoString(&orderedquery, " DESC");
+
+			if (pathkey->pk_nulls_first)
+				appendStringInfoString(&orderedquery, " NULLS FIRST");
+			else
+				appendStringInfoString(&orderedquery, " NULLS LAST");
+		}
+		else
+		{
+			/*
+			 * Before PostgreSQL v13, the planner and executor don't have
+			 * any clever strategy for taking data sorted by a prefix of the
+			 * query's pathkeys and getting it to be sorted by all of those
+			 * pathekeys.
+			 * So, unless we can push down all of the query pathkeys, forget it.
+			 * This could be improved from v13 on!
+			 */
+			list_free(usable_pathkeys);
+			usable_pathkeys = NIL;
+			break;
+		}
+	}
+
+	/* set ORDER BY clause and remember pushed down path keys */
+	if (usable_pathkeys != NIL)
+	{
+		fdwState->order_clause = orderedquery.data;
+		fdwState->usable_pathkeys = usable_pathkeys;
+	}
+
+	return (root->query_pathkeys == NIL || usable_pathkeys != NIL);
 }
 
 /*
