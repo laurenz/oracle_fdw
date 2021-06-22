@@ -6,6 +6,7 @@ and libraries has to be installed manually.
 
 1. [Installation Requirements](#1-installation-requirements)
 2. [Installation](#2-installation)
+3. [Problems](#3-problems)
 
 1 Installation Requirements
 ===========================
@@ -88,7 +89,7 @@ Compile oracle_fdw and install:
 Follow the general installation guide for oracle_fdw.
 
 3 Problems
-----------
+==========
 
 When the oracle_fdw.so has been compiled the path to the libraries can be checked:
 
