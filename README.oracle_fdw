@@ -634,7 +634,8 @@ knowledge there.
 ==============
 
 If you are using a binary distribution of oracle_fdw, skip to "Installing the
-extension" below.
+extension" below.  Additional hints for installing oracle_fdw can be found
+on the [Wiki](https://github.com/laurenz/oracle_fdw/wiki).
 
 Building oracle_fdw on platforms other than Windows:
 ----------------------------------------------------
@@ -925,6 +926,12 @@ for more information.
 
 9 Support
 =========
+
+Check out the [Wiki](https://github.com/laurenz/oracle_fdw/wiki) for
+help with configuration on certain platforms and other problems.
+Also, searching the
+[GitHub issues](https://github.com/laurenz/oracle_fdw/issues)
+can help - you may not be the first one with that problem.
 
 If you want to report a problem with oracle_fdw, and the name of the
 foreign server is (for example) "ora_serv", please include the output of
