@@ -23,6 +23,8 @@ Version 2.4.0
     If the Oracle table has more columns than the foreign table,
     ANALYZE on the foreign table caused a crash.
     Reported by Jan.
+  - Fix build with unset ORACLE_HOME and Instant Client 21.
+    Reported by "fjf2002".
 
   Enhancements:
   - Support push-down of "uuid" values.
