@@ -702,10 +702,11 @@ If you use Visual Studio 2015 or later and you get errors about missing
 header files including `sys/types.h`, you must install the Universal CRT
 SDK (part of Visual Studio).
 
-Copy `oracle_fdw.dll` into the PostgreSQL library directory (which can be
-found with `pg_config --libdir`) and copy `oracle_fdw.control` and the SQL
-files into the `extension` subdirectory of the PostgreSQL share
-directory (which can be found with `pg_config --sharedir`).
+Copy `oracle_fdw.dll` into the PostgreSQL library directory and 
+copy `oracle_fdw.control` and the SQL files into the `extension` 
+subdirectory of the PostgreSQL share directory.  
+To find those directories, you can use `pg_config --libdir` and 
+`pg_config --sharedir`.
 
 Installing the extension:
 -------------------------
