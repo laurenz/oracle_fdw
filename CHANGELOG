@@ -25,6 +25,11 @@ Version 2.4.0
     Reported by Jan.
   - Fix build with unset ORACLE_HOME and Instant Client 21.
     Reported by "fjf2002".
+  - Use the correct user mapping in SECURITY DEFINER contexts.
+    Before this, oracle_fdw always used the current user to
+    determine the security context, which is wrong if a
+    foreign table was accessed in a SECURITY DEFINER function.
+    Reported by "ksmalara".
 
   Enhancements:
   - Support push-down of "uuid" values.

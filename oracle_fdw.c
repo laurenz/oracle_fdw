@@ -391,6 +391,7 @@ static char *fold_case(char *name, fold_t foldcase, int collation);
 static oraIsoLevel getIsolationLevel(const char *isolation_level);
 static bool pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *fdwState);
 static char *deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel);
+static Oid getActiveUser();
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
@@ -2139,7 +2140,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
-	mapping = GetUserMapping(GetUserId(), serverOid);
+	mapping = GetUserMapping(getActiveUser(), serverOid);
 	wrapper = GetForeignDataWrapper(server->fdwid);
 
 	/* get all options for these objects */
@@ -2623,7 +2624,7 @@ oracleGetOptions(Oid foreigntableid, List **options)
 	 */
 	table = GetForeignTable(foreigntableid);
 	server = GetForeignServer(table->serverid);
-	mapping = GetUserMapping(GetUserId(), table->serverid);
+	mapping = GetUserMapping(getActiveUser(), table->serverid);
 	wrapper = GetForeignDataWrapper(server->fdwid);
 
 	/* later options override earlier ones */
@@ -5147,7 +5148,7 @@ oracleConnectServer(Name srvname)
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(srvId);
-	mapping = GetUserMapping(GetUserId(), srvId);
+	mapping = GetUserMapping(getActiveUser(), srvId);
 	wrapper = GetForeignDataWrapper(server->fdwid);
 
 	/* get all options for these objects */
@@ -6794,6 +6795,20 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 						 limit_val);
 
 	return limit_clause.data;
+}
+
+/*
+ * getActiveUser
+ * 		This will do the correct thing in SECURITY DEFINER functions.
+ */
+Oid
+getActiveUser()
+{
+	Oid userid;
+	int sec_context;
+
+	GetUserIdAndSecContext(&userid, &sec_context);
+	return OidIsValid(userid) ? userid : GetUserId();
 }
 
 /*
