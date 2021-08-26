@@ -391,7 +391,7 @@ static char *fold_case(char *name, fold_t foldcase, int collation);
 static oraIsoLevel getIsolationLevel(const char *isolation_level);
 static bool pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *fdwState);
 static char *deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel);
-static Oid getActiveUser();
+static Oid getActiveUser(void);
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
@@ -2538,7 +2538,7 @@ struct OracleFdwState
 			nchar = ((Value *) (def->arg))->val.str;
 	}
 
-    /* set isolation_level (or use default) */
+	/* set isolation_level (or use default) */
 	if (isolationlevel == NULL)
 		fdwState->isolation_level = DEFAULT_ISOLATION_LEVEL;
 	else
@@ -4941,9 +4941,9 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			&& pgtype == JSONOID)
 		return;
 
-    /* XMLTYPE can be converted to xml */
-    if (oratype == ORA_TYPE_XMLTYPE && pgtype == XMLOID)
-        return;
+	/* XMLTYPE can be converted to xml */
+	if (oratype == ORA_TYPE_XMLTYPE && pgtype == XMLOID)
+		return;
 
 	/* otherwise, report an error */
 	ereport(ERROR,
