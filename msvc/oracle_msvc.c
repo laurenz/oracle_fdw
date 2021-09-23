@@ -53,7 +53,4 @@ oracleDelayLoadFailureHook(unsigned dliNotify, PDelayLoadInfo pdli)
 	return 0;
 }
 
-#if _MSC_VER >= 1900
-const
-#endif
 PfnDliHook __pfnDliFailureHook2 = oracleDelayLoadFailureHook;
