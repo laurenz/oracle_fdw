@@ -1,4 +1,4 @@
-Version 2.4.0
+Version 2.4.0, released 2021-09-24
 
   Bugfixes:
   - Fix a performance regression introduced in 2.3.0 by the fix for NCHAR
