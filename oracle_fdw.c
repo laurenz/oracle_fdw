@@ -506,7 +506,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 				|| strcmp(def->defname, OPT_NCHAR) == 0
 			)
 		{
-			char *val = strval(def->arg);
+			char *val = strVal(def->arg);
 			if (pg_strcasecmp(val, "on") != 0
 					&& pg_strcasecmp(val, "off") != 0
 					&& pg_strcasecmp(val, "yes") != 0
