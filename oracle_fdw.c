@@ -497,7 +497,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 		/* check valid values for "isolation_level" */
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-			(void)getIsolationLevel(((Value *)(def->arg))->val.str);
+			(void)getIsolationLevel(strVal(def->arg));
 
 		/* check valid values for "readonly", "key", "strip_zeros" and "nchar" */
 		if (strcmp(def->defname, OPT_READONLY) == 0
@@ -506,7 +506,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 				|| strcmp(def->defname, OPT_NCHAR) == 0
 			)
 		{
-			char *val = ((Value *)(def->arg))->val.str;
+			char *val = strval(def->arg);
 			if (pg_strcasecmp(val, "on") != 0
 					&& pg_strcasecmp(val, "off") != 0
 					&& pg_strcasecmp(val, "yes") != 0
@@ -522,7 +522,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		/* check valid values for "dblink" */
 		if (strcmp(def->defname, OPT_DBLINK) == 0)
 		{
-			char *val = ((Value *)(def->arg))->val.str;
+			char *val = strVal(def->arg);
 			if (strchr(val, '"') != NULL)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
@@ -533,7 +533,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		/* check valid values for "schema" */
 		if (strcmp(def->defname, OPT_SCHEMA) == 0)
 		{
-			char *val = ((Value *)(def->arg))->val.str;
+			char *val = strVal(def->arg);
 			if (strchr(val, '"') != NULL)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
@@ -544,7 +544,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		/* check valid values for max_long */
 		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
 		{
-			char *val = ((Value *) (def->arg))->val.str;
+			char *val = strVal(def->arg);
 			char *endptr;
 			unsigned long max_long;
 
@@ -560,7 +560,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		/* check valid values for "sample_percent" */
 		if (strcmp(def->defname, OPT_SAMPLE) == 0)
 		{
-			char *val = ((Value *) (def->arg))->val.str;
+			char *val = strVal(def->arg);
 			char *endptr;
 			double sample_percent;
 
@@ -576,7 +576,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		/* check valid values for "prefetch" */
 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
 		{
-			char *val = ((Value *) (def->arg))->val.str;
+			char *val = strVal(def->arg);
 			char *endptr;
 			long prefetch;
 
@@ -1418,7 +1418,7 @@ oracleAddForeignUpdateTargets(
 			/* if "key" is set, add a resjunk for this column */
 			if (strcmp(def->defname, OPT_KEY) == 0)
 			{
-				if (optionIsTrue(((Value *)(def->arg))->val.str))
+				if (optionIsTrue(strVal(def->arg)))
 				{
 					Var *var;
 #if PG_VERSION_NUM < 140000
@@ -2103,7 +2103,7 @@ oracleIsForeignRelUpdatable(Relation rel)
 	foreach(cell, GetForeignTable(RelationGetRelid(rel))->options)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
-		char *value = ((Value *)(def->arg))->val.str;
+		char *value = strVal(def->arg);
 		if (strcmp(def->defname, OPT_READONLY) == 0
 				&& optionIsTrue(value))
 			return 0;
@@ -2152,18 +2152,18 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
 		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
-			nls_lang = ((Value *) (def->arg))->val.str;
+			nls_lang = strVal(def->arg);
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
-			dbserver = ((Value *) (def->arg))->val.str;
+			dbserver = strVal(def->arg);
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-			isolation_level_val = getIsolationLevel(((Value *) (def->arg))->val.str);
+			isolation_level_val = getIsolationLevel(strVal(def->arg));
 		if (strcmp(def->defname, OPT_USER) == 0)
-			user = ((Value *) (def->arg))->val.str;
+			user = (strVal(def->arg));
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
-			password = ((Value *) (def->arg))->val.str;
+			password = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
 		{
-			char *nchar = ((Value *) (def->arg))->val.str;
+			char *nchar = strVal(def->arg);
 
 			if (pg_strcasecmp(nchar, "on") == 0
 					|| pg_strcasecmp(nchar, "yes") == 0
@@ -2179,7 +2179,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 		if (strcmp(def->defname, "case") == 0)
 		{
-			char *s = ((Value *) (def->arg))->val.str;
+			char *s = strVal(def->arg);
 			if (strcmp(s, "keep") == 0)
 				foldcase = CASE_KEEP;
 			else if (strcmp(s, "lower") == 0)
@@ -2194,7 +2194,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		}
 		else if (strcmp(def->defname, "collation") == 0)
 		{
-			char *s = ((Value *) (def->arg))->val.str;
+			char *s = strVal(def->arg);
 			if (pg_strcasecmp(s, "default") != 0) {
 
 			/* look up collation within pg_catalog namespace with the name */
@@ -2225,7 +2225,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		}
 		else if (strcmp(def->defname, OPT_READONLY) == 0)
 		{
-			char *s = ((Value *) (def->arg))->val.str;
+			char *s = strVal(def->arg);
 			if (pg_strcasecmp(s, "on") == 0
 					|| pg_strcasecmp(s, "yes") == 0
 					|| pg_strcasecmp(s, "true") == 0)
@@ -2241,7 +2241,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		}
 		else if (strcmp(def->defname, OPT_DBLINK) == 0)
 		{
-			char *s = ((Value *) (def->arg))->val.str;
+			char *s = strVal(def->arg);
 			if (strchr(s, '"') != NULL)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
@@ -2254,7 +2254,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			char *endptr;
 			unsigned long max_long_val;
 
-			max_long = ((Value *) (def->arg))->val.str;
+			max_long = strVal(def->arg);
 			errno = 0;
 			max_long_val = strtoul(max_long, &endptr, 0);
 			if (max_long[0] == '\0' || *endptr != '\0' || errno != 0 || max_long_val < 1 || max_long_val > 1073741823ul)
@@ -2268,7 +2268,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			char *endptr;
 			double sample_percent_val;
 
-			sample_percent = ((Value *) (def->arg))->val.str;
+			sample_percent = strVal(def->arg);
 			errno = 0;
 			sample_percent_val = strtod(sample_percent, &endptr);
 			if (sample_percent[0] == '\0' || *endptr != '\0' || errno != 0 || sample_percent_val < 0.000001 || sample_percent_val > 100.0)
@@ -2282,7 +2282,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			char *endptr;
 			long prefetch_val;
 
-			prefetch = ((Value *) (def->arg))->val.str;
+			prefetch = strVal(def->arg);
 			errno = 0;
 			prefetch_val = strtol(prefetch, &endptr, 0);
 			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 0 || prefetch_val > 10240 )
@@ -2513,29 +2513,29 @@ struct OracleFdwState
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
 		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
-			fdwState->nls_lang = ((Value *) (def->arg))->val.str;
+			fdwState->nls_lang = strVal(def->arg);
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
-			fdwState->dbserver = ((Value *) (def->arg))->val.str;
+			fdwState->dbserver = strVal(def->arg);
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-			isolationlevel = ((Value *) (def->arg))->val.str;
+			isolationlevel = strVal(def->arg);
 		if (strcmp(def->defname, OPT_USER) == 0)
-			fdwState->user = ((Value *) (def->arg))->val.str;
+			fdwState->user = strVal(def->arg);
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
-			fdwState->password = ((Value *) (def->arg))->val.str;
+			fdwState->password = strVal(def->arg);
 		if (strcmp(def->defname, OPT_DBLINK) == 0)
-			dblink = ((Value *) (def->arg))->val.str;
+			dblink = strVal(def->arg);
 		if (strcmp(def->defname, OPT_SCHEMA) == 0)
-			schema = ((Value *) (def->arg))->val.str;
+			schema = strVal(def->arg);
 		if (strcmp(def->defname, OPT_TABLE) == 0)
-			table = ((Value *) (def->arg))->val.str;
+			table = strVal(def->arg);
 		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
-			maxlong = ((Value *) (def->arg))->val.str;
+			maxlong = strVal(def->arg);
 		if (strcmp(def->defname, OPT_SAMPLE) == 0)
-			sample = ((Value *) (def->arg))->val.str;
+			sample = strVal(def->arg);
 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
-			fetch = ((Value *) (def->arg))->val.str;
+			fetch = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
-			nchar = ((Value *) (def->arg))->val.str;
+			nchar = strVal(def->arg);
 	}
 
 	/* set isolation_level (or use default) */
@@ -2684,12 +2684,12 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 			DefElem *def = (DefElem *)lfirst(option);
 
 			/* is it the "key" option and is it set to "true" ? */
-			if (strcmp(def->defname, OPT_KEY) == 0 && optionIsTrue(((Value *)(def->arg))->val.str))
+			if (strcmp(def->defname, OPT_KEY) == 0 && optionIsTrue(strVal(def->arg)))
 			{
 				/* mark the column as primary key column */
 				oraTable->cols[index-1]->pkey = 1;
 			}
-			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && optionIsTrue(((Value *)(def->arg))->val.str))
+			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && optionIsTrue(strVal(def->arg)))
 				oraTable->cols[index-1]->strip_zeros = 1;
 		}
 	}
@@ -5160,18 +5160,18 @@ oracleConnectServer(Name srvname)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
 		if (strcmp(def->defname, OPT_NLS_LANG) == 0)
-			nls_lang = ((Value *) (def->arg))->val.str;
+			nls_lang = strVal(def->arg);
 		if (strcmp(def->defname, OPT_DBSERVER) == 0)
-			dbserver = ((Value *) (def->arg))->val.str;
+			dbserver = strVal(def->arg);
 		if (strcmp(def->defname, OPT_ISOLATION_LEVEL) == 0)
-			isolation_level = getIsolationLevel(((Value *) (def->arg))->val.str);
+			isolation_level = getIsolationLevel(strVal(def->arg));
 		if (strcmp(def->defname, OPT_USER) == 0)
-			user = ((Value *) (def->arg))->val.str;
+			user = strVal(def->arg);
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
-			password = ((Value *) (def->arg))->val.str;
+			password = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
 		{
-			char *nchar = ((Value *) (def->arg))->val.str;
+			char *nchar = strVal(def->arg);
 
 			if ((pg_strcasecmp(nchar, "on") == 0
 				|| pg_strcasecmp(nchar, "yes") == 0
