@@ -6629,7 +6629,7 @@ fold_case(char *name, fold_t foldcase, int collation)
  *		Converts Oracle isolation level string to oraIsoLevel.
  *      Throws an error for invalid values.
  */
-unsigned int
+oraIsoLevel
 getIsolationLevel(const char *isolation_level)
 {
 	oraIsoLevel val = 0;
