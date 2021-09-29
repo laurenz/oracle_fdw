@@ -734,7 +734,7 @@ To upgrade from an oracle_fdw version before 1.0.0, use
 
     ALTER EXTENSION oracle_fdw UPDATE;
 
-Note that the extension version as shown by the psql command `\x` or the
+Note that the extension version as shown by the psql command `\dx` or the
 system catalog `pg_available_extensions` is *not* the installed version
 of oracle_fdw.  To get the oracle_fdw version, use the function `oracle_diag`.
 
