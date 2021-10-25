@@ -335,8 +335,8 @@ static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid server
 /*
  * Helper functions
  */
-static struct OracleFdwState *getFdwState(Oid foreigntableid, double *sample_percent);
-static void oracleGetOptions(Oid foreigntableid, List **options);
+static struct OracleFdwState *getFdwState(Oid foreigntableid, double *sample_percent, Oid userid);
+static void oracleGetOptions(Oid foreigntableid, Oid userid, List **options);
 static char *createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool modify, List *query_pathkeys);
 static void deparseFromExprForRel(struct OracleFdwState *fdwState, StringInfo buf, RelOptInfo *joinrel, List **params_list);
 #ifdef JOIN_API
@@ -391,7 +391,6 @@ static char *fold_case(char *name, fold_t foldcase, int collation);
 static oraIsoLevel getIsolationLevel(const char *isolation_level);
 static bool pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *fdwState);
 static char *deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *baserel);
-static Oid getActiveUser(void);
 
 #define REL_ALIAS_PREFIX    "r"
 /* Handy macro to add relation name qualification */
@@ -750,11 +749,16 @@ oracleGetForeignRelSize(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
 	int i, major, minor, update, patch, port_patch;
 	double ntuples = -1;
 	bool order_by_local;
+	RangeTblEntry *rte = planner_rt_fetch(baserel->relid, root);
 
 	elog(DEBUG1, "oracle_fdw: plan foreign table scan");
 
- 	/* get connection options, connect and get the remote table description */
- 	fdwState = getFdwState(foreigntableid, NULL);
+	/*
+	 * Get connection options, connect and get the remote table description.
+	 * To match what ExecCheckRTEPerms does, pass the user whose user mapping
+	 * should be used (if invalid, the current user is used).
+	 */
+	fdwState = getFdwState(foreigntableid, NULL, rte->checkAsUser);
 
 	/*
 	 * Store the table OID in each table column.
@@ -1513,8 +1517,12 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	}
 	else
 	{
-		/* if no, we have to construct it ourselves */
-		fdwState = getFdwState(rte->relid, NULL);
+		/*
+		 * If no, we have to construct the foreign table data ourselves.
+		 * To match what ExecCheckRTEPerms does, pass the user whose user mapping
+		 * should be used (if invalid, the current user is used).
+		 */
+		fdwState = getFdwState(rte->relid, NULL, rte->checkAsUser);
 	}
 
 	initStringInfo(&sql);
@@ -1782,6 +1790,8 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	ModifyTable *plan = castNode(ModifyTable, mtstate->ps.plan);
 	EState *estate = mtstate->ps.state;
 	struct OracleFdwState *fdw_state;
+	Index resultRelation;
+	RangeTblEntry *rte;
 	StringInfoData buf;
 	struct paramDesc *param;
 	HeapTuple tuple;
@@ -1809,7 +1819,48 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot route tuples into foreign table to be updated")));
 
-	fdw_state = getFdwState(RelationGetRelid(rinfo->ri_RelationDesc), NULL);
+	/*
+	 * If the foreign table is a partition that doesn't have a corresponding
+	 * RTE entry, we need to create a new RTE describing the foreign table for
+	 * use by deparseInsertSql and create_foreign_modify() below, after first
+	 * copying the parent's RTE and modifying some fields to describe the
+	 * foreign partition to work on. However, if this is invoked by UPDATE,
+	 * the existing RTE may already correspond to this partition if it is one
+	 * of the UPDATE subplan target rels; in that case, we can just use the
+	 * existing RTE as-is.
+	 */
+	if (rinfo->ri_RangeTableIndex == 0)
+	{
+		ResultRelInfo *rootResultRelInfo = rinfo->ri_RootResultRelInfo;
+
+		rte = exec_rt_fetch(rootResultRelInfo->ri_RangeTableIndex, estate);
+		rte = copyObject(rte);
+		rte->relid = RelationGetRelid(rinfo->ri_RelationDesc);
+		rte->relkind = RELKIND_FOREIGN_TABLE;
+
+		/*
+		 * For UPDATE, we must use the RT index of the first subplan target
+		 * rel's RTE, because the core code would have built expressions for
+		 * the partition, such as RETURNING, using that RT index as varno of
+		 * Vars contained in those expressions.
+		 */
+		if (plan && plan->operation == CMD_UPDATE &&
+			rootResultRelInfo->ri_RangeTableIndex == plan->rootRelation)
+			resultRelation = mtstate->resultRelInfo[0].ri_RangeTableIndex;
+		else
+			resultRelation = rootResultRelInfo->ri_RangeTableIndex;
+	}
+	else
+	{
+		resultRelation = rinfo->ri_RangeTableIndex;
+		rte = exec_rt_fetch(resultRelation, estate);
+	}
+
+	/*
+	 * To match what ExecCheckRTEPerms does, pass the user whose user mapping
+	 * should be used (if invalid, the current user is used).
+	 */
+	fdw_state = getFdwState(RelationGetRelid(rinfo->ri_RelationDesc), NULL, rte->checkAsUser);
 
 	/* not using "deserializePlanData", we have to initialize these ourselves */
 	for (i=0; i<fdw_state->oraTable->ncols; ++i)
@@ -2140,7 +2191,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
-	mapping = GetUserMapping(getActiveUser(), serverOid);
+	mapping = GetUserMapping(GetUserId(), serverOid);
 	wrapper = GetForeignDataWrapper(server->fdwid);
 
 	/* get all options for these objects */
@@ -2491,9 +2542,11 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
  * 		remote table.
  * 		"sample_percent" is set from the foreign table options.
  * 		"sample_percent" can be NULL, in that case it is not set.
+ * 		"userid" determines the use to connect as; if invalid, the current
+ * 		user is used.
  */
 struct OracleFdwState
-*getFdwState(Oid foreigntableid, double *sample_percent)
+*getFdwState(Oid foreigntableid, double *sample_percent, Oid userid)
 {
 	struct OracleFdwState *fdwState = palloc0(sizeof(struct OracleFdwState));
 	char *pgtablename = get_rel_name(foreigntableid);
@@ -2508,7 +2561,7 @@ struct OracleFdwState
 	 * Get all relevant options from the foreign table, the user mapping,
 	 * the foreign server and the foreign data wrapper.
 	 */
-	oracleGetOptions(foreigntableid, &options);
+	oracleGetOptions(foreigntableid, userid, &options);
 	foreach(cell, options)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
@@ -2612,7 +2665,7 @@ struct OracleFdwState
  * 		in that order.  Column options are ignored.
  */
 void
-oracleGetOptions(Oid foreigntableid, List **options)
+oracleGetOptions(Oid foreigntableid, Oid userid, List **options)
 {
 	ForeignTable *table;
 	ForeignServer *server;
@@ -2624,7 +2677,10 @@ oracleGetOptions(Oid foreigntableid, List **options)
 	 */
 	table = GetForeignTable(foreigntableid);
 	server = GetForeignServer(table->serverid);
-	mapping = GetUserMapping(getActiveUser(), table->serverid);
+	mapping = GetUserMapping(
+				(userid != InvalidOid) ? userid : GetUserId(),
+				table->serverid
+			  );
 	wrapper = GetForeignDataWrapper(server->fdwid);
 
 	/* later options override earlier ones */
@@ -3392,8 +3448,11 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	/* Prepare for sampling rows */
 	rstate = anl_init_selection_state(targrows);
 
-	/* get connection options, connect and get the remote table description */
-	fdw_state = getFdwState(RelationGetRelid(relation), &sample_percent);
+	/*
+	 * Get connection options, connect and get the remote table description.
+	 * Always use the user mapping for the current user.
+	 */
+	fdw_state = getFdwState(RelationGetRelid(relation), &sample_percent, InvalidOid);
 	fdw_state->paramList = NULL;
 	fdw_state->rowcount = 0;
 
@@ -5148,7 +5207,7 @@ oracleConnectServer(Name srvname)
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(srvId);
-	mapping = GetUserMapping(getActiveUser(), srvId);
+	mapping = GetUserMapping(GetUserId(), srvId);
 	wrapper = GetForeignDataWrapper(server->fdwid);
 
 	/* get all options for these objects */
@@ -6795,20 +6854,6 @@ deparseLimit(PlannerInfo *root, struct OracleFdwState *fdwState, RelOptInfo *bas
 						 limit_val);
 
 	return limit_clause.data;
-}
-
-/*
- * getActiveUser
- * 		This will do the correct thing in SECURITY DEFINER functions.
- */
-Oid
-getActiveUser()
-{
-	Oid userid;
-	int sec_context;
-
-	GetUserIdAndSecContext(&userid, &sec_context);
-	return OidIsValid(userid) ? userid : GetUserId();
 }
 
 /*

@@ -10,7 +10,7 @@ CREATE EXTENSION oracle_fdw;
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
 CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true');
 
-CREATE USER MAPPING FOR PUBLIC SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
+CREATE USER MAPPING FOR CURRENT_ROLE SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 
 -- drop the Oracle tables if they exist
 DO
@@ -483,3 +483,25 @@ ANALYZE typetest1;
 ANALYZE longy;
 -- bug reported by Jan
 ANALYZE shorty;
+
+/* test if views and SECURITY DEFINER functions use the correct user mapping */
+
+CREATE ROLE duff LOGIN;
+GRANT SELECT ON typetest1 TO PUBLIC;
+
+CREATE VIEW v_typetest1 AS SELECT id FROM typetest1;
+GRANT SELECT ON v_typetest1 TO PUBLIC;
+
+CREATE FUNCTION f_typetest1() RETURNS TABLE (id integer)
+   LANGUAGE sql SECURITY DEFINER AS
+'SELECT id FROM public.typetest1';
+
+SET SESSION AUTHORIZATION duff;
+-- this should fail
+SELECT id FROM typetest1;
+-- these should succeed
+SELECT id FROM v_typetest1;
+SELECT id FROM f_typetest1();
+-- clean up
+RESET SESSION AUTHORIZATION;
+DROP ROLE duff;

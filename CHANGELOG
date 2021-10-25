@@ -1,3 +1,10 @@
+Version 2.5.0
+
+  Bugfixes:
+  - Use the correct user mapping for views on foreign tables.
+    This should use the mapping associated with the view owner.
+    Reported by "JSilex".
+
 Version 2.4.0, released 2021-09-24
 
   Bugfixes:
