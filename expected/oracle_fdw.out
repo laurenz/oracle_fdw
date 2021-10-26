@@ -764,19 +764,23 @@ ANALYZE longy;
 ANALYZE shorty;
 /* test if views and SECURITY DEFINER functions use the correct user mapping */
 CREATE ROLE duff LOGIN;
-ERROR:  role "duff" already exists
 GRANT SELECT ON typetest1 TO PUBLIC;
 CREATE VIEW v_typetest1 AS SELECT id FROM typetest1;
 GRANT SELECT ON v_typetest1 TO PUBLIC;
+CREATE VIEW v_join AS
+   SELECT id, a.vc, b.c
+   FROM typetest1 AS a
+      JOIN typetest1 AS b USING (id);
+GRANT SELECT ON v_join TO PUBLIC;
 CREATE FUNCTION f_typetest1() RETURNS TABLE (id integer)
    LANGUAGE sql SECURITY DEFINER AS
 'SELECT id FROM public.typetest1';
 SET SESSION AUTHORIZATION duff;
 -- this should fail
-SELECT id FROM typetest1;
+SELECT id FROM typetest1 ORDER BY id;
 ERROR:  user mapping not found for "duff"
 -- these should succeed
-SELECT id FROM v_typetest1;
+SELECT id FROM v_typetest1 ORDER BY id;
  id 
 ----
   1
@@ -784,7 +788,13 @@ SELECT id FROM v_typetest1;
   4
 (3 rows)
 
-SELECT id FROM f_typetest1();
+SELECT c FROM v_join WHERE vc = 'short';
+     c      
+------------
+ short     
+(1 row)
+
+SELECT id FROM f_typetest1() ORDER BY id;
  id 
 ----
   1

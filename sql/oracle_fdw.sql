@@ -492,16 +492,23 @@ GRANT SELECT ON typetest1 TO PUBLIC;
 CREATE VIEW v_typetest1 AS SELECT id FROM typetest1;
 GRANT SELECT ON v_typetest1 TO PUBLIC;
 
+CREATE VIEW v_join AS
+   SELECT id, a.vc, b.c
+   FROM typetest1 AS a
+      JOIN typetest1 AS b USING (id);
+GRANT SELECT ON v_join TO PUBLIC;
+
 CREATE FUNCTION f_typetest1() RETURNS TABLE (id integer)
    LANGUAGE sql SECURITY DEFINER AS
 'SELECT id FROM public.typetest1';
 
 SET SESSION AUTHORIZATION duff;
 -- this should fail
-SELECT id FROM typetest1;
+SELECT id FROM typetest1 ORDER BY id;
 -- these should succeed
-SELECT id FROM v_typetest1;
-SELECT id FROM f_typetest1();
+SELECT id FROM v_typetest1 ORDER BY id;
+SELECT c FROM v_join WHERE vc = 'short';
+SELECT id FROM f_typetest1() ORDER BY id;
 -- clean up
 RESET SESSION AUTHORIZATION;
 DROP ROLE duff;
