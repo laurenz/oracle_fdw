@@ -1832,8 +1832,15 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	if (rinfo->ri_RangeTableIndex == 0)
 	{
 		ResultRelInfo *rootResultRelInfo = rinfo->ri_RootResultRelInfo;
+		Index rootRelation;
 
+#if PG_VERSION_NUM < 120000
+		rte = list_nth(estate->es_range_table, rootResultRelInfo->ri_RangeTableIndex - 1);
+		rootRelation = plan->nominalRelation;
+#else
 		rte = exec_rt_fetch(rootResultRelInfo->ri_RangeTableIndex, estate);
+		rootRelation = plan->rootRelation;
+#endif  /* PG_VERSION_NUM */
 		rte = copyObject(rte);
 		rte->relid = RelationGetRelid(rinfo->ri_RelationDesc);
 		rte->relkind = RELKIND_FOREIGN_TABLE;
@@ -1845,7 +1852,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 		 * Vars contained in those expressions.
 		 */
 		if (plan && plan->operation == CMD_UPDATE &&
-			rootResultRelInfo->ri_RangeTableIndex == plan->rootRelation)
+			rootResultRelInfo->ri_RangeTableIndex == rootRelation)
 			resultRelation = mtstate->resultRelInfo[0].ri_RangeTableIndex;
 		else
 			resultRelation = rootResultRelInfo->ri_RangeTableIndex;
@@ -1853,7 +1860,11 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	else
 	{
 		resultRelation = rinfo->ri_RangeTableIndex;
+#if PG_VERSION_NUM < 120000
+		rte = list_nth(estate->es_range_table, resultRelation - 1);
+#else
 		rte = exec_rt_fetch(resultRelation, estate);
+#endif  /* PG_VERSION_NUM */
 	}
 
 	/*
