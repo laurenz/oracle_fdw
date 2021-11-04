@@ -279,6 +279,10 @@ Foreign table options
   Higher values can speed up performance, but will use more memory on the
   PostgreSQL server.
 
+  Note that due to an Oracle limitation, row prefetching won't work if the
+  Oracle query involves a BLOB, CLOB or BFILE column.  As a consequence, queries
+  on such columns on a foreign table will perform badly if you fetch many rows.
+
 Column options
 --------------
 
