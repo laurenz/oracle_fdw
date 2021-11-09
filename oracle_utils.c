@@ -493,7 +493,7 @@ oracleSession
 		{
 			oracleError_i(FDW_OUT_OF_MEMORY,
 				"error connecting to Oracle: failed to allocate %d bytes of memory",
-				sizeof(strlen(user) + 1));
+				strlen(user) + 1);
 		}
 		connp->svchp = svchp;
 		connp->userhp = userhp;
