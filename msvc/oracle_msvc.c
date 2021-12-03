@@ -53,4 +53,8 @@ oracleDelayLoadFailureHook(unsigned dliNotify, PDelayLoadInfo pdli)
 	return 0;
 }
 
-ExternC const PfnDliHook __pfnDliFailureHook2 = oracleDelayLoadFailureHook;
+ExternC
+#if _MSC_FULL_VER >= 190024210  /* VS 2015 Update 3 */
+const
+#endif
+PfnDliHook __pfnDliFailureHook2 = oracleDelayLoadFailureHook;
