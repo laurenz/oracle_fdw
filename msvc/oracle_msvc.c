@@ -53,4 +53,4 @@ oracleDelayLoadFailureHook(unsigned dliNotify, PDelayLoadInfo pdli)
 	return 0;
 }
 
-PfnDliHook __pfnDliFailureHook2 = oracleDelayLoadFailureHook;
+ExternC const PfnDliHook __pfnDliFailureHook2 = oracleDelayLoadFailureHook;
