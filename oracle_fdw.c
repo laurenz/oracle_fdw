@@ -1461,7 +1461,7 @@ oracleAddForeignUpdateTargets(
 					has_key = true;
 				}
 			}
-			else
+			else if (strcmp(def->defname, OPT_STRIP_ZEROS) != 0)
 			{
 				elog(ERROR, "impossible column option \"%s\"", def->defname);
 			}
