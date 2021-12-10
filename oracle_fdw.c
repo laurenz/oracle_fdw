@@ -544,7 +544,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 		if (strcmp(def->defname, OPT_TABLE) == 0)
 		{
 			char *val = strVal(def->arg);
-			if (strchr(val, '"') != NULL)
+			if (val[0] == '"' || val[strlen(val) - 1] == '"')
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
