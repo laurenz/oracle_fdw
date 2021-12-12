@@ -540,17 +540,6 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 						errhint("Double quotes are not allowed in the schema name.")));
 		}
 
-		/* check valid values for "table" */
-		if (strcmp(def->defname, OPT_TABLE) == 0)
-		{
-			char *val = strVal(def->arg);
-			if (val[0] == '"' || val[strlen(val) - 1] == '"')
-				ereport(ERROR,
-						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Double quotes are not allowed in the table name.")));
-		}
-
 		/* check valid values for max_long */
 		if (strcmp(def->defname, OPT_MAX_LONG) == 0)
 		{

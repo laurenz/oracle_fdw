@@ -2833,6 +2833,15 @@ char
 		result[size] = '\0';
 		return result;
 	}
+
+	/* if "string" is already quoted, return a copy */
+	if (string[0] == '"' && string[size-1] == '"')
+	{
+		result = oracleAlloc(size + 1);
+		memcpy(result, string, size);
+		result[size] = '\0';
+		return result;
+	}
 		
 	if (quote)
 	{
