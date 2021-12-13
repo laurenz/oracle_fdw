@@ -4,6 +4,9 @@ Version 2.5.0
   - Use the correct user mapping for views on foreign tables.
     This should use the mapping associated with the view owner.
     Reported by "JSilex".
+  - Fix a spurious error on UPDATE or DELETE if the column options "key" and
+    "strip_zeros" are used on the same column.
+    Report and patch by Noriyoshi Shinoda.
 
 Version 2.4.0, released 2021-09-24
 
