@@ -2891,12 +2891,22 @@ char
 	 * Calculate MD5 hash of the query string so far.
 	 * This is needed to find the query in Oracle's library cache for EXPLAIN.
 	 */
-	if (! pg_md5_hash(query.data, strlen(query.data), md5))
+#if PG_VERSION_NUM >= 150000
 	{
+		const char *errstr = NULL;
+
+		if (! pg_md5_hash(query.data, strlen(query.data), md5, &errstr))
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("could not compute %s hash: %s", "MD5",
+							errstr)));
+	}
+#else
+	if (! pg_md5_hash(query.data, strlen(query.data), md5))
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
-				errmsg("out of memory")));
-	}
+				 errmsg("out of memory")));
+#endif  /* PG_VERSION_NUM */
 
 	/* add comment with MD5 hash to query */
 	initStringInfo(&result);
