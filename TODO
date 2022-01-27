@@ -6,3 +6,6 @@ Help is welcome!
   our NLS settings.
 
 - Convert OCI prefetching to bulk fetches to improve performance for LOBs.
+
+- Add a sample Docker file to build a container with PostgreSQL and oracle_fdw.
+  This can also serve as a cookbook for installing the software.
