@@ -1,4 +1,4 @@
-This is a list of things that should be done.
+This is a list of things that would be nice to have.
 Help is welcome!
 
 - Set parameters like NLS_DATE_FORMAT *after* the Oracle connection has been
@@ -9,3 +9,5 @@ Help is welcome!
 
 - Add a sample Docker file to build a container with PostgreSQL and oracle_fdw.
   This can also serve as a cookbook for installing the software.
+
+- Aggregate pushdown.
