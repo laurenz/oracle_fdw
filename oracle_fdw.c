@@ -29,10 +29,10 @@
 #include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
-#if PG_VERSION_NUM < 100000
-#include "libpq/md5.h"
+#if PG_VERSION_NUM < 130000
+#include "utils/hashutils.h"
 #else
-#include "common/md5.h"
+#include "common/hashfn.h"
 #endif  /* PG_VERSION_NUM */
 #include "libpq/pqsignal.h"
 #include "mb/pg_wchar.h"
@@ -2780,7 +2780,8 @@ char
 	ListCell *cell;
 	bool in_quote = false;
 	int i, index;
-	char *wherecopy, *p, md5[33], parname[10], *separator = "";
+	char *wherecopy, *p, hash_str[17], parname[10], *separator = "";
+	long queryhash;
 	StringInfoData query, result;
 	List *columnlist,
 		*conditions = foreignrel->baserestrictinfo;
@@ -2888,30 +2889,15 @@ char
 	pfree(wherecopy);
 
 	/*
-	 * Calculate MD5 hash of the query string so far.
+	 * Calculate a hash of the query string so far.
 	 * This is needed to find the query in Oracle's library cache for EXPLAIN.
 	 */
-#if PG_VERSION_NUM >= 150000
-	{
-		const char *errstr = NULL;
+	queryhash = hash_bytes_extended((unsigned char *)query.data, strlen(query.data), 0);
+	snprintf(hash_str, 17, "%08lx", queryhash);
 
-		if (! pg_md5_hash(query.data, strlen(query.data), md5, &errstr))
-			ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("could not compute %s hash: %s", "MD5",
-							errstr)));
-	}
-#else
-	if (! pg_md5_hash(query.data, strlen(query.data), md5))
-		ereport(ERROR,
-				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("out of memory or FIPS mode enabled"),
-				 errhint("If you are running on Linux, try disabling FIPS mode to allow MD5 hashes.")));
-#endif  /* PG_VERSION_NUM */
-
-	/* add comment with MD5 hash to query */
+	/* add comment with hash to query */
 	initStringInfo(&result);
-	appendStringInfo(&result, "SELECT /*%s*/ %s", md5, query.data);
+	appendStringInfo(&result, "SELECT /*%s*/ %s", hash_str, query.data);
 	pfree(query.data);
 
 	return result.data;

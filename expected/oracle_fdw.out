@@ -300,10 +300,10 @@ SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varch
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
-                                                                             QUERY PLAN                                                                             
---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                     QUERY PLAN                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*8c6beaafc8da5092be8f9e5228293b79*/ r1."ID", r1."VC" FROM "TYPETEST1" r1 WHERE (r1."VC" IN ('short', :p1)) ORDER BY r1."ID" ASC NULLS LAST
+   Oracle query: SELECT /*fdfac5fa5afb2dc8*/ r1."ID", r1."VC" FROM "TYPETEST1" r1 WHERE (r1."VC" IN ('short', :p1)) ORDER BY r1."ID" ASC NULLS LAST
    InitPlan 1 (returns $0)
      ->  Result
 (4 rows)
@@ -349,30 +349,30 @@ DELETE FROM typetest1 WHERE id = 5;
  * Test EXPLAIN support.
  */
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;
-                                                                                                                                      QUERY PLAN                                                                                                                                      
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                              QUERY PLAN                                                                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1
    Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p7 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*15030992d3ac8035d2b16b61b10953ec*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
+         Oracle query: SELECT /*5c452aa357a4239f*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
 (4 rows)
 
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Foreign Scan on public.shorty
    Output: id, c
-   Oracle query: SELECT /*91f1b22c0e234d8c0794325f39acdac8*/ r1."ID", r1."C" FROM "TYPETEST1" r1
+   Oracle query: SELECT /*92c465781c2259ec*/ r1."ID", r1."C" FROM "TYPETEST1" r1
    Oracle plan: SELECT STATEMENT
    Oracle plan:   TABLE ACCESS FULL TYPETEST1
 (5 rows)
 
 -- this should fetch all columns from the foreign table
 EXPLAIN (COSTS off) SELECT typetest1 FROM typetest1;
-                                                                                                                   QUERY PLAN                                                                                                                    
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                           QUERY PLAN                                                                                                            
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*4737e8f4f6dd5315e1ad7dcd923945e3*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1
+   Oracle query: SELECT /*f45af6ff7fe0f072*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1
 (2 rows)
 
 /*
@@ -411,10 +411,10 @@ EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
 (1 row)
 
 EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-                                                                                                QUERY PLAN                                                                                                
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                       QUERY PLAN                                                                                        
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*af20b28e0a7b0cb45f42d27a533f758e*/ r1."ID", r1."D", r1."TS" FROM "TYPETEST1" r1 WHERE (r1."D" < CAST (:p1 AS DATE)) AND (r1."TS" < CAST (:p2 AS TIMESTAMP)) AND (r1."ID" = :p3)
+   Oracle query: SELECT /*e7109a5ab160454*/ r1."ID", r1."D", r1."TS" FROM "TYPETEST1" r1 WHERE (r1."D" < CAST (:p1 AS DATE)) AND (r1."TS" < CAST (:p2 AS TIMESTAMP)) AND (r1."ID" = :p3)
 (2 rows)
 
 EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
@@ -551,21 +551,21 @@ ROLLBACK;
  */
 -- don't push down string data types
 EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY id, vc;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Sort
    Sort Key: id, vc
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*072b982b9aa0c38d3ad556626000d2d7*/ r1."ID", r1."VC" FROM "TYPETEST1" r1
+         Oracle query: SELECT /*5481fa8e920c0b1e*/ r1."ID", r1."VC" FROM "TYPETEST1" r1
 (4 rows)
 
 -- push down complicated expressions
 EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
-                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                            
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                    QUERY PLAN                                                                                                                                                                                    
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  LockRows
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*7dc72f311b677cb569d2f9187585c5f0*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 ORDER BY length(r1."VC") ASC NULLS LAST, CASE WHEN (r1."VC" IS NULL) THEN 0 ELSE 1 END ASC NULLS LAST, r1."TS" DESC NULLS FIRST FOR UPDATE
+         Oracle query: SELECT /*5074cc14d3a68fac*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 ORDER BY length(r1."VC") ASC NULLS LAST, CASE WHEN (r1."VC" IS NULL) THEN 0 ELSE 1 END ASC NULLS LAST, r1."TS" DESC NULLS FIRST FOR UPDATE
 (3 rows)
 
 SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
@@ -652,11 +652,11 @@ DEALLOCATE stmt;
  */
 -- the LIMIT clause is pushed down with and without ORDER BY
 EXPLAIN (COSTS off) SELECT d FROM typetest1 LIMIT 2;
-                                                      QUERY PLAN                                                      
-----------------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
  Limit
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*f04d370c8510559c215152b699b07ac5*/ r1."D" FROM "TYPETEST1" r1 FETCH FIRST 2 ROWS ONLY
+         Oracle query: SELECT /*1ec5967d52c3030a*/ r1."D" FROM "TYPETEST1" r1 FETCH FIRST 2 ROWS ONLY
 (3 rows)
 
 SELECT d FROM typetest1 LIMIT 2;
@@ -667,11 +667,11 @@ SELECT d FROM typetest1 LIMIT 2;
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY d LIMIT 2;
-                                                                     QUERY PLAN                                                                      
------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
  Limit
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*e2f036b94f72638325ef6dc70ad78e76*/ r1."D" FROM "TYPETEST1" r1 ORDER BY r1."D" ASC NULLS LAST FETCH FIRST 2 ROWS ONLY
+         Oracle query: SELECT /*e576e014fab5be1c*/ r1."D" FROM "TYPETEST1" r1 ORDER BY r1."D" ASC NULLS LAST FETCH FIRST 2 ROWS ONLY
 (3 rows)
 
 SELECT d FROM typetest1 ORDER BY d LIMIT 2;
@@ -683,22 +683,22 @@ SELECT d FROM typetest1 ORDER BY d LIMIT 2;
 
 -- the LIMIT clause is not pushed down because the ORDER BY is not
 EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY lc LIMIT 2;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Limit
    ->  Sort
          Sort Key: lc
          ->  Foreign Scan on typetest1
-               Oracle query: SELECT /*b69b8f67724d8bdbad41bf5a9345cc14*/ r1."LC", r1."D" FROM "TYPETEST1" r1
+               Oracle query: SELECT /*4774138fc3e1aafa*/ r1."LC", r1."D" FROM "TYPETEST1" r1
 (5 rows)
 
 -- with an OFFSET clause, the offset value is added to the limit
 EXPLAIN (COSTS off) SELECT * FROM qtest LIMIT 1 OFFSET 2;
-                                                                                          QUERY PLAN                                                                                          
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                  QUERY PLAN                                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Limit
    ->  Foreign Scan on qtest
-         Oracle query: SELECT /*e571dec394b1d567b88b73fb3b4e6786*/ r1."ID", r1."SUBSTR(VC,1,3)", r1."NUM" FROM (SELECT id, SUBSTR(vc, 1, 3), num FROM typetest1) r1 FETCH FIRST 1+2 ROWS ONLY
+         Oracle query: SELECT /*735674424370741d*/ r1."ID", r1."SUBSTR(VC,1,3)", r1."NUM" FROM (SELECT id, SUBSTR(vc, 1, 3), num FROM typetest1) r1 FETCH FIRST 1+2 ROWS ONLY
 (3 rows)
 
 SELECT * FROM qtest LIMIT 1 OFFSET 2;
@@ -709,13 +709,13 @@ SELECT * FROM qtest LIMIT 1 OFFSET 2;
 
 -- no LIMIT push-down if there is a GROUP BY clause
 EXPLAIN (COSTS off) SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
-                                                            QUERY PLAN                                                             
------------------------------------------------------------------------------------------------------------------------------------
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
  Limit
    ->  GroupAggregate
          Group Key: d
          ->  Foreign Scan on typetest1
-               Oracle query: SELECT /*145d52f5de38a843e3af04dc11eeb80c*/ r1."D" FROM "TYPETEST1" r1 ORDER BY r1."D" ASC NULLS LAST
+               Oracle query: SELECT /*3ad9a4ae16c8af72*/ r1."D" FROM "TYPETEST1" r1 ORDER BY r1."D" ASC NULLS LAST
 (5 rows)
 
 SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
@@ -727,12 +727,12 @@ SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
 
 -- no LIMIT push-down if there is an aggregate function
 EXPLAIN (COSTS off) SELECT 12 - count(*) FROM typetest1 LIMIT 1;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Limit
    ->  Aggregate
          ->  Foreign Scan on typetest1
-               Oracle query: SELECT /*50857ae5af0c5a170837c8c56f91e583*/ '1' FROM "TYPETEST1" r1
+               Oracle query: SELECT /*5ac4525c1631b53c*/ '1' FROM "TYPETEST1" r1
 (4 rows)
 
 SELECT 12 - count(*) FROM typetest1 LIMIT 1;
@@ -743,12 +743,12 @@ SELECT 12 - count(*) FROM typetest1 LIMIT 1;
 
 -- no LIMIT push-down if there is a local WHERE condition
 EXPLAIN (COSTS OFF) SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Limit
    ->  Foreign Scan on typetest1
          Filter: ((vc)::text < 'u'::text)
-         Oracle query: SELECT /*072b982b9aa0c38d3ad556626000d2d7*/ r1."ID", r1."VC" FROM "TYPETEST1" r1
+         Oracle query: SELECT /*5481fa8e920c0b1e*/ r1."ID", r1."VC" FROM "TYPETEST1" r1
 (4 rows)
 
 SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
