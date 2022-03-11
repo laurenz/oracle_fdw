@@ -1790,6 +1790,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 {
 	ModifyTable *plan = castNode(ModifyTable, mtstate->ps.plan);
+	Relation rel = rinfo->ri_RelationDesc;
 	EState *estate = mtstate->ps.state;
 	struct OracleFdwState *fdw_state;
 	Index resultRelation;
@@ -1799,7 +1800,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	HeapTuple tuple;
 	int i;
 
-	elog(DEBUG3, "oracle_fdw: execute foreign table COPY on %d", RelationGetRelid(rinfo->ri_RelationDesc));
+	elog(DEBUG3, "oracle_fdw: execute foreign table COPY on %d", RelationGetRelid(rel));
 
 	/* we don't support INSERT ... ON CONFLICT */
 	if (plan && plan->onConflictAction != ONCONFLICT_NONE)
@@ -1823,57 +1824,28 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 
 	/*
 	 * If the foreign table is a partition that doesn't have a corresponding
-	 * RTE entry, we need to create a new RTE describing the foreign table for
-	 * use by deparseInsertSql and create_foreign_modify() below, after first
-	 * copying the parent's RTE and modifying some fields to describe the
-	 * foreign partition to work on. However, if this is invoked by UPDATE,
+	 * RTE entry, we need to create a new RTE describing the foreign table,
+	 * so that we can get the effective user.  However, if this is invoked by UPDATE,
 	 * the existing RTE may already correspond to this partition if it is one
 	 * of the UPDATE subplan target rels; in that case, we can just use the
 	 * existing RTE as-is.
 	 */
 	if (rinfo->ri_RangeTableIndex == 0)
-	{
-		ResultRelInfo *rootResultRelInfo = rinfo->ri_RootResultRelInfo;
-		Index rootRelation;
-
-#if PG_VERSION_NUM < 120000
-		rte = list_nth(estate->es_range_table, rootResultRelInfo->ri_RangeTableIndex - 1);
-		rootRelation = plan->nominalRelation;
-#else
-		rte = exec_rt_fetch(rootResultRelInfo->ri_RangeTableIndex, estate);
-		rootRelation = plan->rootRelation;
-#endif  /* PG_VERSION_NUM */
-		rte = copyObject(rte);
-		rte->relid = RelationGetRelid(rinfo->ri_RelationDesc);
-		rte->relkind = RELKIND_FOREIGN_TABLE;
-
-		/*
-		 * For UPDATE, we must use the RT index of the first subplan target
-		 * rel's RTE, because the core code would have built expressions for
-		 * the partition, such as RETURNING, using that RT index as varno of
-		 * Vars contained in those expressions.
-		 */
-		if (plan && plan->operation == CMD_UPDATE &&
-			rootResultRelInfo->ri_RangeTableIndex == rootRelation)
-			resultRelation = mtstate->resultRelInfo[0].ri_RangeTableIndex;
-		else
-			resultRelation = rootResultRelInfo->ri_RangeTableIndex;
-	}
+		resultRelation = rinfo->ri_RootResultRelInfo->ri_RangeTableIndex;
 	else
-	{
 		resultRelation = rinfo->ri_RangeTableIndex;
+
 #if PG_VERSION_NUM < 120000
-		rte = list_nth(estate->es_range_table, resultRelation - 1);
+	rte = list_nth(estate->es_range_table, resultRelation - 1);
 #else
-		rte = exec_rt_fetch(resultRelation, estate);
+	rte = exec_rt_fetch(resultRelation, estate);
 #endif  /* PG_VERSION_NUM */
-	}
 
 	/*
 	 * To match what ExecCheckRTEPerms does, pass the user whose user mapping
 	 * should be used (if invalid, the current user is used).
 	 */
-	fdw_state = getFdwState(RelationGetRelid(rinfo->ri_RelationDesc), NULL, rte->checkAsUser);
+	fdw_state = getFdwState(RelationGetRelid(rel), NULL, rte->checkAsUser);
 
 	/* not using "deserializePlanData", we have to initialize these ourselves */
 	for (i=0; i<fdw_state->oraTable->ncols; ++i)
@@ -1903,7 +1875,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	 * We could figure out what columns to return in the second case,
 	 * but let's keep it simple for now.
 	 */
-	if (hasTrigger(rinfo->ri_RelationDesc, CMD_INSERT)
+	if (hasTrigger(rel, CMD_INSERT)
 		|| (estate->es_plannedstmt != NULL && estate->es_plannedstmt->hasReturning))
 	{
 		/* mark all attributes for returning */
