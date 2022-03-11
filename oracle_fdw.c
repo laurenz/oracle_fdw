@@ -2905,7 +2905,8 @@ char
 	if (! pg_md5_hash(query.data, strlen(query.data), md5))
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("out of memory")));
+				 errmsg("out of memory or FIPS mode enabled"),
+				 errhint("If you are running on Linux, try disabling FIPS mode to allow MD5 hashes.")));
 #endif  /* PG_VERSION_NUM */
 
 	/* add comment with MD5 hash to query */
