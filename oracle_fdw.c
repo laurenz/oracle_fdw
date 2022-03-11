@@ -31,6 +31,8 @@
 #include "foreign/foreign.h"
 #if PG_VERSION_NUM < 130000
 #include "utils/hashutils.h"
+#define hash_bytes_extended(k, keylen, seed) \
+	DatumGetInt64(hash_any_extended((k), (keylen), (seed)))
 #else
 #include "common/hashfn.h"
 #endif  /* PG_VERSION_NUM */
