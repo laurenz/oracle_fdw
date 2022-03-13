@@ -7,6 +7,9 @@ Version 2.5.0
   - Fix a spurious error on UPDATE or DELETE if the column options "key" and
     "strip_zeros" are used on the same column.
     Report and patch by Noriyoshi Shinoda.
+  - Fix "out of memory" and other errors on Linux systems with FIPS enabled.
+    The cause is that calculating MD5 hashes on such systems causes errors.
+    Reported by Hank Drews.
 
 Version 2.4.0, released 2021-09-24
 
