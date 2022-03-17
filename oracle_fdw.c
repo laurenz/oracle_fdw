@@ -29,12 +29,20 @@
 #include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
-#if PG_VERSION_NUM < 130000
+/* for "hash_bytes_extended" or "hash_bytes" */
+#if PG_VERSION_NUM >= 130000
+#include "common/hashfn.h"
+#elif PG_VERSION_NUM >= 120000
 #include "utils/hashutils.h"
+#else
+#include "access/hash.h"
+#endif  /* PG_VERSION_NUM */
+#if PG_VERSION_NUM < 110000
+#define hash_bytes_extended(k, keylen, seed) \
+	DatumGetInt32(hash_any((k), (keylen)))
+#elif PG_VERSION_NUM < 130000
 #define hash_bytes_extended(k, keylen, seed) \
 	DatumGetInt64(hash_any_extended((k), (keylen), (seed)))
-#else
-#include "common/hashfn.h"
 #endif  /* PG_VERSION_NUM */
 #include "libpq/pqsignal.h"
 #include "mb/pg_wchar.h"
