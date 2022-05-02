@@ -373,10 +373,6 @@ static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
 static long deserializeLong(Const *constant);
 static bool optionIsTrue(const char *value);
-#if PG_VERSION_NUM < 130000
-/* this function is not exported before v13 */
-static Expr *find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel);
-#endif  /* PG_VERSION_NUM */
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static char *deparseInterval(Datum datum);
@@ -5551,39 +5547,6 @@ optionIsTrue(const char *value)
 		return false;
 }
 
-#if PG_VERSION_NUM < 130000
-/*
- * find_em_expr_for_rel
- * 		Find an equivalence class member expression, all of whose Vars come from
- * 		the indicated relation.
- * 		This is copied from the PostgreSQL source, because before v13 it was
- * 		not exported.
- */
-Expr *
-find_em_expr_for_rel(EquivalenceClass *ec, RelOptInfo *rel)
-{
-	ListCell   *lc_em;
-
-	foreach(lc_em, ec->ec_members)
-	{
-		EquivalenceMember *em = lfirst(lc_em);
-
-		if (bms_equal(em->em_relids, rel->relids))
-		{
-			/*
-			 * If there is more than one equivalence member whose Vars are
-			 * taken entirely from this relation, we'll be content to choose
-			 * any one of those.
-			 */
-			return em->em_expr;
-		}
-	}
-
-	/* We didn't find any suitable equivalence class expression */
-	return NULL;
-}
-#endif  /* PG_VERSION_NUM */
-
 /*
  * deparseDate
  * 		Render a PostgreSQL date so that Oracle can parse it.
@@ -6744,31 +6707,59 @@ pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *f
 	{
 		PathKey *pathkey = (PathKey *)lfirst(cell);
 		EquivalenceClass *pathkey_ec = pathkey->pk_eclass;
+		EquivalenceMember *em = NULL;
 		Expr *em_expr = NULL;
 		char *sort_clause;
 		Oid em_type;
+		ListCell *lc;
 		bool can_pushdown;
 
+		/* ec_has_volatile saves some cycles */
+		if (pathkey_ec->ec_has_volatile)
+			return false;
+
 		/*
-		 * deparseExpr would detect volatile expressions as well, but
-		 * ec_has_volatile saves some cycles.
+		 * Given an EquivalenceClass and a foreign relation, find an EC member
+		 * that can be used to sort the relation remotely according to a pathkey
+		 * using this EC.
+		 *
+		 * If there is more than one suitable candidate, use an arbitrary
+		 * one of them.
+		 *
+		 * This checks that the EC member expression uses only Vars from the given
+		 * rel and is shippable.  Caller must separately verify that the pathkey's
+		 * ordering operator is shippable.
 		 */
-		can_pushdown = !pathkey_ec->ec_has_volatile
-				&& ((em_expr = find_em_expr_for_rel(pathkey_ec, baserel)) != NULL);
-
-		if (can_pushdown)
+		foreach(lc, pathkey_ec->ec_members)
 		{
-			em_type = exprType((Node *)em_expr);
+			EquivalenceMember *some_em = (EquivalenceMember *) lfirst(lc);
 
-			/* expressions of a type different from this are not safe to push down into ORDER BY clauses */
-			if (em_type != INT8OID && em_type != INT2OID && em_type != INT4OID && em_type != OIDOID
-					&& em_type != FLOAT4OID && em_type != FLOAT8OID && em_type != NUMERICOID && em_type != DATEOID
-					&& em_type != TIMESTAMPOID && em_type != TIMESTAMPTZOID && em_type != INTERVALOID)
-				can_pushdown = false;
+			/*
+			 * Note we require !bms_is_empty, else we'd accept constant
+			 * expressions which are not suitable for the purpose.
+			 */
+			if (bms_is_subset(some_em->em_relids, baserel->relids) &&
+				!bms_is_empty(some_em->em_relids))
+			{
+				em = some_em;
+				break;
+			}
 		}
 
+		if (em == NULL)
+			return false;
+
+		em_expr = em->em_expr;
+		em_type = exprType((Node *)em_expr);
+
+		/* expressions of a type different from this are not safe to push down into ORDER BY clauses */
+		can_pushdown = (em_type == INT8OID || em_type == INT2OID || em_type == INT4OID || em_type == OIDOID
+				|| em_type == FLOAT4OID || em_type == FLOAT8OID || em_type == NUMERICOID || em_type == DATEOID
+				|| em_type == TIMESTAMPOID || em_type == TIMESTAMPTZOID || em_type == INTERVALOID);
+
 		if (can_pushdown &&
-			((sort_clause = deparseExpr(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params))) != NULL)){
+			((sort_clause = deparseExpr(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params))) != NULL))
+		{
 			/* keep usable_pathkeys for later use. */
 			usable_pathkeys = lappend(usable_pathkeys, pathkey);
 
