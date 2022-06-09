@@ -307,7 +307,11 @@ Oracle permissions
 ------------------
 
 The Oracle user will obviously need CREATE SESSION privilege and the right
-to select from the table or view in question.
+to select from the table or view in question.  Note that oracle_fdw accesses
+the Oracle table at query planning time to get its definition.  This happens
+*before* permissions on the foreign table are checked.  Consequently, you may
+receive an Oracle error if you try to access a foreign table on which you
+have no permissions in PostgreSQL.  This is expected and no security problem.
 
 For EXPLAIN VERBOSE the user will also need SELECT privileges on V$SQL and
 V$SQL_PLAN.
