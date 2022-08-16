@@ -5008,7 +5008,9 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 	/* otherwise, report an error */
 	ereport(ERROR,
 			(errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
-			errmsg("column \"%s\" of foreign table \"%s\" cannot be converted to or from Oracle data type", colname, tablename)));
+			errmsg(
+				"column \"%s\" (%d) of foreign table \"%s\" cannot be converted to or from Oracle data type (%d)",
+				colname, pgtype, tablename, oratype)));
 }
 
 /*
