@@ -1156,9 +1156,13 @@ struct oraTable
 				reply->cols[i-1]->val_size = 34;
 				break;
 			case SQLT_TIMESTAMP_TZ:
-			case SQLT_TIMESTAMP_LTZ:
-				/* TIMESTAMP WITH TIMEZONE and TIMESTAMP WITH LOCAL TIMEZONE */
+				/* TIMESTAMP WITH TIMEZONE */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMPTZ;
+				reply->cols[i-1]->val_size = 40;
+				break;
+			case SQLT_TIMESTAMP_LTZ:
+				/* TIMESTAMP WITH LOCAL TIMEZONE */
+				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMPLTZ;
 				reply->cols[i-1]->val_size = 40;
 				break;
 			case SQLT_INTERVAL_YM:

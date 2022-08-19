@@ -10,6 +10,10 @@ Version 2.5.0
   - Fix "out of memory" and other errors on Linux systems with FIPS enabled.
     The cause is that calculating MD5 hashes on such systems causes errors.
     Reported by Hank Drews.
+  - Handle Oracle's TIMESTAMP WITH LOCAL TIME ZONE correctly.
+    Oracle converts such values to its session time zone on output, but does not
+    add a time zone offset, so PostgreSQL interpreted them incorrectly.
+    Reported by "JamesInform".
 
 Version 2.4.0, released 2021-09-24
 
