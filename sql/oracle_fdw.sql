@@ -23,6 +23,14 @@ END;$$;
 
 DO
 $$BEGIN
+   SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest2 PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+
+DO
+$$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.gis PURGE');
 EXCEPTION
    WHEN OTHERS THEN
@@ -56,6 +64,17 @@ SELECT oracle_execute(
 
 SELECT oracle_execute(
           'oracle',
+          E'CREATE TABLE scott.typetest2 (\n'
+          '   id  NUMBER(5)\n'
+          '     CONSTRAINT typetest2_pkey PRIMARY KEY,\n'
+          '   ts1 TIMESTAMP WITH LOCAL TIME ZONE,\n'
+          '   ts2 TIMESTAMP WITH LOCAL TIME ZONE,\n'
+          '   ts3 TIMESTAMP WITH LOCAL TIME ZONE\n'
+          ') SEGMENT CREATION IMMEDIATE'
+       );
+
+SELECT oracle_execute(
+          'oracle',
           E'CREATE TABLE scott.gis (\n'
           '   id  NUMBER(5) PRIMARY KEY,\n'
           '   g   MDSYS.SDO_GEOMETRY\n'
@@ -73,8 +92,26 @@ SELECT oracle_execute(
 SELECT oracle_execute(
           'oracle',
           E'BEGIN\n'
+          '   DBMS_STATS.GATHER_TABLE_STATS (''SCOTT'', ''TYPETEST2'', NULL, 100);\n'
+          'END;'
+       );
+
+SELECT oracle_execute(
+          'oracle',
+          E'BEGIN\n'
           '   DBMS_STATS.GATHER_TABLE_STATS (''SCOTT'', ''GIS'', NULL, 100);\n'
           'END;'
+       );
+
+-- initial data for typetest2
+SELECT oracle_execute(
+          'oracle',
+          E'INSERT INTO scott.typetest2 (id, ts1, ts2, ts3) VALUES (\n'
+          '   1,\n'
+          '   ''2022-08-01 00:00:00 AD'',\n'
+          '   ''2022-08-01 00:00:00 AD'',\n'
+          '   ''2022-08-01 00:00:00 AD''\n'
+          ')'
        );
 
 -- create the foreign tables
@@ -130,8 +167,15 @@ CREATE FOREIGN TABLE longy (
    x   integer
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
 
+CREATE FOREIGN TABLE typetest2 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   ts1 timestamp with time zone,
+   ts2 timestamp without time zone,
+   ts3 date
+) SERVER oracle OPTIONS (table 'TYPETEST2');
+
 /*
- * Empty the table and INSERT some samples.
+ * INSERT some rows into "typetest1".
  */
 
 -- will fail with a read-only transaction
@@ -512,3 +556,21 @@ SELECT id FROM f_typetest1() ORDER BY id;
 -- clean up
 RESET SESSION AUTHORIZATION;
 DROP ROLE duff;
+
+/* test TIMESTAMP WITH LOCAL TIME ZONE */
+INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
+   2,
+   '2020-12-31 00:00:00 UTC',
+   '2020-12-31 00:00:00',
+   '2020-12-31'
+);
+SELECT * FROM typetest2;
+SET timezone = 'Asia/Kolkata';
+INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
+   3,
+   '2020-12-31 00:00:00 UTC',
+   '2020-12-31 00:00:00',
+   '2020-12-31'
+);
+SELECT * FROM typetest2;
+RESET timezone;

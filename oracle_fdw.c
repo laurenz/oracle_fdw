@@ -2811,20 +2811,30 @@ char
 	{
 		if (fdwState->oraTable->cols[i]->used)
 		{
+			char *format;
 			StringInfoData alias;
+
 			initStringInfo(&alias);
 			/* table alias is created from range table index */
 			ADD_REL_QUALIFIER(&alias, fdwState->oraTable->cols[i]->varno);
 
-			/* add qualified column name */
+			/* format for qualified column name */
 			if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_XMLTYPE)
 				/* convert XML to CLOB in the query */
-				appendStringInfo(&query, "%s(%s%s).getclobval()", separator, alias.data, fdwState->oraTable->cols[i]->name);
+				format = "%s(%s%s).getclobval()";
 			else if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_TIMESTAMPLTZ)
-				/* convert to TIMESTAMP WITH TIME ZONE */
-				appendStringInfo(&query, "%s(%s%s AT TIME ZONE 'UTC')", separator, alias.data, fdwState->oraTable->cols[i]->name);
+				/* convert TIMESTAMP WITH LOCAL TIME ZONE to TIMESTAMP WITH TIME ZONE */
+				format = "%s(%s%s AT TIME ZONE sessiontimezone)";
 			else
-				appendStringInfo(&query, "%s%s%s", separator, alias.data, fdwState->oraTable->cols[i]->name);
+				/* select the column as it is */
+				format = "%s%s%s";
+
+			appendStringInfo(&query,
+							 format,
+							 separator,
+							 alias.data,
+							 fdwState->oraTable->cols[i]->name);
+
 			separator = ", ";
 		}
 	}
