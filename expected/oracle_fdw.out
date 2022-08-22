@@ -587,10 +587,10 @@ CREATE FOREIGN TABLE badtypes (
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
 -- should fail for column "nc", as "c" is not used
 SELECT id, nc FROM badtypes WHERE id = 1;
-ERROR:  column "nc" of foreign table "badtypes" cannot be converted to or from Oracle data type
+ERROR:  column "nc" (142) of foreign table "badtypes" cannot be converted to or from Oracle data type (1)
 -- this will fail for inserting a NULL in column "c"
 INSERT INTO badtypes (id, nc) VALUES (42, XML '<empty/>');
-ERROR:  column "c" of foreign table "badtypes" cannot be converted to or from Oracle data type
+ERROR:  column "c" (142) of foreign table "badtypes" cannot be converted to or from Oracle data type (1)
 -- remove foreign table
 DROP FOREIGN TABLE badtypes;
 /*
