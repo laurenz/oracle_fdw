@@ -15,6 +15,11 @@ Version 2.5.0
     add a time zone offset, so PostgreSQL interpreted them incorrectly.
     Reported by "JamesInform".
 
+  Enhancements:
+  - Improve the Makefile so that the build process automatically detects
+    Oracle Instant Client installations installed by packages on Linux.
+    Patch by Christian Ullrich.
+
 Version 2.4.0, released 2021-09-24
 
   Enhancements:
