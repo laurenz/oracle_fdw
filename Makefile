@@ -6,8 +6,8 @@ DOCS = README.oracle_fdw
 REGRESS = oracle_fdw oracle_gis oracle_import oracle_join
 
 # try to find Instant Client installations installed in standard paths
-FIND_INCLUDE != ls -d /usr/include/oracle/*/client64 /usr/include/oracle/*/client 2>/dev/null | tr -d \$
-FIND_LIBDIRS != ls -d /usr/lib/oracle/*/client64/lib /usr/lib/oracle/*/client/lib 2>/dev/null | tr -d \$
+FIND_INCLUDE := $(wildcard /usr/include/oracle/*/client64 /usr/include/oracle/*/client)
+FIND_LIBDIRS := $(wildcard /usr/lib/oracle/*/client64/lib /usr/lib/oracle/*/client/lib)
 
 FIND_CPPFLAGS = $(foreach DIR,$(FIND_INCLUDE),-I$(DIR))
 FIND_LDFLAGS = $(foreach DIR,$(FIND_LIBDIRS),-L$(DIR))
