@@ -1,4 +1,4 @@
-Version 2.5.0
+Version 2.5.0, released 2022-10-28
 
   Bugfixes:
   - Use the correct user mapping for views on foreign tables.
