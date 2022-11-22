@@ -1294,7 +1294,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 	/* connect to Oracle database */
 	fdw_state->session = oracleGetSession(
 			fdw_state->dbserver,
-			fdw_state->isolation_level,
+			(XactReadOnly ? ORA_TRANS_READ_ONLY : fdw_state->isolation_level),
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
@@ -2644,7 +2644,7 @@ struct OracleFdwState
 	/* connect to Oracle database */
 	fdwState->session = oracleGetSession(
 		fdwState->dbserver,
-		fdwState->isolation_level,
+		(XactReadOnly ? ORA_TRANS_READ_ONLY : fdwState->isolation_level),
 		fdwState->user,
 		fdwState->password,
 		fdwState->nls_lang,
