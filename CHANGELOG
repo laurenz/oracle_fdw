@@ -1,3 +1,10 @@
+Version 2.6.0
+
+  Enhancements:
+  - Skip Oracle savepoint management when "isolation_level" is "read_only".
+    This saves some round trips and prevents Oracle errors in some cases.
+    Per suggestion from "math-g".
+
 Version 2.5.0, released 2022-10-28
 
   Bugfixes:

@@ -37,6 +37,9 @@ static sb4 err_code;
 /* set to "1" as soon as OCIEnvCreate is called */
 static int oci_initialized = 0;
 
+/* is the current transaction read-only? */
+static int readonly = 0;
+
 /*
  * Linked list for temporary Oracle handles and descriptors.
  * Stores statement and describe handles as well as timetamp and LOB descriptors.
@@ -544,6 +547,8 @@ oracleSession
 		}
 
 		connp->xact_level = 1;
+
+		readonly = (isolation_level == ORA_TRANS_READ_ONLY);
 	}
 
 	/* palloc a data structure pointing to the cached entries */
@@ -650,6 +655,9 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 	if (((struct connEntry *)arg)->xact_level == 0)
 		return;
 
+	/* clear read-only status if set */
+	readonly = 0;
+
 	/* find the cached handles for the argument */
 	envp = envlist;
 	while (envp)
@@ -742,6 +750,10 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 		return;
 
 	((struct connEntry *)arg)->xact_level = nest_level - 1;
+
+	/* nothing else to do in read-only transactions */
+	if (readonly)
+		return;
 
 	if (is_commit)
 	{
@@ -1295,6 +1307,12 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 		snprintf(message, 49, "oracle_fdw: set savepoint s%d", session->connp->xact_level + 1);
 		oracleDebug2(message);
 
+		++session->connp->xact_level;
+
+		/* nothing else to do in read-only transactions */
+		if (readonly)
+			continue;
+
 		snprintf(query, 39, "SAVEPOINT s%d", session->connp->xact_level + 1);
 
 		/* create statement handle */
@@ -1327,8 +1345,6 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 		/* free statement handle */
 		freeHandle(session->stmthp, session->connp);
 		session->stmthp = NULL;
-
-		++session->connp->xact_level;
 	}
 }
 
