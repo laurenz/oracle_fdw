@@ -751,7 +751,11 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 
 	((struct connEntry *)arg)->xact_level = nest_level - 1;
 
-	/* nothing else to do in read-only transactions */
+	/*
+	 * There is nothing else to do in read-only transactions, since Oracle
+	 * has statement level rollback, so there is no need for savepoint
+	 * processing in read-only transactions.
+	 */
 	if (readonly)
 		return;
 
@@ -1309,7 +1313,11 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 
 		++session->connp->xact_level;
 
-		/* nothing else to do in read-only transactions */
+		/*
+		 * There is nothing else to do in read-only transactions, since Oracle
+		 * has statement level rollback, so there is no need for savepoint
+		 * processing in read-only transactions.
+		 */
 		if (readonly)
 			continue;
 
