@@ -646,14 +646,19 @@ oracleCancel(void)
  */
 void oracleEndTransaction(void *arg, int is_commit, int noerror)
 {
-	struct connEntry *connp = NULL;
+	struct connEntry *connp = NULL, *connarg = (struct connEntry *)arg;
 	struct srvEntry *srvp = NULL;
 	struct envEntry *envp = NULL;
 	int found = 0;
 
+	/* don't report errors on commit or rollback of read-only transactions */
+	noerror = noerror || readonly;
+
 	/* do nothing if there is no transaction */
-	if (((struct connEntry *)arg)->xact_level == 0)
+	if (connarg->xact_level == 0)
 		return;
+	else
+		connarg->xact_level = 0;
 
 	/* clear read-only status if set */
 	readonly = 0;
@@ -668,7 +673,7 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 			connp = srvp->connlist;
 			while (connp)
 			{
-				if (connp == (struct connEntry *)arg)
+				if (connp == connarg)
 				{
 					found = 1;
 					break;
@@ -725,8 +730,6 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 				oraMessage);
 		}
 	}
-
-	connp->xact_level = 0;
 }
 
 /*
@@ -1308,9 +1311,6 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 	{
 		char query[40], message[50];
 
-		snprintf(message, 49, "oracle_fdw: set savepoint s%d", session->connp->xact_level + 1);
-		oracleDebug2(message);
-
 		++session->connp->xact_level;
 
 		/*
@@ -1320,6 +1320,9 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 		 */
 		if (readonly)
 			continue;
+
+		snprintf(message, 49, "oracle_fdw: set savepoint s%d", session->connp->xact_level + 1);
+		oracleDebug2(message);
 
 		snprintf(query, 39, "SAVEPOINT s%d", session->connp->xact_level + 1);
 
