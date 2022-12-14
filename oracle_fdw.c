@@ -3682,9 +3682,9 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	Expr *rightexpr;
 	ArrayExpr *array;
 	ArrayCoerceExpr *arraycoerce;
-#if PG_VERSION_NUM >= 100000
+#if (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000)
 	SQLValueFunction *sqlvalfunc;
-#endif
+#endif  /* PG_VERSION_NUM */
 	regproc typoutput;
 	HeapTuple tuple;
 	ListCell *cell;
@@ -4510,11 +4510,25 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 				pfree(left);
 				pfree(right);
 			}
-			else if (strcmp(opername, "now") == 0 || strcmp(opername, "transaction_timestamp") == 0)
+			else if (strcmp(opername, "now") == 0
+				|| strcmp(opername, "current_timestamp") == 0
+				|| strcmp(opername, "transaction_timestamp") == 0)
 			{
 				/* special case: current timestamp */
 				initStringInfo(&result);
 				appendStringInfo(&result, "(CAST (:now AS TIMESTAMP WITH TIME ZONE))");
+			}
+			else if (strcmp(opername, "current_date") == 0)
+			{
+				/* special case: current_date */
+				initStringInfo(&result);
+				appendStringInfo(&result, "TRUNC(CAST (CAST(:now AS TIMESTAMP WITH TIME ZONE) AS DATE))");
+			}
+			else if (strcmp(opername, "localtimestamp") == 0)
+			{
+				/* special case: localtimestamp */
+				initStringInfo(&result);
+				appendStringInfo(&result, "(CAST (CAST (:now AS TIMESTAMP WITH TIME ZONE) AS TIMESTAMP))");
 			}
 			else
 			{
@@ -4528,6 +4542,11 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 		case T_CoerceViaIO:
 			/*
 			 * We will only handle casts of 'now'.
+			 *
+			 * This is how "current_timestamp", "current_date" and
+			 * "localtimestamp" were represented before PostgreSQL v10.
+			 * I am not sure whether this code path can be reached in later
+			 * versions, but it doesn't hurt to leave the code for now.
 			 */
 			coerce = (CoerceViaIO *)expr;
 
@@ -4573,7 +4592,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 
 			break;
-#if PG_VERSION_NUM >= 100000
+#if (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000)
 		case T_SQLValueFunction:
 			sqlvalfunc = (SQLValueFunction *)expr;
 
@@ -4596,7 +4615,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 
 			break;
-#endif
+#endif  /* (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000) */
 		default:
 			/* we cannot translate this to Oracle */
 			return NULL;
@@ -4949,10 +4968,10 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 		case T_PlaceHolderVar:
 			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable, foreignrelid);
 			break;
-#if PG_VERSION_NUM >= 100000
+#if (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000)
 		case T_SQLValueFunction:
 			break;  /* contains no column references */
-#endif
+#endif  /* PG_VERSION_NUM */
 		default:
 			/*
 			 * We must be able to handle all node types that can
