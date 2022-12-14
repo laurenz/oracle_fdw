@@ -124,9 +124,9 @@ SELECT oracle_execute(
           'oracle',
           E'INSERT INTO scott.typetest2 (id, ts1, ts2, ts3) VALUES (\n'
           '   1,\n'
-          '   ''2022-08-01 00:00:00 AD'',\n'
-          '   ''2022-08-01 00:00:00 AD'',\n'
-          '   ''2022-08-01 00:00:00 AD''\n'
+          '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
+          '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
+          '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC'')\n'
           ')'
        );
  oracle_execute 
@@ -869,7 +869,7 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
 SELECT * FROM typetest2;
  id |             ts1              |           ts2            |    ts3     
 ----+------------------------------+--------------------------+------------
-  1 | Sun Jul 31 15:00:00 2022 PDT | Mon Aug 01 00:00:00 2022 | 08-01-2022
+  1 | Wed Jul 31 17:00:00 2002 PDT | Thu Aug 01 01:00:00 2002 | 08-01-2002
   2 | Wed Dec 30 16:00:00 2020 PST | Thu Dec 31 00:00:00 2020 | 12-31-2020
 (2 rows)
 
@@ -883,7 +883,7 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
 SELECT * FROM typetest2;
  id |             ts1              |           ts2            |    ts3     
 ----+------------------------------+--------------------------+------------
-  1 | Mon Aug 01 03:30:00 2022 IST | Mon Aug 01 00:00:00 2022 | 08-01-2022
+  1 | Thu Aug 01 05:30:00 2002 IST | Thu Aug 01 01:00:00 2002 | 08-01-2002
   2 | Thu Dec 31 05:30:00 2020 IST | Thu Dec 31 00:00:00 2020 | 12-31-2020
   3 | Thu Dec 31 05:30:00 2020 IST | Thu Dec 31 00:00:00 2020 | 12-31-2020
 (3 rows)

@@ -108,9 +108,9 @@ SELECT oracle_execute(
           'oracle',
           E'INSERT INTO scott.typetest2 (id, ts1, ts2, ts3) VALUES (\n'
           '   1,\n'
-          '   ''2022-08-01 00:00:00 AD'',\n'
-          '   ''2022-08-01 00:00:00 AD'',\n'
-          '   ''2022-08-01 00:00:00 AD''\n'
+          '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
+          '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
+          '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC'')\n'
           ')'
        );
 
