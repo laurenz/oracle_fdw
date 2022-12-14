@@ -1321,10 +1321,10 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 		if (readonly)
 			continue;
 
-		snprintf(message, 49, "oracle_fdw: set savepoint s%d", session->connp->xact_level + 1);
+		snprintf(message, 49, "oracle_fdw: set savepoint s%d", session->connp->xact_level);
 		oracleDebug2(message);
 
-		snprintf(query, 39, "SAVEPOINT s%d", session->connp->xact_level + 1);
+		snprintf(query, 39, "SAVEPOINT s%d", session->connp->xact_level);
 
 		/* create statement handle */
 		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
