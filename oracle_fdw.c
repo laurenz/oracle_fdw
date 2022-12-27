@@ -6045,6 +6045,16 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 
 				value_len = VARSIZE(datum) - VARHDRSZ;
 
+				/*
+				 * Empty values are not allowed.
+				 * Oracle considers empty values equivalent to NULL, so we insert NULL instead.
+				 */
+				if (value_len == 0)
+				{
+					param->value = NULL;
+					break;
+				}
+
 				/* the first 4 bytes contain the length */
 				param->value = palloc(value_len + 4);
 				memcpy(param->value, (const char *)&value_len, 4);

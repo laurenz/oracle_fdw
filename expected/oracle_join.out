@@ -26,7 +26,8 @@ SELECT t1.id, t2.id FROM typetest1  t1, typetest1  t2 WHERE t1.c = t2.c ORDER BY
   1 |  1
   3 |  3
   4 |  4
-(3 rows)
+  7 |  7
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT length(t1.lb), length(t2.lc) FROM typetest1  t1 JOIN typetest1  t2 ON (t1.id + t2.id = 2) ORDER BY t1.id, t2.id;
@@ -79,7 +80,8 @@ SELECT id FROM typetest1  NATURAL JOIN shorty  ORDER BY id;
   1
   3
   4
-(3 rows)
+  7
+(4 rows)
 
 -- table with column that does not exist in Oracle (should become NULL)
 EXPLAIN (COSTS off)
@@ -100,7 +102,8 @@ WARNING:  column number 19 of foreign table "longy" does not exist in foreign Or
   1 |  
   3 |  
   4 |  
-(3 rows)
+  7 |  
+(4 rows)
 
 -- left outer join two tables
 EXPLAIN (COSTS off)
@@ -119,7 +122,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d = t2.d O
   1 |  1
   3 |  3
   4 |   
-(3 rows)
+  7 |   
+(4 rows)
 
 -- right outer join two tables
 EXPLAIN (COSTS off)
@@ -138,7 +142,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d = t2.d O
   1 |  1
   3 |  3
     |  4
-(3 rows)
+    |  7
+(4 rows)
 
 -- full outer join two tables
 EXPLAIN (COSTS off)
@@ -157,8 +162,10 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d O
   1 |  1
   3 |  3
   4 |   
+  7 |   
     |  4
-(4 rows)
+    |  7
+(6 rows)
 
 -- joins with filter conditions
 ---- inner join with WHERE clause
@@ -194,7 +201,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d = t2.d W
 ----+----
   3 |  3
   4 |   
-(2 rows)
+  7 |   
+(3 rows)
 
 ---- right outer join with WHERE clause
 EXPLAIN (COSTS off)
@@ -229,7 +237,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d = t2.d W
 ----+----
   3 |  3
   4 |   
-(2 rows)
+  7 |   
+(3 rows)
 
 /*
  * Cases that should not be pushed down.
@@ -328,7 +337,8 @@ SELECT t1.c, t2.nc FROM typetest1  t1 JOIN (SELECT * FROM typetest1)  t2 ON (t1.
  fixed chau           | nat'l char
  a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb    
  short                | short     
-(3 rows)
+                      |           
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.c, t2.nc FROM typetest1  t1 LEFT JOIN (SELECT * FROM typetest1)  t2 ON (t1.id = t2.id AND t1.c >= t2.c) ORDER BY t1.id, t2.nc;
@@ -352,7 +362,8 @@ SELECT t1.c, t2.nc FROM typetest1  t1 LEFT JOIN (SELECT * FROM typetest1)  t2 ON
  fixed chau           | nat'l char
  a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb    
  short                | short     
-(3 rows)
+                      |           
+(4 rows)
 
 -- subquery with where clause cannnot be pushed down in full outer join query
 EXPLAIN (COSTS off)
@@ -376,7 +387,8 @@ SELECT t1.c, t2.nc FROM typetest1  t1 FULL JOIN (SELECT * FROM typetest1  WHERE 
  fixed chau           | 
  a\x1B\x07\r\x7Fb     | a\x1B\x07\r\x7Fb    
  short                | short     
-(3 rows)
+                      |           
+(4 rows)
 
 -- left outer join with placeholder, not pushed down
 EXPLAIN (COSTS off)
@@ -402,7 +414,8 @@ FROM typetest1  t1 LEFT OUTER JOIN (SELECT id AS x, 99 AS y FROM typetest1  t2 W
   1 |   |   
   3 | 3 | 99
   4 | 4 | 99
-(3 rows)
+  7 | 7 | 99
+(4 rows)
 
 -- inner join with placeholder, not pushed down
 EXPLAIN (COSTS off)
@@ -443,10 +456,17 @@ ON subq1.c1 = subq2.c2 ORDER BY subq2.c3;
  10
  10
  10
+ 10
+ 10
    
    
    
-(9 rows)
+   
+   
+   
+   
+   
+(16 rows)
 
 -- inner rel is false, not pushed down
 EXPLAIN (COSTS off)
@@ -467,7 +487,8 @@ SELECT 1 FROM (SELECT 1 FROM typetest1  WHERE false) AS subq1 RIGHT JOIN typetes
         1
         1
         1
-(3 rows)
+        1
+(4 rows)
 
 -- semi-join, not pushed down
 EXPLAIN (COSTS off)
@@ -508,7 +529,8 @@ SELECT t1.id FROM typetest1  t1 WHERE NOT EXISTS (SELECT 1 FROM typetest1  t2 WH
  id 
 ----
   4
-(1 row)
+  7
+(2 rows)
 
 -- cross join, not pushed down
 EXPLAIN (COSTS off)
@@ -531,13 +553,20 @@ SELECT t1.id, t2.id FROM typetest1  t1 CROSS JOIN typetest1  t2 ORDER BY t1.id, 
   1 |  1
   1 |  3
   1 |  4
+  1 |  7
   3 |  1
   3 |  3
   3 |  4
+  3 |  7
   4 |  1
   4 |  3
   4 |  4
-(9 rows)
+  4 |  7
+  7 |  1
+  7 |  3
+  7 |  4
+  7 |  7
+(16 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 INNER JOIN typetest1  t2 ON true ORDER BY t1.id, t2.id;
@@ -559,13 +588,20 @@ SELECT t1.id, t2.id FROM typetest1  t1 INNER JOIN typetest1  t2 ON true ORDER BY
   1 |  1
   1 |  3
   1 |  4
+  1 |  7
   3 |  1
   3 |  3
   3 |  4
+  3 |  7
   4 |  1
   4 |  3
   4 |  4
-(9 rows)
+  4 |  7
+  7 |  1
+  7 |  3
+  7 |  4
+  7 |  7
+(16 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON true ORDER BY t1.id, t2.id;
@@ -587,13 +623,20 @@ SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON true ORDER BY
   1 |  1
   1 |  3
   1 |  4
+  1 |  7
   3 |  1
   3 |  3
   3 |  4
+  3 |  7
   4 |  1
   4 |  3
   4 |  4
-(9 rows)
+  4 |  7
+  7 |  1
+  7 |  3
+  7 |  4
+  7 |  7
+(16 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON true ORDER BY t1.id, t2.id;
@@ -615,13 +658,20 @@ SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON true ORDER BY
   1 |  1
   1 |  3
   1 |  4
+  1 |  7
   3 |  1
   3 |  3
   3 |  4
+  3 |  7
   4 |  1
   4 |  3
   4 |  4
-(9 rows)
+  4 |  7
+  7 |  1
+  7 |  3
+  7 |  4
+  7 |  7
+(16 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON true ORDER BY t1.id, t2.id;
@@ -643,13 +693,20 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON true ORDER BY
   1 |  1
   1 |  3
   1 |  4
+  1 |  7
   3 |  1
   3 |  3
   3 |  4
+  3 |  7
   4 |  1
   4 |  3
   4 |  4
-(9 rows)
+  4 |  7
+  7 |  1
+  7 |  3
+  7 |  4
+  7 |  7
+(16 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 CROSS JOIN (SELECT * FROM typetest1  WHERE vc = 'short') t2 ORDER BY t1.id, t2.id;
@@ -670,7 +727,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 CROSS JOIN (SELECT * FROM typetest1  WHER
   1 |  4
   3 |  4
   4 |  4
-(3 rows)
+  7 |  4
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 INNER JOIN (SELECT * FROM typetest1  WHERE vc = 'short') t2 ON true ORDER BY t1.id, t2.id;
@@ -691,7 +749,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 INNER JOIN (SELECT * FROM typetest1  WHER
   1 |  4
   3 |  4
   4 |  4
-(3 rows)
+  7 |  4
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN (SELECT * FROM typetest1  WHERE vc = 'short') t2 ON true ORDER BY t1.id, t2.id;
@@ -713,7 +772,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 LEFT  JOIN (SELECT * FROM typetest1  WHER
   1 |  4
   3 |  4
   4 |  4
-(3 rows)
+  7 |  4
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN (SELECT * FROM typetest1  WHERE vc = 'short') t2 ON true ORDER BY t1.id, t2.id;
@@ -734,7 +794,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 RIGHT JOIN (SELECT * FROM typetest1  WHER
   1 |  4
   3 |  4
   4 |  4
-(3 rows)
+  7 |  4
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN (SELECT * FROM typetest1  WHERE vc = 'short') t2 ON true ORDER BY t1.id, t2.id;
@@ -756,7 +817,8 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN (SELECT * FROM typetest1  WHER
   1 |  4
   3 |  4
   4 |  4
-(3 rows)
+  7 |  4
+(4 rows)
 
 -- update statement, not pushed down
 EXPLAIN (COSTS off) UPDATE typetest1 t1 SET c = NULL FROM typetest1 t2 WHERE t1.vc = t2.vc AND t2.num = 3.14159;
@@ -815,7 +877,8 @@ SELECT t1, t1.ctid FROM shorty t1 INNER JOIN longy t2 ON t1.id = t2.id ORDER BY 
  (1,"fixed chau")           | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
-(3 rows)
+ (7,"          ")           | (4294967295,0)
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
@@ -836,7 +899,8 @@ SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY 
  (1,"fixed chau")           | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
-(3 rows)
+ (7,"          ")           | (4294967295,0)
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
@@ -859,7 +923,8 @@ SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY 
  (1,"fixed chau")           | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
-(3 rows)
+ (7,"          ")           | (4294967295,0)
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
@@ -882,7 +947,8 @@ SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id ORDER BY 
  (1,"fixed chau")           | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
-(3 rows)
+ (7,"          ")           | (4294967295,0)
+(4 rows)
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 CROSS JOIN longy t2 ORDER BY t1.id;
@@ -902,29 +968,36 @@ SELECT t1, t1.ctid FROM shorty t1 CROSS JOIN longy t2 ORDER BY t1.id;
  (1,"fixed chau")           | (4294967295,0)
  (1,"fixed chau")           | (4294967295,0)
  (1,"fixed chau")           | (4294967295,0)
+ (1,"fixed chau")           | (4294967295,0)
+ (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (3,"a\x1B\x07\r\x7Fb    ") | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
  (4,"short     ")           | (4294967295,0)
-(9 rows)
+ (4,"short     ")           | (4294967295,0)
+ (7,"          ")           | (4294967295,0)
+ (7,"          ")           | (4294967295,0)
+ (7,"          ")           | (4294967295,0)
+ (7,"          ")           | (4294967295,0)
+(16 rows)
 
 -- only part of a three-way join will be pushed down
 ---- inner join three tables
 EXPLAIN (COSTS off)
 SELECT t1.id, t3.id FROM typetest1  t1 JOIN typetest1  t2 USING (nvc) JOIN typetest1  t3 ON t2.db = t3.db ORDER BY t1.id, t3.id;
-                                                                    QUERY PLAN                                                                     
----------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: t1.id, t3.id
    ->  Hash Join
-         Hash Cond: (t2.db = t3.db)
-         ->  Foreign Scan
-               Oracle query: SELECT /*fbdeb0ca1f705712*/ r1."ID", r2."DB" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."NVC" = r2."NVC"))
+         Hash Cond: (t3.db = t2.db)
+         ->  Foreign Scan on typetest1 t3
+               Oracle query: SELECT /*1d11d7a1af28e194*/ r4."ID", r4."DB" FROM "TYPETEST1" r4
          ->  Hash
-               ->  Foreign Scan on typetest1 t3
-                     Oracle query: SELECT /*1d11d7a1af28e194*/ r4."ID", r4."DB" FROM "TYPETEST1" r4
+               ->  Foreign Scan
+                     Oracle query: SELECT /*fbdeb0ca1f705712*/ r1."ID", r2."DB" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."NVC" = r2."NVC"))
 (9 rows)
 
 SELECT t1.id, t3.id FROM typetest1  t1 JOIN typetest1  t2 USING (nvc) JOIN typetest1  t3 ON t2.db = t3.db ORDER BY t1.id, t3.id;
@@ -1002,7 +1075,8 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 INNER JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
     |    |  4
-(3 rows)
+    |    |  7
+(4 rows)
 
 ---- inner outer join + full outer join
 EXPLAIN (COSTS off)
@@ -1026,7 +1100,8 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 INNER JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
     |    |  4
-(3 rows)
+    |    |  7
+(4 rows)
 
 ---- left outer join three tables
 EXPLAIN (COSTS off)
@@ -1050,7 +1125,8 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
   4 |    |   
-(3 rows)
+  7 |    |   
+(4 rows)
 
 ---- left outer join + inner outer join
 EXPLAIN (COSTS off)
@@ -1097,7 +1173,8 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
     |    |  4
-(3 rows)
+    |    |  7
+(4 rows)
 
 ---- left outer join + full outer join
 EXPLAIN (COSTS off)
@@ -1121,8 +1198,10 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 LEFT  JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
   4 |    |   
+  7 |    |   
     |    |  4
-(4 rows)
+    |    |  7
+(6 rows)
 
 ---- right outer join three tables
 EXPLAIN (COSTS off)
@@ -1145,8 +1224,9 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d =
 ----+----+----
   1 |  1 |  1
   3 |  3 |  3
+    |    |  7
     |    |  4
-(3 rows)
+(4 rows)
 
 ---- right outer join + inner outer join
 EXPLAIN (COSTS off)
@@ -1193,7 +1273,8 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
     |  4 |   
-(3 rows)
+    |  7 |   
+(4 rows)
 
 ---- right outer join + full outer join
 EXPLAIN (COSTS off)
@@ -1217,8 +1298,10 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 RIGHT JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
     |  4 |   
+    |  7 |   
     |    |  4
-(4 rows)
+    |    |  7
+(6 rows)
 
 ---- full outer join three tables
 EXPLAIN (COSTS off)
@@ -1242,9 +1325,12 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
   4 |    |   
+  7 |    |   
     |  4 |   
+    |  7 |   
+    |    |  7
     |    |  4
-(5 rows)
+(8 rows)
 
 ---- full outer join + inner join
 EXPLAIN (COSTS off)
@@ -1291,8 +1377,10 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d =
   1 |  1 |  1
   3 |  3 |  3
   4 |    |   
+  7 |    |   
     |  4 |   
-(4 rows)
+    |  7 |   
+(6 rows)
 
 ---- full outer join + right outer join
 EXPLAIN (COSTS off)
@@ -1315,8 +1403,9 @@ SELECT t1.id, t2.id, t3.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON t1.d =
 ----+----+----
   1 |  1 |  1
   3 |  3 |  3
+    |    |  7
     |    |  4
-(3 rows)
+(4 rows)
 
 -- join with LATERAL reference
 EXPLAIN (COSTS off)
@@ -1341,7 +1430,8 @@ SELECT t1.id, sl.c FROM typetest1  t1, LATERAL (SELECT DISTINCT s.c FROM shorty 
   1 | fixed chau
   3 | a\x1B\x07\r\x7Fb    
   4 | short     
-(3 rows)
+  7 |           
+(4 rows)
 
 -- test for bug #279 fixed with 839b125e1bdc63b71220ccd675fa852c028de9ea
 SELECT 1
@@ -1356,7 +1446,9 @@ WHERE (a.c = a.vc) = (b.id IS NOT NULL);
         1
         1
         1
-(6 rows)
+        1
+        1
+(8 rows)
 
 /*
  * Cost estimates.
@@ -1367,14 +1459,14 @@ ANALYZE typetest1;
 EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c = t2.c;
                                                             QUERY PLAN                                                            
 ----------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan  (cost=10000.00..10030.00 rows=3 width=8)
+ Foreign Scan  (cost=10000.00..10040.00 rows=4 width=8)
    Oracle query: SELECT /*ea19dfccab82df8*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."C" = r2."C"))
 (2 rows)
 
 EXPLAIN SELECT t1.id, t2.id FROM typetest1 t1, typetest1 t2 WHERE t1.c <> t2.c;
                                                              QUERY PLAN                                                             
 ------------------------------------------------------------------------------------------------------------------------------------
- Foreign Scan  (cost=10000.00..10060.00 rows=6 width=8)
+ Foreign Scan  (cost=10000.00..10120.00 rows=12 width=8)
    Oracle query: SELECT /*9564dc36650a4136*/ r1."ID", r2."ID" FROM ("TYPETEST1" r1 INNER JOIN "TYPETEST1" r2 ON (r1."C" <> r2."C"))
 (2 rows)
 

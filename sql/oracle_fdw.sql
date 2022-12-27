@@ -256,6 +256,18 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    '3 years'
 );
 
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, lb, lr) VALUES (
+   7,
+   '',
+   '',
+   '',
+   '',
+   '',
+   bytea(''),
+   bytea(''),
+   bytea('')
+);
+
 /*
  * Test SELECT, UPDATE ... RETURNING, DELETE and transactions.
  */
