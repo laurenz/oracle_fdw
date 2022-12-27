@@ -2893,6 +2893,7 @@ char
 		appendStringInfo(&query, " ORDER BY%s", fdwState->order_clause);
 
 	/* append FETCH FIRST n ROWS ONLY if the LIMIT can be pushed down */
+	/* skip LIMIT when SELECT FOR UPDATE is used */
 	if (fdwState->limit_clause)
 		appendStringInfo(&query, " %s", fdwState->limit_clause);
 
