@@ -532,8 +532,6 @@ DELETE FROM qtest WHERE id = 5;
  */
 BEGIN;
 COPY typetest1 FROM STDIN;
-ERROR:  invalid input syntax for type uuid: "\x01020304"
-CONTEXT:  COPY typetest1, line 1, column u: "\x01020304"
 ROLLBACK;
 /*
  * Test foreign table as a partition.
@@ -543,13 +541,19 @@ CREATE TABLE defpart PARTITION OF party DEFAULT;
 ALTER TABLE party ATTACH PARTITION typetest1 FOR VALUES FROM (1) TO (MAXVALUE);
 BEGIN;
 COPY party FROM STDIN;
-ERROR:  invalid input syntax for type uuid: "\x01020304"
-CONTEXT:  COPY party, line 1, column u: "\x01020304"
 INSERT INTO party (id, lc, lr, lb)
    VALUES (12, 'very long character', '\x0001020304', '\xFFFEFDFC');
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SELECT id, lr, lb, c FROM typetest1 ORDER BY id;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ id  |             lr             |             lb             |          c           
+-----+----------------------------+----------------------------+----------------------
+   1 | \xdeadbeef00               | \xdeadbeef00               | fixed chau
+   3 | \xdeadf00ddeadf00ddeadf00d | \xdeadf00ddeadf00ddeadf00d | a\x1B\x07\r\x7Fb    
+   4 | \xdeadf00d                 | \xdeadf00d                 | short     
+  12 | \x0001020304               | \xfffefdfc                 | 
+ 666 | \xffff                     | \x01020304                 | cöpy      
+ 777 | \x00                       | \x00                       | fdjkl     
+(6 rows)
+
 ROLLBACK;
 BEGIN;
 CREATE TABLE shortpart (
