@@ -2857,7 +2857,7 @@ char
 				/* convert TIMESTAMP WITH LOCAL TIME ZONE to TIMESTAMP WITH TIME ZONE */
 				format = "%s(%s%s AT TIME ZONE sessiontimezone)";
 			else if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_NCLOB)
-				format = "%s(TO_CLOB(%s%s))";
+				format = "%sTO_CLOB(%s%s)";
 			else
 				/* select the column as it is */
 				format = "%s%s%s";
@@ -3537,7 +3537,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 			/* append column name/expression */
 			if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_NCLOB)
-				appendStringInfo(&query, "(TO_CLOB(%s))", fdw_state->oraTable->cols[i]->name);
+				appendStringInfo(&query, "TO_CLOB(%s)", fdw_state->oraTable->cols[i]->name);
 			else
 				appendStringInfo(&query, "%s", fdw_state->oraTable->cols[i]->name);
 		}
