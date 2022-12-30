@@ -47,6 +47,7 @@ SELECT oracle_execute(
           '   vc  VARCHAR2(10 CHAR),\n'
           '   nvc NVARCHAR2(10),\n'
           '   lc  CLOB,\n'
+          '   lnc NCLOB,\n'
           '   r   RAW(10),\n'
           '   u   RAW(16),\n'
           '   lb  BLOB,\n'
@@ -123,6 +124,7 @@ CREATE FOREIGN TABLE typetest1 (
    vc  character varying(10),
    nvc character varying(10),
    lc  text,
+   lnc text,
    r   bytea,
    u   uuid,
    lb  bytea,
@@ -152,6 +154,7 @@ CREATE FOREIGN TABLE longy (
    vc  character varying(10),
    nvc character varying(10),
    lc  text,
+   lnc text,
    r   bytea,
    u   uuid,
    lb  bytea,
@@ -188,13 +191,14 @@ ALTER SERVER oracle OPTIONS (DROP isolation_level);
 SELECT oracle_close_connections();
 DELETE FROM typetest1;
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    1,
    'fixed char',
    'nat''l char',
    'varlena',
    'nat''l var',
    'character large object',
+   'character national large object',
    bytea('\xDEADBEEF'),
    uuid('055e26fa-f1d8-771f-e053-1645990add93'),
    bytea('\xDEADBEEF'),
@@ -214,12 +218,13 @@ SELECT oracle_execute('oracle', 'UPDATE typetest1 SET b = 2 WHERE id = 1');
 
 INSERT INTO shorty (id, c) VALUES (2, NULL);
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    3,
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
+   E'a\u001B\u0007\u000D\u007Fb ABC' || repeat('X', 9000),
    E'a\u001B\u0007\u000D\u007Fb ABC' || repeat('X', 9000),
    bytea('\xDEADF00D'),
    uuid('055f3b32-a02c-4532-e053-1645990a6db2'),
@@ -235,8 +240,9 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    '-2 years -6 months'
 );
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    4,
+   'short',
    'short',
    'short',
    'short',
@@ -261,7 +267,7 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
  */
 
 -- simple SELECT
-SELECT id, c, nc, vc, nvc, length(lc), r, u, length(lb), length(lr), b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
+SELECT id, c, nc, vc, nvc, length(lc), length(lnc), r, u, length(lb), length(lr), b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
 -- mass UPDATE
 WITH upd (id, c, lb, d, ts) AS
    (UPDATE longy SET c = substr(c, 1, 9) || 'u',
