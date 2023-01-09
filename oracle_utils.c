@@ -2029,8 +2029,9 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 		/*
 		 * Use the expensive character conversion only if we are dealing with
 		 * "national character sets" on the Oracle side.
+		 * CLOBs have their own encoding, so we have to exclude them.
 		 */
-		if (session->have_nchar
+		if (session->have_nchar && value_type != SQLT_CLOB
 			&& checkerr(
 				OCIAttrSet((void *)param->bindh, OCI_HTYPE_BIND, (void *)&nchar, 0,
 					OCI_ATTR_CHARSET_FORM, session->envp->errhp),

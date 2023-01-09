@@ -1,5 +1,10 @@
 Version 2.6.0
 
+  Bugfixes:
+  - Inserting CLOBs with the server option "nchar" on can lead to the error
+    "ORA-24806: LOB form mismatch".
+    Report and patch by "jopoly".
+
   Enhancements:
   - Skip Oracle savepoint management if the foreign server option
     "isolation_level" is set to "read_only" or if we are inside a read-only
