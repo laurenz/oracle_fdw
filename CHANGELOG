@@ -4,6 +4,9 @@ Version 2.6.0
   - Inserting CLOBs with the server option "nchar" on can lead to the error
     "ORA-24806: LOB form mismatch".
     Report and patch by "jopoly".
+  - Don't push down LIMIT with FOR SHARE or FOR UPDATE.  That caused the error
+    ORA-02014: cannot select FOR UPDATE from view with DISTINCT, GROUP BY, etc.
+    Reported by Marti Raudsepp.
 
   Enhancements:
   - Skip Oracle savepoint management if the foreign server option

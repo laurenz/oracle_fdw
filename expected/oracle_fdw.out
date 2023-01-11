@@ -811,6 +811,16 @@ SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
   3
 (1 row)
 
+-- no LIMIT pushdown with FOR SHARE/UPDATE
+EXPLAIN (COSTS OFF) SELECT id FROM typetest1 ORDER BY id LIMIT 1 FOR UPDATE;
+                                                                                                                                       QUERY PLAN                                                                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  LockRows
+         ->  Foreign Scan on typetest1
+               Oracle query: SELECT /*acef6247e022b52b*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST FOR UPDATE
+(4 rows)
+
 /* test ANALYZE */
 ANALYZE typetest1;
 ANALYZE longy;

@@ -347,7 +347,7 @@ static List *oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid server
  */
 static struct OracleFdwState *getFdwState(Oid foreigntableid, double *sample_percent, Oid userid);
 static void oracleGetOptions(Oid foreigntableid, Oid userid, List **options);
-static char *createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool modify, List *query_pathkeys);
+static char *createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool for_update, List *query_pathkeys);
 static void deparseFromExprForRel(struct OracleFdwState *fdwState, StringInfo buf, RelOptInfo *joinrel, List **params_list);
 #ifdef JOIN_API
 static void appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, List **params_list);
@@ -2799,7 +2799,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
  *		As a side effect for base relations, we also mark the used columns in oraTable.
  */
 char
-*createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool modify, List *query_pathkeys)
+*createQuery(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, bool for_update, List *query_pathkeys)
 {
 	ListCell *cell;
 	bool in_quote = false;
@@ -2893,11 +2893,11 @@ char
 		appendStringInfo(&query, " ORDER BY%s", fdwState->order_clause);
 
 	/* append FETCH FIRST n ROWS ONLY if the LIMIT can be pushed down */
-	if (fdwState->limit_clause)
+	if (fdwState->limit_clause && !for_update)
 		appendStringInfo(&query, " %s", fdwState->limit_clause);
 
 	/* append FOR UPDATE if if the scan is for a modification */
-	if (modify)
+	if (for_update)
 		appendStringInfo(&query, " FOR UPDATE");
 
 	/* get a copy of the where clause without single quoted string literals */
