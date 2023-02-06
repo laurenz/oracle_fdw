@@ -7,6 +7,10 @@ Version 2.6.0
   - Don't push down LIMIT with FOR SHARE or FOR UPDATE.  That caused the error
     ORA-02014: cannot select FOR UPDATE from view with DISTINCT, GROUP BY, etc.
     Reported by Marti Raudsepp.
+  - Fix BEFORE UPDATE triggers.
+    If a BEFORE UPDATE trigger modified a column that was not updated, the
+    changed column was not propagated to Oracle.
+    Report and diagnosis by "jopoly".
 
   Enhancements:
   - Skip Oracle savepoint management if the foreign server option
