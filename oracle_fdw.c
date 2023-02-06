@@ -1581,54 +1581,56 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	 */
 	rel = table_open(rte->relid, NoLock);
 
-	/* figure out which attributes are affected and if there is a trigger */
-	switch (operation)
+	/*
+	 * In an INSERT, we transmit all columns that are defined in the foreign
+	 * table.  In an UPDATE, if there are BEFORE ROW UPDATE triggers on the
+	 * foreign table, we transmit all columns like INSERT; else we transmit
+	 * only columns that were explicitly targets of the UPDATE, so as to avoid
+	 * unnecessary data transmission.  (We can't do that for INSERT since we
+	 * would miss sending default values for columns not listed in the source
+	 * statement, and for UPDATE if there are BEFORE ROW UPDATE triggers since
+	 * those triggers might change values for non-target columns, in which
+	 * case we would miss sending changed values for those columns.)
+	 * In addition, set "has_trigger" if there is an AFTER trigger.
+	 */
+	if (operation == CMD_INSERT ||
+		(operation == CMD_UPDATE &&
+		 rel->trigdesc &&
+		 rel->trigdesc->trig_update_before_row))
 	{
-		case CMD_INSERT:
-			/*
-			 * In an INSERT, we transmit all columns that are defined in the foreign
-			 * table.  In an UPDATE, we transmit only columns that were explicitly
-			 * targets of the UPDATE, so as to avoid unnecessary data transmission.
-			 * (We can't do that for INSERT since we would miss sending default values
-			 * for columns not listed in the source statement.)
-			 */
+		tupdesc = RelationGetDescr(rel);
 
-			tupdesc = RelationGetDescr(rel);
+		for (attnum = 1; attnum <= tupdesc->natts; attnum++)
+		{
+			Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
 
-			for (attnum = 1; attnum <= tupdesc->natts; attnum++)
-			{
-				Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
+			if (!attr->attisdropped)
+				targetAttrs = lappend_int(targetAttrs, attnum);
+		}
 
-				if (!attr->attisdropped)
-					targetAttrs = lappend_int(targetAttrs, attnum);
-			}
-
-			/* is there a row level AFTER trigger? */
-			has_trigger = hasTrigger(rel, CMD_INSERT);
-
-			break;
-		case CMD_UPDATE:
-			while ((col = bms_first_member(updated_cols)) >= 0)
-			{
-				col += FirstLowInvalidHeapAttributeNumber;
-				if (col <= InvalidAttrNumber)  /* shouldn't happen */
-					elog(ERROR, "system-column update is not supported");
-				targetAttrs = lappend_int(targetAttrs, col);
-			}
-
-			/* is there a row level AFTER trigger? */
-			has_trigger = hasTrigger(rel, CMD_UPDATE);
-
-			break;
-		case CMD_DELETE:
-
-			/* is there a row level AFTER trigger? */
-			has_trigger = hasTrigger(rel, CMD_DELETE);
-
-			break;
-		default:
-			elog(ERROR, "unexpected operation: %d", (int) operation);
+		/* is there a row level AFTER trigger? */
+		has_trigger = hasTrigger(rel, CMD_INSERT);
 	}
+	else if (operation == CMD_UPDATE)
+	{
+		while ((col = bms_first_member(updated_cols)) >= 0)
+		{
+			col += FirstLowInvalidHeapAttributeNumber;
+			if (col <= InvalidAttrNumber)  /* shouldn't happen */
+				elog(ERROR, "system-column update is not supported");
+			targetAttrs = lappend_int(targetAttrs, col);
+		}
+
+		/* is there a row level AFTER trigger? */
+		has_trigger = hasTrigger(rel, CMD_UPDATE);
+	}
+	else if (operation == CMD_DELETE)
+	{
+		/* is there a row level AFTER trigger? */
+		has_trigger = hasTrigger(rel, CMD_DELETE);
+	}
+	else
+		elog(ERROR, "unexpected operation: %d", (int) operation);
 
 	table_close(rel, NoLock);
 

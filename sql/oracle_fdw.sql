@@ -420,13 +420,16 @@ $$BEGIN
    IF TG_OP IN ('INSERT', 'UPDATE') THEN
       RAISE WARNING 'trigger % % NEW row: id = %, c = %', TG_WHEN, TG_OP, NEW.id, NEW.c;
    END IF;
+
+   NEW.c := 'modified';
+
    RETURN NEW;
 END;$$;
 
 -- test BEFORE trigger
 CREATE TRIGGER shorttrig BEFORE UPDATE ON shorty FOR EACH ROW EXECUTE PROCEDURE shorttrig();
 BEGIN;
-UPDATE shorty SET id = id + 1 WHERE id = 4;
+UPDATE shorty SET id = id + 1 WHERE id = 4 RETURNING c;
 ROLLBACK;
 
 -- test AFTER trigger
