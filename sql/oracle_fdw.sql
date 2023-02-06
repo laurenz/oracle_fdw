@@ -585,7 +585,7 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    '2020-12-31 00:00:00',
    '2020-12-31'
 );
-SELECT * FROM typetest2;
+SELECT * FROM typetest2 ORDER BY id;
 SET timezone = 'Asia/Kolkata';
 INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    3,
@@ -593,5 +593,5 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    '2020-12-31 00:00:00',
    '2020-12-31'
 );
-SELECT * FROM typetest2;
+SELECT * FROM typetest2 ORDER BY id;
 RESET timezone;
