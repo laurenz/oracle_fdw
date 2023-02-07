@@ -454,7 +454,7 @@ SELECT 1 FROM (SELECT 1 FROM typetest1  WHERE false) AS subq1 RIGHT JOIN typetes
                                                   QUERY PLAN                                                   
 ---------------------------------------------------------------------------------------------------------------
  Nested Loop Left Join
-   Join Filter: NULL::boolean
+   Join Filter: (false AND NULL::boolean)
    ->  Foreign Scan on typetest1 ref1
          Oracle query: SELECT /*5d60d3afb74ea0b8*/ r2."ID" FROM "TYPETEST1" r2 ORDER BY r2."ID" ASC NULLS LAST
    ->  Result
@@ -840,8 +840,8 @@ SELECT t1, t1.ctid FROM shorty t1 LEFT  JOIN longy t2 ON t1.id = t2.id ORDER BY 
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                            QUERY PLAN                                                             
------------------------------------------------------------------------------------------------------------------------------------
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
  Sort
    Sort Key: t1.id
    ->  Hash Left Join
@@ -850,7 +850,7 @@ SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY 
                Oracle query: SELECT /*4f4c2f8a10477927*/ r2."ID" FROM "TYPETEST1" r2
          ->  Hash
                ->  Foreign Scan on shorty t1
-                     Oracle query: SELECT /*70f4d4d40cda0863*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+                     Oracle query: SELECT /*92c465781c2259ec*/ r1."ID", r1."C" FROM "TYPETEST1" r1
 (9 rows)
 
 SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
@@ -863,14 +863,14 @@ SELECT t1, t1.ctid FROM shorty t1 RIGHT JOIN longy t2 ON t1.id = t2.id ORDER BY 
 
 EXPLAIN (COSTS off)
 SELECT t1, t1.ctid FROM shorty t1 FULL  JOIN longy t2 ON t1.id = t2.id ORDER BY t1.id;
-                                                         QUERY PLAN                                                          
------------------------------------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Sort
    Sort Key: t1.id
    ->  Hash Full Join
          Hash Cond: (t1.id = t2.id)
          ->  Foreign Scan on shorty t1
-               Oracle query: SELECT /*70f4d4d40cda0863*/ r1."ID", r1."C" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
+               Oracle query: SELECT /*92c465781c2259ec*/ r1."ID", r1."C" FROM "TYPETEST1" r1
          ->  Hash
                ->  Foreign Scan on longy t2
                      Oracle query: SELECT /*4f4c2f8a10477927*/ r2."ID" FROM "TYPETEST1" r2
