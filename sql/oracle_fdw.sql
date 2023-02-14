@@ -37,6 +37,14 @@ EXCEPTION
       NULL;
 END;$$;
 
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP TABLE scott.gloc1 PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+
 SELECT oracle_execute(
           'oracle',
           E'CREATE TABLE scott.typetest1 (\n'
@@ -112,6 +120,15 @@ SELECT oracle_execute(
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC'')\n'
           ')'
+       );
+
+-- initial data for gloc1
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE TABLE scott.gloc1 (\n'
+          '   a  NUMBER(5) PRIMARY KEY,\n'
+          '   b  NUMBER(5)\n'
+          ') SEGMENT CREATION IMMEDIATE'
        );
 
 -- create the foreign tables
@@ -594,3 +611,24 @@ SELECT * FROM typetest2 ORDER BY id;
 COMMIT;
 -- we need to re-establish the connection after changing "timezone"
 SELECT oracle_close_connections();
+RESET timezone;
+
+
+/*
+ * Test generated columns
+ */
+
+create foreign table grem1 (
+  a int OPTIONS (key 'yes'),
+  b int generated always as (a * 2) stored)
+  server oracle options(table 'GLOC1');
+
+explain (costs off)
+insert into grem1 (a) values (1), (2);
+insert into grem1 (a) values (1), (2);
+
+explain (costs off)
+update grem1 set a = 22 where a = 2;
+update grem1 set a = 22 where a = 2;
+
+select a, b from grem1;

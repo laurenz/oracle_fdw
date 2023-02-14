@@ -1568,11 +1568,13 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	updated_cols = perminfo->updatedCols;
 #else
 	check_user = rte->checkAsUser;
-#if PG_VERSION_NUM >= 90500
+#if PG_VERSION_NUM >= 120000
+	updated_cols = bms_union(rte->updatedCols, rte->extraUpdatedCols);
+#elif PG_VERSION_NUM >= 90500
 	updated_cols = rte->updatedCols;
 #else
 	updated_cols = bms_copy(rte->modifiedCols);
-#endif  /* PG_VERSION_NUM >= 90500 */
+#endif  /* PG_VERSION_NUM >= 120000 */
 #endif  /* PG_VERSION_NUM >= 160000 */
 
 #if PG_VERSION_NUM >= 90500
