@@ -1697,8 +1697,14 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 		if (returningList != NIL)
 		{
+			bool	have_wholerow = false;
+
 			/* get all the attributes mentioned there */
 			pull_varattnos((Node *) returningList, resultRelation, &attrs_used);
+
+			/* If there's a whole-row reference, we'll need all the columns. */
+			have_wholerow = bms_is_member(0 - FirstLowInvalidHeapAttributeNumber,
+										  attrs_used);
 
 			/* mark the corresponding columns as used */
 			for (i=0; i<fdwState->oraTable->ncols; ++i)
@@ -1707,7 +1713,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 				if (fdwState->oraTable->cols[i]->pgname == NULL)
 					continue;
 
-				if (bms_is_member(fdwState->oraTable->cols[i]->pgattnum - FirstLowInvalidHeapAttributeNumber, attrs_used))
+				if (have_wholerow ||
+					bms_is_member(fdwState->oraTable->cols[i]->pgattnum - FirstLowInvalidHeapAttributeNumber, attrs_used))
 				{
 					/* throw an error if it is a LONG or LONG RAW column */
 					if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW
