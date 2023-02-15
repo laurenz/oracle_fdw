@@ -323,22 +323,18 @@ DELETE FROM typetest1 WHERE FALSE;
 UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
 -- test deparsing of ScalarArrayOpExpr where the RHS has different element type than the LHS
 SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
-
-
-/*
- * Test INSERT ... RETURNING
- */
-
+-- test returning a whole row
 INSERT INTO returningtest (id, c, nc, vc) VALUES (
    1,
    'fixed char',
    'nat''l char',
    'varlena'
 ) RETURNING id, c, nc, vc;
-
 INSERT INTO returningtest (id) VALUES (
    2
 ) RETURNING returningtest;
+UPDATE returningtest SET c = 'updated' WHERE id = 1 RETURNING returningtest;
+DELETE FROM returningtest WHERE id = 1 RETURNING returningtest;
 
 
 /*
