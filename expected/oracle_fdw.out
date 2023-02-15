@@ -408,9 +408,7 @@ SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
 ----
 (0 rows)
 
-/*
- * Test INSERT ... RETURNING
- */
+-- test returning a whole row
 INSERT INTO returningtest (id, c, nc, vc) VALUES (
    1,
    'fixed char',
@@ -428,6 +426,18 @@ INSERT INTO returningtest (id) VALUES (
  returningtest 
 ---------------
  (2,,,)
+(1 row)
+
+UPDATE returningtest SET c = 'updated' WHERE id = 1 RETURNING returningtest;
+             returningtest             
+---------------------------------------
+ (1,"updated   ","nat'l char",varlena)
+(1 row)
+
+DELETE FROM returningtest WHERE id = 1 RETURNING returningtest;
+             returningtest             
+---------------------------------------
+ (1,"updated   ","nat'l char",varlena)
 (1 row)
 
 /*
