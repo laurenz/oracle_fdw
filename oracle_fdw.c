@@ -94,6 +94,9 @@
 #include "optimizer/optimizer.h"
 #include "access/heapam.h"
 #endif
+#if PG_VERSION_NUM >= 150002
+#include "optimizer/inherit.h"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -1565,17 +1568,33 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	RTEPermissionInfo *perminfo = getRTEPermissionInfo(root->parse->rteperminfos, rte);
 
 	check_user = perminfo->checkAsUser;
-	updated_cols = perminfo->updatedCols;
+	if (root->parse->commandType != CMD_UPDATE)
+	{
+		updated_cols = bms_copy(perminfo->updatedCols);
+	}
 #else
 	check_user = rte->checkAsUser;
-#if PG_VERSION_NUM >= 120000
+#if PG_VERSION_NUM >= 150002
+	if (root->parse->commandType != CMD_UPDATE)
+	{
+		updated_cols = bms_copy(rte->updatedCols);
+	}
+#elif PG_VERSION_NUM >= 120000
 	updated_cols = bms_union(rte->updatedCols, rte->extraUpdatedCols);
 #elif PG_VERSION_NUM >= 90500
 	updated_cols = rte->updatedCols;
 #else
 	updated_cols = bms_copy(rte->modifiedCols);
-#endif  /* PG_VERSION_NUM >= 120000 */
+#endif  /* PG_VERSION_NUM >= 150002 */
 #endif  /* PG_VERSION_NUM >= 160000 */
+
+#if PG_VERSION_NUM >= 150002
+	else
+	{
+		RelOptInfo *relOtp = find_base_rel(root, resultRelation);
+		updated_cols = get_rel_all_updated_cols(root, relOtp);
+	}
+#endif
 
 #if PG_VERSION_NUM >= 90500
 	/* we don't support INSERT ... ON CONFLICT */
