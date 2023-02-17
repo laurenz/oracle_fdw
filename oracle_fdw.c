@@ -157,7 +157,7 @@ PG_MODULE_MAGIC;
 static bool dml_in_transaction = false;
 
 /*
- * PostGIS geometry type, set upon library initialization.
+ * PostGIS geometry type, set in initializePostGIS().
  */
 static Oid GEOMETRYOID = InvalidOid;
 static bool geometry_is_setup = false;
