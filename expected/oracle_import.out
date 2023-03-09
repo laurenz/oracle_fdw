@@ -25,6 +25,7 @@ ORDER BY attnum;
  vc      | character varying        | 
  nvc     | character varying        | 
  lc      | text                     | 
+ lnc     | text                     | 
  r       | bytea                    | 
  u       | uuid                     | 
  lb      | bytea                    | 
@@ -37,5 +38,5 @@ ORDER BY attnum;
  ts      | timestamp with time zone | 
  ids     | interval                 | 
  iym     | interval                 | 
-(18 rows)
+(19 rows)
 
