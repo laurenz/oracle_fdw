@@ -1378,14 +1378,6 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 void
 setOracleEnvironment(char *nls_lang)
 {
-	if (putenv(nls_lang) != 0)
-	{
-		free(nls_lang);
-		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
-			"error connecting to Oracle",
-			"Environment variable NLS_LANG cannot be set.");
-	}
-
 	/* other environment variables that control Oracle formats */
 	if (putenv("NLS_DATE_LANGUAGE=AMERICAN") != 0)
 	{
@@ -1441,6 +1433,14 @@ setOracleEnvironment(char *nls_lang)
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_NCHAR cannot be set.");
+	}
+
+	if (putenv(nls_lang) != 0)
+	{
+		free(nls_lang);
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			"error connecting to Oracle",
+			"Environment variable NLS_LANG cannot be set.");
 	}
 }
 
@@ -3104,6 +3104,7 @@ removeEnvironment(OCIEnv *envhp)
 		prevenvp->next = envp->next;
 
 	/* free the memory */
+	(void)putenv("NLS_LANG=");
 	free(envp->nls_lang);
 	free(envp);
 }
