@@ -46,11 +46,17 @@ static int readonly = 0;
  * Other handles are stored in the handle cache below.
  */
 
+typedef enum handleKind
+{
+	HK_DESCRIPTOR,
+	HK_STATEMENT
+} handleKind;
+
 struct handleEntry
 {
 	dvoid *handlep;
 	ub4 type;
-	int isDescriptor;
+	handleKind kind;
 	struct handleEntry *next;
 };
 
@@ -76,8 +82,8 @@ static char *copyOraText(const char *string, int size, int quote);
 static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect);
 static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
-static void allocHandle(dvoid **handlep, ub4 type, int isDescriptor, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
-static void freeHandle(dvoid *handlep, struct connEntry *connp);
+static void allocHandle(dvoid **handlep, ub4 type, handleKind kind, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
+static void freeHandle(dvoid *handlep, struct connEntry *connp, OCIError *errhp);
 static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
@@ -578,7 +584,7 @@ oracleCloseStatement(oracleSession *session)
 	if (session->stmthp != NULL)
 	{
 		/* free the statement handle */
-		freeHandle(session->stmthp, session->connp);
+		freeHandle(session->stmthp, session->connp, session->envp->errhp);
 		session->stmthp = NULL;
 	}
 }
@@ -654,12 +660,6 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 	/* don't report errors on commit or rollback of read-only transactions */
 	noerror = noerror || readonly;
 
-	/* do nothing if there is no transaction */
-	if (connarg->xact_level == 0)
-		return;
-	else
-		connarg->xact_level = 0;
-
 	/* clear read-only status if set */
 	readonly = 0;
 
@@ -690,11 +690,14 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 	}
 
 	if (! found)
+	{
+		connarg->xact_level = 0;
 		oracleError(FDW_ERROR, "oracleEndTransaction internal error: handle not found in cache");
+	}
 
 	/* free handles */
 	while (connp->handlelist != NULL)
-		freeHandle(connp->handlelist->handlep, connp);
+		freeHandle(connp->handlelist->handlep, connp, envp->errhp);
 
 	/* free objects in cache (might be left behind in case of errors) */
 	(void)OCICacheFree(envp->envhp, envp->errhp, NULL);
@@ -702,6 +705,12 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 	/* null_geometry has been freed */
 	null_geometry.geometry = NULL;
 	null_geometry.indicator = NULL;
+
+	/* do nothing if there is no transaction */
+	if (connarg->xact_level == 0)
+		return;
+	else
+		connarg->xact_level = 0;
 
 	/* commit or rollback */
 	if (is_commit)
@@ -741,6 +750,7 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 void
 oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 {
+	struct connEntry *ce = (struct connEntry *)arg;
 	char query[50], message[60];
 	struct connEntry *connp = NULL;
 	struct srvEntry *srvp = NULL;
@@ -749,10 +759,10 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 	int found = 0;
 
 	/* do nothing if the transaction level is lower than nest_level */
-	if (((struct connEntry *)arg)->xact_level < nest_level)
+	if (ce->xact_level < nest_level)
 		return;
 
-	((struct connEntry *)arg)->xact_level = nest_level - 1;
+	ce->xact_level = nest_level - 1;
 
 	/*
 	 * There is nothing else to do in read-only transactions, since Oracle
@@ -781,7 +791,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 			connp = srvp->connlist;
 			while (connp)
 			{
-				if (connp == (struct connEntry *)arg)
+				if (connp == ce)
 				{
 					found = 1;
 					break;
@@ -805,21 +815,20 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 
 	snprintf(query, 49, "ROLLBACK TO SAVEPOINT s%d", nest_level);
 
-	/* create statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, envp->envhp, connp,
-		FDW_OUT_OF_MEMORY,
-		"error rolling back to savepoint: OCIHandleAlloc failed to allocate statement handle");
-
 	/* prepare the query */
 	if (checkerr(
-		OCIStmtPrepare(stmthp, envp->errhp, (text *)query, (ub4) strlen(query),
-			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		OCIStmtPrepare2(ce->svchp, &stmthp, envp->errhp, (text *)query, (ub4) strlen(query),
+			(text *)NULL, (ub4)0, (ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error rolling back to savepoint: OCIStmtPrepare failed to prepare rollback statement",
+			"error rolling back to savepoint: OCIStmtPrepare2 failed to prepare rollback statement",
 			oraMessage);
 	}
+
+	/* register the statement handle */
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, envp->envhp, connp,
+		FDW_OUT_OF_MEMORY, "");
 
 	/* rollback to savepoint */
 	if (checkerr(
@@ -833,7 +842,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 	}
 
 	/* free statement handle */
-	freeHandle(stmthp, connp);
+	freeHandle(stmthp, connp, envp->errhp);
 }
 
 /*
@@ -905,22 +914,23 @@ struct oraTable
 	strcpy(query, "SELECT * FROM ");
 	strcat(query, tablename);
 
-	/* create statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_REPLY,
-		"error describing remote table: OCIHandleAlloc failed to allocate statement handle");
-
 	/* prepare the query */
 	if (checkerr(
-		OCIStmtPrepare(stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
+		OCIStmtPrepare2(session->connp->svchp, &stmthp, session->envp->errhp,
+			(text *)query, (ub4)strlen(query), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_REPLY,
-			"error describing remote table: OCIStmtPrepare failed to prepare query",
+			"error describing remote table: OCIStmtPrepare2 failed to prepare query",
 			oraMessage);
 	}
 
+	/* register statement handle */
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_REPLY, "");
+
+	/* execute query */
 	if (checkerr(
 		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)0, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DESCRIBE_ONLY),
@@ -1228,7 +1238,7 @@ struct oraTable
 	}
 
 	/* free statement handle, this takes care of the parameter handles */
-	freeHandle(stmthp, session->connp);
+	freeHandle(stmthp, session->connp, session->envp->errhp);
 
 	return reply;
 }
@@ -1317,21 +1327,21 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 
 		snprintf(query, 39, "SAVEPOINT s%d", session->connp->xact_level);
 
-		/* create statement handle */
-		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-			FDW_OUT_OF_MEMORY,
-			"error setting savepoint: OCIHandleAlloc failed to allocate statement handle");
-
 		/* prepare the query */
 		if (checkerr(
-			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
+			OCIStmtPrepare2(session->connp->svchp, &session->stmthp, session->envp->errhp,
+				(text *)query, (ub4)strlen(query), (text *)NULL, (ub4)0,
 				(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error setting savepoint: OCIStmtPrepare failed to prepare savepoint statement",
+				"error setting savepoint: OCIStmtPrepare2 failed to prepare savepoint statement",
 				oraMessage);
 		}
+
+		/* register statement handle */
+		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+			FDW_OUT_OF_MEMORY, "");
 
 		/* set savepoint */
 		if (checkerr(
@@ -1345,7 +1355,7 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 		}
 
 		/* free statement handle */
-		freeHandle(session->stmthp, session->connp);
+		freeHandle(session->stmthp, session->connp, session->envp->errhp);
 		session->stmthp = NULL;
 	}
 }
@@ -1467,10 +1477,21 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 		oracleError(FDW_ERROR, "oracleQueryPlan internal error: statement handle is not NULL");
 	}
 
-	/* create statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION,
-		"error describing query: OCIHandleAlloc failed to allocate statement handle");
+	/* prepare the query */
+	if (checkerr(
+		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+			(text *)query, (ub4)strlen(query), (text *)NULL, (ub4)0,
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error describing query: OCIStmtPrepare2 failed to prepare remote query",
+			oraMessage);
+	}
+
+	/* register statement handle */
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* set prefetch options */
 	if (checkerr(
@@ -1480,17 +1501,6 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error describing query: OCIAttrSet failed to set number of prefetched rows in statement handle",
-			oraMessage);
-	}
-
-	/* prepare the query */
-	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
-			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
-		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error describing query: OCIStmtPrepare failed to prepare remote query",
 			oraMessage);
 	}
 
@@ -1505,7 +1515,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 			oraMessage);
 	}
 
-	freeHandle(session->stmthp, session->connp);
+	freeHandle(session->stmthp, session->connp, session->envp->errhp);
 	session->stmthp = NULL;
 
 	/*
@@ -1521,21 +1531,21 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	query_head[p-query] = '%';
 	query_head[p-query+1] = '\0';
 
-	/* create statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION,
-		"error describing query: OCIHandleAlloc failed to allocate statement handle");
-
 	/* prepare */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)sql_id_query,
-			(ub4) strlen(sql_id_query), (ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+			(text *)sql_id_query, (ub4)strlen(sql_id_query), (text *)NULL, (ub4)0,
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error describing query: OCIStmtPrepare failed to prepare remote query for sql_id",
+			"error describing query: OCIStmtPrepare2 failed to prepare remote query for sql_id",
 			oraMessage);
 	}
+
+	/* register statement handle */
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* bind */
 	bndhp = NULL;
@@ -1598,28 +1608,28 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 				oraMessage);
 	}
 
-	freeHandle(session->stmthp, session->connp);
+	freeHandle(session->stmthp, session->connp, session->envp->errhp);
 	session->stmthp = NULL;
 
 	/*
 	 * Run the final desc_query.
 	 */
 
-	/* create statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION,
-		"error describing query: OCIHandleAlloc failed to allocate statement handle");
-
 	/* prepare */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)desc_query,
-			(ub4) strlen(desc_query), (ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+			(text *)desc_query, (ub4)strlen(desc_query), (text *)NULL, (ub4)0,
+			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error describing query: OCIStmtPrepare failed to prepare remote plan query",
+			"error describing query: OCIStmtPrepare2 failed to prepare remote plan query",
 			oraMessage);
 	}
+
+	/* register statement handle */
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* bind */
 	bndhp = NULL;
@@ -1715,21 +1725,21 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 		oracleError(FDW_ERROR, "oraclePrepareQuery internal error: statement handle is not NULL");
 	}
 
-	/* create statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION,
-		"error executing query: OCIHandleAlloc failed to allocate statement handle");
-
 	/* prepare the statement */
 	if (checkerr(
-		OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)query, (ub4) strlen(query),
+		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+			(text *)query, (ub4)strlen(query), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error executing query: OCIStmtPrepare failed to prepare remote query",
+			"error executing query: OCIStmtPrepare2 failed to prepare remote query",
 			oraMessage);
 	}
+
+	/* register statement handle */
+	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* loop through table columns */
 	col_pos = 0;
@@ -1760,8 +1770,8 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
 				{
 					/* allocate a LOB locator, store a pointer to it in "val" */
-					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
-						FDW_UNABLE_TO_CREATE_EXECUTION,
+					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, HK_DESCRIPTOR,
+						session->envp->envhp, session->connp, FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 				}
 
@@ -1833,7 +1843,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
 				{
 					/* allocate a LOB locator, store a pointer to it in "val" */
-					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, 1, session->envp->envhp, session->connp,
+					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, HK_DESCRIPTOR, session->envp->envhp, session->connp,
 						FDW_UNABLE_TO_CREATE_EXECUTION,
 						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 				}
@@ -2207,21 +2217,21 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 {
 	OCIStmt *stmthp;
 
-	/* create statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION,
-		"error executing statement: OCIHandleAlloc failed to allocate statement handle");
-
 	/* prepare the query */
 	if (checkerr(
-		OCIStmtPrepare(stmthp, session->envp->errhp, (text *)stmt, (ub4) strlen(stmt),
+		OCIStmtPrepare2(session->connp->svchp, &stmthp, session->envp->errhp,
+			(text *)stmt, (ub4)strlen(stmt), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error executing statement: OCIStmtPrepare failed to prepare query",
+			"error executing statement: OCIStmtPrepare2 failed to prepare query",
 			oraMessage);
 	}
+
+	/* register statement handle */
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	if (checkerr(
 		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)1, (ub4)0,
@@ -2238,7 +2248,7 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 	}
 
 	/* free the statement handle */
-	freeHandle(stmthp, session->connp);
+	freeHandle(stmthp, session->connp, session->envp->errhp);
 }
 
 /*
@@ -2466,21 +2476,21 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 	/* when first called, check if the schema does exist */
 	if (session->stmthp == NULL)
 	{
-		/* create statement handle */
-		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-			FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error importing foreign schema: OCIHandleAlloc failed to allocate statement handle");
-
 		/* prepare the query */
 		if (checkerr(
-			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)schema_query, (ub4) strlen(schema_query),
-				(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
+			OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+				(text *)schema_query, (ub4)strlen(schema_query), (text *)NULL, (ub4)0,
+				(ub4) OCI_NTV_SYNTAX, (ub4)OCI_DEFAULT),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error importing foreign schema: OCIStmtPrepare failed to prepare schema query",
+				"error importing foreign schema: OCIStmtPrepare2 failed to prepare schema query",
 				oraMessage);
 		}
+
+		/* create statement handle */
+		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+			FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 		/* bind the parameter */
 		if (checkerr(
@@ -2520,7 +2530,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		}
 
 		/* free the statement handle */
-		freeHandle(session->stmthp, session->connp);
+		freeHandle(session->stmthp, session->connp, session->envp->errhp);
 		session->stmthp = NULL;
 
 		/* return -1 if the remote schema does not exist */
@@ -2530,22 +2540,6 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 
 	if (session->stmthp == NULL)
 	{
-		/* create statement handle */
-		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, 0, session->envp->envhp, session->connp,
-			FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error importing foreign schema: OCIHandleAlloc failed to allocate statement handle");
-
-		/* set prefetch options */
-		if (checkerr(
-			OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
-				OCI_ATTR_PREFETCH_ROWS, session->envp->errhp),
-			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-		{
-			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error importing foreign schema: OCIAttrSet failed to set number of prefetched rows in statement handle",
-				oraMessage);
-		}
-
 		if (dblink == NULL)
 			table_suffix = "";
 		else
@@ -2564,12 +2558,28 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 
 		/* prepare the query */
 		if (checkerr(
-			OCIStmtPrepare(session->stmthp, session->envp->errhp, (text *)column_query, (ub4) strlen(column_query),
+			OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+				(text *)column_query, (ub4)strlen(column_query), (text *)NULL, (ub4)0,
 				(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
 			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-				"error importing foreign schema: OCIStmtPrepare failed to prepare remote query",
+				"error importing foreign schema: OCIStmtPrepare2 failed to prepare remote query",
+				oraMessage);
+		}
+
+		/* register statement handle */
+		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+			FDW_UNABLE_TO_CREATE_EXECUTION, "");
+
+		/* set prefetch options */
+		if (checkerr(
+			OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
+				OCI_ATTR_PREFETCH_ROWS, session->envp->errhp),
+			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+		{
+			oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+				"error importing foreign schema: OCIAttrSet failed to set number of prefetched rows in statement handle",
 				oraMessage);
 		}
 
@@ -2730,7 +2740,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 	if (result == OCI_NO_DATA)
 	{
 		/* free the statement handle */
-		freeHandle(session->stmthp, session->connp);
+		freeHandle(session->stmthp, session->connp, session->envp->errhp);
 		session->stmthp = NULL;
 
 		return 0;
@@ -3108,7 +3118,7 @@ removeEnvironment(OCIEnv *envhp)
  */
 
 void
-allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
+allocHandle(dvoid **handlepp, ub4 type, handleKind kind, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
 {
 	struct handleEntry *entry;
 	sword rc;
@@ -3121,10 +3131,15 @@ allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct 
 			sizeof(struct handleEntry));
 	}
 
-	if (isDescriptor)
-		rc = OCIDescriptorAlloc((const dvoid *)envhp, handlepp, type, (size_t)0, NULL);
-	else
-		rc = OCIHandleAlloc((const dvoid *)envhp, handlepp, type, (size_t)0, NULL);
+	switch (kind)
+	{
+		case HK_DESCRIPTOR:
+			rc = OCIDescriptorAlloc((const dvoid *)envhp, handlepp, type, (size_t)0, NULL);
+			break;
+		case HK_STATEMENT:
+			/* handle already allocated by OCIStmtPrepare2 */
+			rc = 0;
+	}
 
 	if (rc != OCI_SUCCESS)
 	{
@@ -3135,7 +3150,7 @@ allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct 
 	/* add handle to linked list */
 	entry->handlep = *handlepp;
 	entry->type = type;
-	entry->isDescriptor = isDescriptor;
+	entry->kind = kind;
 	entry->next = connp->handlelist;
 	connp->handlelist = entry;
 }
@@ -3146,7 +3161,7 @@ allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct 
  */
 
 void
-freeHandle(dvoid *handlep, struct connEntry *connp)
+freeHandle(dvoid *handlep, struct connEntry *connp, OCIError *errhp)
 {
 	struct handleEntry *entry, *preventry = NULL;
 
@@ -3163,10 +3178,14 @@ freeHandle(dvoid *handlep, struct connEntry *connp)
 		oracleError(FDW_ERROR, "internal error freeing handle: not found in cache");
 
 	/* free the handle */
-	if (entry->isDescriptor)
-		(void)OCIDescriptorFree(handlep, entry->type);
-	else
-		(void)OCIHandleFree(handlep, entry->type);
+	switch (entry->kind)
+	{
+		case HK_DESCRIPTOR:
+			(void)OCIDescriptorFree(handlep, entry->type);
+			break;
+		case HK_STATEMENT:
+			(void)OCIStmtRelease((OCIStmt *)handlep, errhp, (const OraText *)NULL, (ub4)0, OCI_DEFAULT);
+	}
 
 	/* remove it */
 	if (preventry == NULL)
