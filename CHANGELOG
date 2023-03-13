@@ -20,6 +20,13 @@ Version 2.6.0
     PostgreSQL transaction.  This saves some round trips and avoids Oracle
     errors that might be thrown when entering a PL/pgSQL exception handler.
     Per suggestion from "math-g".
+  - Use explicit bulk fetching into arrays rather than OCI prefetching for
+    Oracle SELECT statements.  This greatly improves performance for LOB
+    and LONG columns, since OCI prefetching didn't work if these data types.
+    The limitation still applies for SDO_GEOMETRY columns.  A new option
+    "lob_prefetch" is used to configure how much of the LOBs is fetched
+    with the rows to reduce the number of round trips.  This enhancement
+    was generously sponsored by Mipih (https://www.mipih.fr/).
 
 Version 2.5.0, released 2022-10-28
 

@@ -187,10 +187,12 @@ struct OracleFdwOption
 #define OPT_STRIP_ZEROS "strip_zeros"
 #define OPT_SAMPLE "sample_percent"
 #define OPT_PREFETCH "prefetch"
+#define OPT_LOB_PREFETCH "lob_prefetch"
 
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
-#define DEFAULT_PREFETCH 200
+#define DEFAULT_PREFETCH 50
+#define DEFAULT_LOB_PREFETCH 1048576
 
 /*
  * Options for case folding for names in IMPORT FOREIGN TABLE.
@@ -214,6 +216,7 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_READONLY, ForeignTableRelationId, false},
 	{OPT_SAMPLE, ForeignTableRelationId, false},
 	{OPT_PREFETCH, ForeignTableRelationId, false},
+	{OPT_LOB_PREFETCH, ForeignTableRelationId, false},
 	{OPT_KEY, AttributeRelationId, false},
 	{OPT_STRIP_ZEROS, AttributeRelationId, false}
 };
@@ -250,10 +253,11 @@ struct OracleFdwState {
 	struct oraTable *oraTable;     /* description of the remote Oracle table */
 	Cost startup_cost;             /* cost estimate, only needed for planning */
 	Cost total_cost;               /* cost estimate, only needed for planning */
+	unsigned int prefetch;         /* number of rows to prefetch */
+	unsigned int lob_prefetch;     /* number of LOB bytes to prefetch */
 	unsigned long rowcount;        /* rows already read from Oracle */
 	int columnindex;               /* currently processed column for error context */
 	MemoryContext temp_cxt;        /* short-lived memory for data modification */
-	unsigned int prefetch;         /* number of rows to prefetch */
 	char *order_clause;            /* for ORDER BY pushdown */
 	List *usable_pathkeys;         /* for ORDER BY pushdown */
 	char *where_clause;            /* deparsed where clause */
@@ -385,7 +389,7 @@ static void transactionCallback(XactEvent event, void *arg);
 static void exitHook(int code, Datum arg);
 static void oracleDie(SIGNAL_ARGS);
 static char *setSelectParameters(struct paramDesc *paramList, ExprContext *econtext);
-static void convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob);
+static void convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values, bool *nulls, bool trunc_lob);
 static void errorContextCallback(void *arg);
 static bool hasTrigger(Relation rel, CmdType cmdtype);
 static void buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState);
@@ -602,11 +606,27 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 			errno = 0;
 			prefetch = strtol(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 0 || prefetch > 10240 )
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 1 || prefetch > 10240 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are integers between 0 and 10240.")));
+		}
+
+		/* check valid values for "lob_prefetch" */
+		if (strcmp(def->defname, OPT_LOB_PREFETCH) == 0)
+		{
+			char *val = strVal(def->arg);
+			char *endptr;
+			long lob_prefetch;
+
+			errno = 0;
+			lob_prefetch = strtol(val, &endptr, 0);
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || lob_prefetch < 0 || lob_prefetch > 10240 )
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are integers between 0 and 536870912.")));
 		}
 	}
 
@@ -1333,17 +1353,10 @@ oracleIterateForeignScan(ForeignScanState *node)
 {
 	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
 	ExprContext *econtext = node->ss.ps.ps_ExprContext;
-	int have_result;
+	unsigned int index;
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)node->fdw_state;
 
-	if (oracleIsStatementOpen(fdw_state->session))
-	{
-		elog(DEBUG3, "oracle_fdw: get next row in foreign table scan");
-
-		/* fetch the next result row */
-		have_result = oracleFetchNext(fdw_state->session);
-	}
-	else
+	if (!oracleIsStatementOpen(fdw_state->session))
 	{
 		/* fill the parameter list with the actual values */
 		char *paramInfo = setSelectParameters(fdw_state->paramList, econtext);
@@ -1351,20 +1364,27 @@ oracleIterateForeignScan(ForeignScanState *node)
 		/* execute the Oracle statement and fetch the first row */
 		elog(DEBUG1, "oracle_fdw: execute query in foreign table scan %s", paramInfo);
 
-		oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->prefetch);
-		have_result = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
+		oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable,
+			fdw_state->prefetch, fdw_state->lob_prefetch);
+		(void)oracleExecuteQuery(fdw_state->session, fdw_state->oraTable,
+			fdw_state->paramList, fdw_state->prefetch);
 	}
+
+	elog(DEBUG3, "oracle_fdw: get next row in foreign table scan");
+
+	/* fetch the next result row */
+	index = oracleFetchNext(fdw_state->session, fdw_state->prefetch);
 
 	/* initialize virtual tuple */
 	ExecClearTuple(slot);
 
-	if (have_result)
+	if (index > 0)
 	{
 		/* increase row count */
 		++fdw_state->rowcount;
 
 		/* convert result to arrays of values and null indicators */
-		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+		convertTuple(fdw_state, index, slot->tts_values, slot->tts_isnull, false);
 
 		/* store the virtual tuple */
 		ExecStoreVirtualTuple(slot);
@@ -1789,7 +1809,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 			GetCurrentTransactionNestLevel()
 		);
 
-	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 0);
+	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 1, fdw_state->lob_prefetch);
 
 	/* get the type output functions for the parameters */
 	output_funcs = (regproc *)palloc0(fdw_state->oraTable->ncols * sizeof(regproc *));
@@ -1901,10 +1921,10 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	/* not using "deserializePlanData", we have to initialize these ourselves */
 	for (i=0; i<fdw_state->oraTable->ncols; ++i)
 	{
-		fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size + 1);
-		fdw_state->oraTable->cols[i]->val_len = 0;
+		fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size);
+		fdw_state->oraTable->cols[i]->val_len = (unsigned short *)palloc(sizeof(unsigned short));
 		fdw_state->oraTable->cols[i]->val_len4 = 0;
-		fdw_state->oraTable->cols[i]->val_null = 1;
+		fdw_state->oraTable->cols[i]->val_null = (short *)palloc(sizeof(short));
 	}
 	fdw_state->rowcount = 0;
 
@@ -1969,7 +1989,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 		ReleaseSysCache(tuple);
 	}
 
-	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 0);
+	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 1, fdw_state->lob_prefetch);
 
 	/* create a memory context for short-lived memory */
 	fdw_state->temp_cxt = AllocSetContextCreate(estate->es_query_cxt,
@@ -2004,7 +2024,7 @@ TupleTableSlot *
 oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
-	int rows;
+	unsigned int rows;
 	MemoryContext oldcontext;
 
 	elog(DEBUG3, "oracle_fdw: execute foreign table insert on %d", RelationGetRelid(rinfo->ri_RelationDesc));
@@ -2018,7 +2038,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable, fdw_state->session);
 
 	/* execute the INSERT statement and store RETURNING values in oraTable's columns */
-	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
+	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList, 1);
 
 	if (rows > 1)
 		ereport(ERROR,
@@ -2035,7 +2055,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 		++fdw_state->rowcount;
 
 		/* convert result for RETURNING to arrays of values and null indicators */
-		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+		convertTuple(fdw_state, 1, slot->tts_values, slot->tts_isnull, false);
 
 		/* store the virtual tuple */
 		ExecStoreVirtualTuple(slot);
@@ -2053,7 +2073,7 @@ TupleTableSlot *
 oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *slot, TupleTableSlot *planSlot)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)rinfo->ri_FdwState;
-	int rows;
+	unsigned int rows;
 	MemoryContext oldcontext;
 
 	elog(DEBUG3, "oracle_fdw: execute foreign table update on %d", RelationGetRelid(rinfo->ri_RelationDesc));
@@ -2067,7 +2087,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable, fdw_state->session);
 
 	/* execute the UPDATE statement and store RETURNING values in oraTable's columns */
-	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
+	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList, 1);
 
 	if (rows > 1)
 		ereport(ERROR,
@@ -2085,7 +2105,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 		++fdw_state->rowcount;
 
 		/* convert result for RETURNING to arrays of values and null indicators */
-		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+		convertTuple(fdw_state, 1, slot->tts_values, slot->tts_isnull, false);
 
 		/* store the virtual tuple */
 		ExecStoreVirtualTuple(slot);
@@ -2117,7 +2137,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	setModifyParameters(fdw_state->paramList, slot, planSlot, fdw_state->oraTable, fdw_state->session);
 
 	/* execute the DELETE statement and store RETURNING values in oraTable's columns */
-	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList);
+	rows = oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList, 1);
 
 	if (rows > 1)
 		ereport(ERROR,
@@ -2135,7 +2155,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 		++fdw_state->rowcount;
 
 		/* convert result for RETURNING to arrays of values and null indicators */
-		convertTuple(fdw_state, slot->tts_values, slot->tts_isnull, false);
+		convertTuple(fdw_state, 1, slot->tts_values, slot->tts_isnull, false);
 
 		/* store the virtual tuple */
 		ExecStoreVirtualTuple(slot);
@@ -2211,8 +2231,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
-	char *dblink = NULL, *max_long = NULL, *sample_percent = NULL, *prefetch = NULL;
+	char *nls_lang = NULL, *user = NULL, *password = NULL,
+		 *dbserver = NULL, *dblink = NULL, *max_long = NULL,
+		 *sample_percent = NULL, *prefetch = NULL, *lob_prefetch = NULL;
 	oraType type;
 	int charlen, typeprec, typescale, nullable, key, rc;
 	List *options, *result = NIL;
@@ -2372,19 +2393,33 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			prefetch = strVal(def->arg);
 			errno = 0;
 			prefetch_val = strtol(prefetch, &endptr, 0);
-			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 0 || prefetch_val > 10240 )
+			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 1 || prefetch_val > 10240 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are integers between 0 and 10240.")));
 		}
+		else if (strcmp(def->defname, OPT_LOB_PREFETCH) == 0)
+		{
+			char *endptr;
+			long lob_prefetch_val;
+
+			lob_prefetch = strVal(def->arg);
+			errno = 0;
+			lob_prefetch_val = strtol(lob_prefetch, &endptr, 0);
+			if (lob_prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || lob_prefetch_val < 0 || lob_prefetch_val > 10240 )
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname),
+						errhint("Valid values in this context are integers between 0 and 536870912.")));
+		}
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
 					errmsg("invalid option \"%s\"", def->defname),
-					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s",
+					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s, %s",
 						"case, collation", OPT_READONLY, OPT_DBLINK,
-						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH)));
+						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH)));
 	}
 
 	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
@@ -2436,6 +2471,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				appendStringInfo(&buf, ", sample_percent '%s'", sample_percent);
 			if (prefetch)
 				appendStringInfo(&buf, ", prefetch '%s'", prefetch);
+			if (lob_prefetch)
+				appendStringInfo(&buf, ", lob_prefetch '%s'", lob_prefetch);
 			appendStringInfo(&buf, ")");
 
 			result = lappend(result, pstrdup(buf.data));
@@ -2591,8 +2628,9 @@ struct OracleFdwState
 	ListCell *cell;
 	char *isolationlevel = NULL;
 	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL,
-		 *sample = NULL, *fetch = NULL, *nchar = NULL;
+		 *sample = NULL, *fetch = NULL, *lob_prefetch = NULL, *nchar = NULL;
 	long max_long;
+	int has_geometry = 0;
 
 	/*
 	 * Get all relevant options from the foreign table, the user mapping,
@@ -2624,6 +2662,8 @@ struct OracleFdwState
 			sample = strVal(def->arg);
 		if (strcmp(def->defname, OPT_PREFETCH) == 0)
 			fetch = strVal(def->arg);
+		if (strcmp(def->defname, OPT_LOB_PREFETCH) == 0)
+			lob_prefetch = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
 			nchar = strVal(def->arg);
 	}
@@ -2654,6 +2694,12 @@ struct OracleFdwState
 		fdwState->prefetch = DEFAULT_PREFETCH;
 	else
 		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
+
+	/* convert "lob_prefetch" to number (or use default) */
+	if (lob_prefetch == NULL)
+		fdwState->lob_prefetch = DEFAULT_LOB_PREFETCH;
+	else
+		fdwState->lob_prefetch = (unsigned int)strtoul(lob_prefetch, NULL, 0);
 
 	/* convert "nchar" option to boolean (or use "false") */
 	if (nchar != NULL
@@ -2686,7 +2732,11 @@ struct OracleFdwState
 	);
 
 	/* get remote table description */
-	fdwState->oraTable = oracleDescribe(fdwState->session, dblink, schema, table, pgtablename, max_long);
+	fdwState->oraTable = oracleDescribe(fdwState->session, dblink, schema, table, pgtablename, max_long, &has_geometry);
+
+	/* don't try array prefetching with geometries */
+	if (has_geometry)
+		fdwState->prefetch = 1;
 
 	/* add PostgreSQL data to table description */
 	getColumnData(foreigntableid, fdwState->oraTable);
@@ -3282,6 +3332,12 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	else
 		fdwState->prefetch = fdwState_i->prefetch;
 
+	/* set LOB prefetch size to maximum of the joining sides */
+	if (fdwState_o->lob_prefetch < fdwState_i->lob_prefetch)
+		fdwState->lob_prefetch = fdwState_i->lob_prefetch;
+	else
+		fdwState->lob_prefetch = fdwState_o->lob_prefetch;
+
 	/* copy outerrel's infomation to fdwstate */
 	fdwState->dbserver = fdwState_o->dbserver;
 	fdwState->isolation_level = fdwState_o->isolation_level;
@@ -3482,6 +3538,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	bool *nulls = (bool *)palloc(tupDesc->natts * sizeof(bool));
 	double rstate, rowstoskip = -1, sample_percent;
 	MemoryContext old_cxt, tmp_cxt;
+	unsigned int index;
 
 	elog(DEBUG1, "oracle_fdw: analyze foreign table %d", RelationGetRelid(relation));
 
@@ -3502,6 +3559,8 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	fdw_state = getFdwState(RelationGetRelid(relation), &sample_percent, InvalidOid);
 	fdw_state->paramList = NULL;
 	fdw_state->rowcount = 0;
+	/* we don't have to prefetch more than that much from a LOB */
+	fdw_state->lob_prefetch = WIDTH_THRESHOLD;
 
 	/* construct query */
 	initStringInfo(&query);
@@ -3524,10 +3583,10 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 			fdw_state->oraTable->cols[i]->used = 1;
 
 			/* allocate memory for return value */
-			fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size);
-			fdw_state->oraTable->cols[i]->val_len = 0;
+			fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size * fdw_state->prefetch);
+			fdw_state->oraTable->cols[i]->val_len = (unsigned short *)palloc(sizeof(unsigned short) * fdw_state->prefetch);
 			fdw_state->oraTable->cols[i]->val_len4 = 0;
-			fdw_state->oraTable->cols[i]->val_null = 1;
+			fdw_state->oraTable->cols[i]->val_null = (short *)palloc(sizeof(short) * fdw_state->prefetch);
 
 			if (first_column)
 				first_column = false;
@@ -3565,11 +3624,12 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 				fdw_state->oraTable->cols[i]->pgname
 			);
 
+	/* execute the query */
+	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->prefetch, fdw_state->lob_prefetch);
+	(void)oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList, fdw_state->prefetch);
+
 	/* loop through query results */
-	while(oracleIsStatementOpen(fdw_state->session)
-			? oracleFetchNext(fdw_state->session)
-			: (oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->prefetch),
-				oracleExecuteQuery(fdw_state->session, fdw_state->oraTable, fdw_state->paramList)))
+	while((index = oracleFetchNext(fdw_state->session, fdw_state->prefetch)) > 0)
 	{
 		/* allow user to interrupt ANALYZE */
 		vacuum_delay_point();
@@ -3582,7 +3642,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 			/* use a temporary memory context during convertTuple */
 			old_cxt = MemoryContextSwitchTo(tmp_cxt);
-			convertTuple(fdw_state, values, nulls, true);
+			convertTuple(fdw_state, index, values, nulls, true);
 			MemoryContextSwitchTo(old_cxt);
 
 			rows[collected_rows++] = heap_form_tuple(tupDesc, values, nulls);
@@ -3605,7 +3665,7 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 				/* use a temporary memory context during convertTuple */
 				old_cxt = MemoryContextSwitchTo(tmp_cxt);
-				convertTuple(fdw_state, values, nulls, true);
+				convertTuple(fdw_state, index, values, nulls, true);
 				MemoryContextSwitchTo(old_cxt);
 
 				rows[k] = heap_form_tuple(tupDesc, values, nulls);
@@ -3613,6 +3673,8 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 			}
 		}
 	}
+
+	oracleCloseStatement(fdw_state->session);
 
 	MemoryContextDelete(tmp_cxt);
 
@@ -5353,6 +5415,8 @@ List
 	result = lappend(result, serializeString(fdwState->query));
 	/* Oracle prefetch count */
 	result = lappend(result, serializeInt((int)fdwState->prefetch));
+	/* Oracle LOB prefetch size */
+	result = lappend(result, serializeInt((int)fdwState->lob_prefetch));
 	/* Oracle table name */
 	result = lappend(result, serializeString(fdwState->oraTable->name));
 	/* PostgreSQL table name */
@@ -5493,6 +5557,10 @@ struct OracleFdwState
 	state->prefetch = (unsigned int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 	cell = list_next(list, cell);
 
+	/* Oracle LOB prefetch size */
+	state->lob_prefetch = (unsigned int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+	cell = list_next(list, cell);
+
 	/* table data */
 	state->oraTable = (struct oraTable *)palloc(sizeof(struct oraTable));
 	state->oraTable->name = deserializeString(lfirst(cell));
@@ -5531,11 +5599,14 @@ struct OracleFdwState
 		cell = list_next(list, cell);
 		state->oraTable->cols[i]->val_size = deserializeLong(lfirst(cell));
 		cell = list_next(list, cell);
-		/* allocate memory for the result value */
-		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size + 1);
-		state->oraTable->cols[i]->val_len = 0;
+		/*
+		 * Allocate memory for the result value.
+		 * Multiply the space to allocate with the prefetch count.
+		 */
+		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size * state->prefetch);
+		state->oraTable->cols[i]->val_len = (unsigned short *)palloc(sizeof(unsigned short) * state->prefetch);
 		state->oraTable->cols[i]->val_len4 = 0;
-		state->oraTable->cols[i]->val_null = 1;
+		state->oraTable->cols[i]->val_null = (short *)palloc(sizeof(short) * state->prefetch);
 	}
 
 	/* length of parameter list */
@@ -5800,11 +5871,12 @@ struct OracleFdwState
 		copy->oraTable->cols[i]->used = 0;
 		copy->oraTable->cols[i]->strip_zeros = orig->oraTable->cols[i]->strip_zeros;
 		copy->oraTable->cols[i]->pkey = orig->oraTable->cols[i]->pkey;
+		/* these are not needed for planning */
 		copy->oraTable->cols[i]->val = NULL;
 		copy->oraTable->cols[i]->val_size = orig->oraTable->cols[i]->val_size;
-		copy->oraTable->cols[i]->val_len = 0;
+		copy->oraTable->cols[i]->val_len = NULL;
 		copy->oraTable->cols[i]->val_len4 = 0;
-		copy->oraTable->cols[i]->val_null = 0;
+		copy->oraTable->cols[i]->val_null = NULL;
 	}
 	copy->startup_cost = 0.0;
 	copy->total_cost = 0.0;
@@ -5812,6 +5884,8 @@ struct OracleFdwState
 	copy->columnindex = 0;
 	copy->temp_cxt = NULL;
 	copy->order_clause = NULL;
+	copy->prefetch = orig->prefetch;
+	copy->lob_prefetch = orig->lob_prefetch;
 
 	return copy;
 }
@@ -6438,14 +6512,16 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
  * convertTuple
  * 		Convert a result row from Oracle stored in oraTable
  * 		into arrays of values and null indicators.
+ * 		"index" is the (1 based) index into the array of results.
  * 		If trunc_lob it true, truncate LOBs to WIDTH_THRESHOLD+1 bytes.
  */
 void
-convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool trunc_lob)
+convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values, bool *nulls, bool trunc_lob)
 {
-	char *value = NULL;
+	char *value = NULL, *oraval;
 	long value_len = 0;
-	int j, index = -1;
+	int j, i = -1;
+	unsigned short oralen;
 	ErrorContextCallback errcb;
 	Oid pgtype;
 
@@ -6457,15 +6533,15 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 	for (j=0; j<fdw_state->oraTable->npgcols; ++j)
 	{
 		/* for dropped columns, insert a NULL */
-		if ((index + 1 < fdw_state->oraTable->ncols)
-				&& (fdw_state->oraTable->cols[index + 1]->pgattnum > j + 1))
+		if ((i + 1 < fdw_state->oraTable->ncols)
+				&& (fdw_state->oraTable->cols[i + 1]->pgattnum > j + 1))
 		{
 			nulls[j] = true;
 			values[j] = PointerGetDatum(NULL);
 			continue;
 		}
 		else
-			++index;
+			++i;
 
 		/*
 		 * Columns exceeding the length of the Oracle table will be NULL,
@@ -6473,11 +6549,11 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		 * Geometry columns are NULL if the value is NULL,
 		 * for all other types use the NULL indicator.
 		 */
-		if (index >= fdw_state->oraTable->ncols
-			|| fdw_state->oraTable->cols[index]->used == 0
-			|| (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY
-				&& ((ora_geometry *)fdw_state->oraTable->cols[index]->val)->geometry == NULL)
-			|| fdw_state->oraTable->cols[index]->val_null == -1)
+		if (i >= fdw_state->oraTable->ncols
+			|| fdw_state->oraTable->cols[i]->used == 0
+			|| (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY
+				&& ((ora_geometry *)fdw_state->oraTable->cols[i]->val)->geometry == NULL)
+			|| fdw_state->oraTable->cols[i]->val_null[index-1] == -1)
 		{
 			nulls[j] = true;
 			values[j] = PointerGetDatum(NULL);
@@ -6486,26 +6562,31 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 
 		/* from here on, we can assume columns to be NOT NULL */
 		nulls[j] = false;
-		pgtype = fdw_state->oraTable->cols[index]->pgtype;
+		pgtype = fdw_state->oraTable->cols[i]->pgtype;
+
+		/* calculate the offset into the arays in "val" and "val_len" */
+		oraval = fdw_state->oraTable->cols[i]->val +
+			(index - 1) * fdw_state->oraTable->cols[i]->val_size;
+		oralen = (fdw_state->oraTable->cols[i]->val_len)[index - 1];
 
 		/* get the data and its length */
-		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
-				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
-				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BFILE
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
 		{
 			/* for LOBs, get the actual LOB contents (palloc'ed), truncated if desired */
 			oracleGetLob(fdw_state->session,
-				(void *)fdw_state->oraTable->cols[index]->val, fdw_state->oraTable->cols[index]->oratype,
+				(void *)oraval, fdw_state->oraTable->cols[i]->oratype,
 				&value, &value_len, trunc_lob ? (WIDTH_THRESHOLD+1) : 0);
 		}
-		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
+		else if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY)
 		{
-			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
+			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[i]->val;
 
 			/* install error context callback */
 			errcb.previous = error_context_stack;
 			error_context_stack = &errcb;
-			fdw_state->columnindex = index;
+			fdw_state->columnindex = i;
 
 			value_len = oracleGetEWKBLen(fdw_state->session, geom);
 
@@ -6514,23 +6595,21 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 
 			value = NULL;  /* we will fetch that later to avoid unnecessary copying */
 		}
-		else if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONG
-				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_LONGRAW)
+		else if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONG
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_LONGRAW)
 		{
 			/* for LONG and LONG RAW, the first 4 bytes contain the length */
-			value_len = *((int32 *)fdw_state->oraTable->cols[index]->val);
+			value_len = *((int32 *)oraval);
 			/* the rest is the actual data */
-			value = fdw_state->oraTable->cols[index]->val + 4;
+			value = oraval + 4;
 			/* terminating zero byte (needed for LONGs) */
 			value[value_len] = '\0';
 		}
 		else
 		{
-			char *oraval = fdw_state->oraTable->cols[index]->val;
-
 			/* special handling for NUMBER's "infinity tilde" */
-			if ((fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_FLOAT
-					|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_NUMBER)
+			if ((fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_FLOAT
+					|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_NUMBER)
 				&& (oraval[0] == '~' || (oraval[0] == '-' && oraval[1] == '~')))
 			{
 				/* "numeric" does not know infinity, so map to NaN */
@@ -6542,19 +6621,19 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 
 			/* for other data types, oraTable contains the results */
 			value = oraval;
-			value_len = fdw_state->oraTable->cols[index]->val_len;
+			value_len = oralen;
 		}
 
 		/* fill the TupleSlot with the data (after conversion if necessary) */
-		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_GEOMETRY)
+		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY)
 		{
-			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
+			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[i]->val;
 			struct varlena *result = NULL;
 
 			/* install error context callback */
 			errcb.previous = error_context_stack;
 			error_context_stack = &errcb;
-			fdw_state->columnindex = index;
+			fdw_state->columnindex = i;
 
 			result = (bytea *)palloc(value_len + VARHDRSZ);
 			oracleFillEWKB(fdw_state->session, geom, value_len, VARDATA(result));
@@ -6590,7 +6669,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			 * In Oracle they are rendered like this: "-01 12:00:00.000000"
 			 * They have to be changed to "-01 -12:00:00.000000" for PostgreSQL.
 			 */
-			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_INTERVALD2S
+			if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_INTERVALD2S
 				&& value[0] == '-')
 			{
 				char *newval = palloc(strlen(value) + 2);
@@ -6620,12 +6699,12 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 			/* install error context callback */
 			errcb.previous = error_context_stack;
 			error_context_stack = &errcb;
-			fdw_state->columnindex = index;
+			fdw_state->columnindex = i;
 
 			if (pgtype == BPCHAROID || pgtype == VARCHAROID || pgtype == TEXTOID)
 			{
 				/* optionally strip zero bytes from string types */
-				if (fdw_state->oraTable->cols[index]->strip_zeros)
+				if (fdw_state->oraTable->cols[i]->strip_zeros)
 				{
 					char *from_p, *to_p = value;
 					long new_length = value_len;
@@ -6657,7 +6736,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 					values[j] = OidFunctionCall3(typinput,
 						dat,
 						ObjectIdGetDatum(InvalidOid),
-						Int32GetDatum(fdw_state->oraTable->cols[index]->pgtypmod));
+						Int32GetDatum(fdw_state->oraTable->cols[i]->pgtypmod));
 					break;
 				default:
 					/* the others don't */
@@ -6669,9 +6748,9 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool 
 		}
 
 		/* free the data buffer for LOBs */
-		if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BLOB
-				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_BFILE
-				|| fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_CLOB)
+		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BFILE
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
 			pfree(value);
 	}
 }

@@ -5,8 +5,6 @@ Help is welcome!
   established.  Otherwise, an ill-guided Oracle logon trigger could mess up
   our NLS settings.
 
-- Convert OCI prefetching to bulk fetches to improve performance for LOBs.
-
 - Add a sample Docker file to build a container with PostgreSQL and oracle_fdw.
   This can also serve as a cookbook for installing the software.
 
