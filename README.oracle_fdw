@@ -269,19 +269,26 @@ Foreign table options
   ANALYZE will fail with ORA-00933 for tables defined with Oracle queries and
   may fail with ORA-01446 for tables defined with complex Oracle views.
 
-- **prefetch** (optional, defaults to "200")
+- **prefetch** (optional, defaults to "50")
 
   Sets the number of rows that will be fetched with a single round-trip between
-  PostgreSQL and Oracle during a foreign table scan.  This is implemented using
-  Oracle row prefetching.  The value must be between 0 and 10240, where a value
-  of zero disables prefetching.
+  PostgreSQL and Oracle during a foreign table scan.  The value must be between
+  1 and 10240.
 
   Higher values can speed up performance, but will use more memory on the
   PostgreSQL server.
 
-  Note that due to an Oracle limitation, row prefetching won't work if the
-  Oracle query involves a BLOB, CLOB or BFILE column.  As a consequence, queries
-  on such columns on a foreign table will perform badly if you fetch many rows.
+  Note that there is no prefetching if the Oracle table contains columns of
+  the type `MDSYS.SDO_GEOMETRY`.
+
+- **lob_prefetch** (optional, defaults to "1048576")
+
+  Sets the number of bytes that are prefetched for BLOB, CLOB and BFILE values.
+  LOBs that exceed that size will require additional round trips between
+  PostgreSQL and Oracle, so setting this value bigger than the size of your
+  typical LOB will be good for performance.  Choosing bigger values for this
+  option can allocate more memory on the server side, but will boost performance
+  for large LOBs.
 
 Column options
 --------------
@@ -589,6 +596,10 @@ following:
 
     See the [Options](#3-options) section for details.
 
+  - **lob_prefetch**: sets the **lob_prefetch** option on all imported tables
+
+    See the [Options](#3-options) section for details.
+
 - The Oracle schema name must be written exactly as it is in Oracle, so
   normally in upper case.  Since PostgreSQL translates names to lower case
   before processing, you must protect the schema name with double quotes
@@ -782,9 +793,9 @@ oracle_fdw sets the MODULE of the Oracle session to `postgres` and the
 ACTION to the backend process number.  This can help identifying the Oracle
 session and allows you to trace it with DBMS_MONITOR.SERV_MOD_ACT_TRACE_ENABLE.
 
-oracle_fdw uses Oracle's result prefetching to avoid unnecessary client-server
-round-trips.  The prefetch row count can be configured with the **prefetch**
-table option and is set to 200 by default.
+oracle_fdw uses Oracle's array interface to avoid unnecessary client-server
+round-trips.  The batch size can be configured with the **prefetch** table
+option and is set to 50 by default.
 
 Rather than using a PLAN_TABLE to explain an Oracle query (which would require
 such a table to be created in the Oracle database), oracle_fdw uses execution
