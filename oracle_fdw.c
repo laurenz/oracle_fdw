@@ -1549,7 +1549,6 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	char paramName[10];
 	TupleDesc tupdesc;
 	Bitmapset *updated_cols;
-	AttrNumber col;
 	Oid check_user;
 
 	/*
@@ -1561,11 +1560,11 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	RTEPermissionInfo *perminfo = getRTEPermissionInfo(root->parse->rteperminfos, rte);
 
 	check_user = perminfo->checkAsUser;
-	updated_cols = bms_copy(perminfo->updatedCols);
+	updated_cols = perminfo->updatedCols;
 #else
 	check_user = rte->checkAsUser;
 #if PG_VERSION_NUM >= 90500
-	updated_cols = bms_copy(rte->updatedCols);
+	updated_cols = rte->updatedCols;
 #else
 	updated_cols = bms_copy(rte->modifiedCols);
 #endif  /* PG_VERSION_NUM >= 90500 */
@@ -1633,9 +1632,17 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	}
 	else if (operation == CMD_UPDATE)
 	{
+		AttrNumber col;
+#if PG_VERSION_NUM >= 90500
+		int col_idx = -1;
+		while ((col_idx = bms_next_member(updated_cols, col_idx)) >= 0)
+		{
+			col = col_idx + FirstLowInvalidHeapAttributeNumber;
+#else
 		while ((col = bms_first_member(updated_cols)) >= 0)
 		{
 			col += FirstLowInvalidHeapAttributeNumber;
+#endif  /* PG_VERSION_NUM >= 90500 */
 			if (col <= InvalidAttrNumber)  /* shouldn't happen */
 				elog(ERROR, "system-column update is not supported");
 			targetAttrs = lappend_int(targetAttrs, col);
