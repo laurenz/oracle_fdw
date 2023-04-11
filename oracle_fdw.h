@@ -46,6 +46,7 @@ struct srvEntry
 struct envEntry
 {
 	char *nls_lang;
+	char *timezone;
 	OCIEnv *envhp;
 	OCIError *errhp;
 	struct envEntry *next;
@@ -204,7 +205,7 @@ typedef enum
 /*
  * functions defined in oracle_utils.c
  */
-extern oracleSession *oracleGetSession(const char *connectstring, oraIsoLevel isolation_level, char *user, char *password, const char *nls_lang, int have_nchar, const char *tablename, int curlevel);
+extern oracleSession *oracleGetSession(const char *connectstring, oraIsoLevel isolation_level, char *user, char *password, const char *nls_lang, const char *timezone, int have_nchar, const char *tablename, int curlevel);
 extern void oracleCloseStatement(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
