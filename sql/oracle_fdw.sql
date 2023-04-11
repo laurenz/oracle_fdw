@@ -137,7 +137,7 @@ CREATE FOREIGN TABLE typetest1 (
    ts  timestamp with time zone,
    ids interval,
    iym interval
-) SERVER oracle OPTIONS (table 'TYPETEST1');
+) SERVER oracle OPTIONS (table 'TYPETEST1', prefetch '2', lob_prefetch '5000');
 ALTER FOREIGN TABLE typetest1 DROP q;
 
 -- a table that is missing some fields
@@ -267,7 +267,7 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db
  */
 
 -- simple SELECT
-SELECT id, c, nc, vc, nvc, length(lc), length(lnc), r, u, length(lb), length(lr), b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
+SELECT id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
 -- mass UPDATE
 WITH upd (id, c, lb, d, ts) AS
    (UPDATE longy SET c = substr(c, 1, 9) || 'u',
