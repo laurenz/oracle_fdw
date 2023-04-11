@@ -15,6 +15,10 @@ Version 2.6.0
     This could lead to crashes and unpredictable behavior.
   - Set the Oracle session time zone from the PostgreSQL session time zone.
     That makes TIMESTAMP WITH LOCAL TIME ZONE translate correctly.
+  - Make auto_explain work with oracle_fdw.  This used to cause an error:
+    oracleQueryPlan internal error: statement handle is not NULL
+    Report by "Jaisus" and Sebastien Caunes.  Sebastien provided the essential
+    clue that the problem is related to auto_explain.
 
   Enhancements:
   - Skip Oracle savepoint management if the foreign server option
