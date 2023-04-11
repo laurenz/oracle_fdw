@@ -63,6 +63,7 @@
 #include "optimizer/tlist.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
+#include "pgtime.h"
 #include "port.h"
 #include "storage/ipc.h"
 #include "storage/lock.h"
@@ -245,6 +246,7 @@ struct OracleFdwState {
 	char *user;                    /* Oracle username */
 	char *password;                /* Oracle password */
 	char *nls_lang;                /* Oracle locale information */
+	char *timezone;                /* session time zone */
 	bool have_nchar;               /* needs support for national character conversion */
 	oracleSession *session;        /* encapsulates the active Oracle session */
 	char *query;                   /* query we issue against Oracle */
@@ -369,6 +371,7 @@ static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrel
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
 static char *deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds);
 static char *guessNlsLang(char *nls_lang);
+static char *getTimezone(void);
 static oracleSession *oracleConnectServer(Name srvname);
 static List *serializePlanData(struct OracleFdwState *fdwState);
 static Const *serializeString(const char *s);
@@ -1329,6 +1332,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
+			fdw_state->timezone,
 			(int)fdw_state->have_nchar,
 			fdw_state->oraTable->pgname,
 			GetCurrentTransactionNestLevel()
@@ -1811,6 +1815,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
+			fdw_state->timezone,
 			(int)fdw_state->have_nchar,
 			fdw_state->oraTable->pgname,
 			GetCurrentTransactionNestLevel()
@@ -1941,6 +1946,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 			fdw_state->user,
 			fdw_state->password,
 			fdw_state->nls_lang,
+			fdw_state->timezone,
 			(int)fdw_state->have_nchar,
 			fdw_state->oraTable->pgname,
 			GetCurrentTransactionNestLevel()
@@ -2238,7 +2244,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *user = NULL, *password = NULL,
+	char *nls_lang = NULL, *timezone = NULL, *user = NULL, *password = NULL,
 		 *dbserver = NULL, *dblink = NULL, *max_long = NULL,
 		 *sample_percent = NULL, *prefetch = NULL, *lob_prefetch = NULL;
 	oraType type;
@@ -2433,6 +2439,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
+	/* environment variable for the Oracle time zone */
+	timezone = getTimezone();
 
 	/* connect to Oracle database */
 	session = oracleGetSession(
@@ -2441,6 +2449,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		user,
 		password,
 		nls_lang,
+		timezone,
 		(int)have_nchar,
 		NULL,
 		1
@@ -2725,6 +2734,8 @@ struct OracleFdwState
 
 	/* guess a good NLS_LANG environment setting */
 	fdwState->nls_lang = guessNlsLang(fdwState->nls_lang);
+	/* Oracle environment variable for the time zone */
+	fdwState->timezone = getTimezone();
 
 	/* connect to Oracle database */
 	fdwState->session = oracleGetSession(
@@ -2733,6 +2744,7 @@ struct OracleFdwState
 		fdwState->user,
 		fdwState->password,
 		fdwState->nls_lang,
+		fdwState->timezone,
 		(int)fdwState->have_nchar,
 		pgtablename,
 		GetCurrentTransactionNestLevel()
@@ -3351,6 +3363,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	fdwState->user     = fdwState_o->user;
 	fdwState->password = fdwState_o->password;
 	fdwState->nls_lang = fdwState_o->nls_lang;
+	fdwState->timezone = fdwState_o->timezone;
 	fdwState->have_nchar = fdwState_o->have_nchar;
 
 	foreach(lc, pull_var_clause((Node *)joinrel->reltarget->exprs, PVC_RECURSE_PLACEHOLDERS))
@@ -5307,6 +5320,22 @@ char
 	return buf.data;
 }
 
+/*
+ * getTimeZone
+ * 		session time zone in the format ORA_SDTZ=...
+ */
+char *
+getTimezone()
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf, "ORA_SDTZ=%s", pg_get_timezone_name(session_timezone));
+
+	elog(DEBUG1, "oracle_fdw: set %s", buf.data);
+	return buf.data;
+}
+
 oracleSession *
 oracleConnectServer(Name srvname)
 {
@@ -5318,7 +5347,7 @@ oracleConnectServer(Name srvname)
 	ForeignDataWrapper *wrapper;
 	List *options;
 	ListCell *cell;
-	char *nls_lang = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
+	char *nls_lang = NULL, *timezone = NULL, *user = NULL, *password = NULL, *dbserver = NULL;
 	oraIsoLevel isolation_level = DEFAULT_ISOLATION_LEVEL;
 	bool have_nchar = false;
 
@@ -5375,6 +5404,8 @@ oracleConnectServer(Name srvname)
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
+	/* Oracle environment variable for the time zone */
+	timezone = getTimezone();
 
 	/* connect to Oracle database */
 	return oracleGetSession(
@@ -5383,6 +5414,7 @@ oracleConnectServer(Name srvname)
 		user,
 		password,
 		nls_lang,
+		timezone,
 		(int)have_nchar,
 		NULL,
 		1
@@ -5418,6 +5450,8 @@ List
 	result = lappend(result, serializeString(fdwState->password));
 	/* nls_lang */
 	result = lappend(result, serializeString(fdwState->nls_lang));
+	/* timezone */
+	result = lappend(result, serializeString(fdwState->timezone));
 	/* query */
 	result = lappend(result, serializeString(fdwState->query));
 	/* Oracle prefetch count */
@@ -5554,6 +5588,10 @@ struct OracleFdwState
 
 	/* nls_lang */
 	state->nls_lang = deserializeString(lfirst(cell));
+	cell = list_next(list, cell);
+
+	/* timezone */
+	state->timezone = deserializeString(lfirst(cell));
 	cell = list_next(list, cell);
 
 	/* query */
@@ -5853,6 +5891,7 @@ struct OracleFdwState
 	copy->user = pstrdup(orig->user);
 	copy->password = pstrdup(orig->password);
 	copy->nls_lang = pstrdup(orig->nls_lang);
+	copy->timezone = pstrdup(orig->timezone);
 	copy->session = NULL;
 	copy->query = NULL;
 	copy->paramList = NULL;

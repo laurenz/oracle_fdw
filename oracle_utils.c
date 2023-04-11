@@ -75,7 +75,7 @@ static ora_geometry null_geometry = { NULL, NULL, -1, NULL, -1, NULL };
  */
 static void getServerVersion(struct srvEntry *srvp, OCIError *errhp);
 static void oracleSetSavepoint(oracleSession *session, int nest_level);
-static void setOracleEnvironment(char *nls_lang);
+static void setOracleEnvironment(char *nls_lang, char *timezone);
 static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
 static sword checkerr(sword status, dvoid *handle, ub4 handleType);
 static char *copyOraText(const char *string, int size, int quote);
@@ -98,7 +98,7 @@ static void setNullGeometry(oracleSession *session, ora_geometry *geom);
 oracleSession
 *oracleGetSession(
 	const char *connectstring, oraIsoLevel isolation_level, char *user, char *password,
-	const char *nls_lang, int have_nchar, const char *tablename, int curlevel)
+	const char *nls_lang, const char *timezone, int have_nchar, const char *tablename, int curlevel)
 {
 	OCIEnv *envhp = NULL;
 	OCIError *errhp = NULL;
@@ -110,7 +110,7 @@ oracleSession
 	struct envEntry *envp;
 	struct srvEntry *srvp;
 	struct connEntry *connp;
-	char pid[30], *nlscopy = NULL;
+	char pid[30], *nlscopy = NULL, *timezonecopy = NULL;
 	ub4 is_connected;
 	int retry = 1, i;
 	ub4 isolevel = OCI_TRANS_SERIALIZABLE;
@@ -138,6 +138,8 @@ oracleSession
 		password = "";
 	if (!nls_lang)
 		nls_lang = "";
+	if (!timezone)
+		timezone = "";
 
 	/*
 	 * Check if PostGIS is installed and initialize GEOMETRYOID if it is.
@@ -164,14 +166,18 @@ oracleSession
 		 * Create environment and error handle.
 		 */
 
-		/* create persistent copy of "nls_lang" */
+		/* create persistent copy of "nls_lang" and "timezone" */
 		if ((nlscopy = strdup(nls_lang)) == NULL)
 			oracleError_i(FDW_OUT_OF_MEMORY,
 				"error connecting to Oracle: failed to allocate %d bytes of memory",
 				strlen(nls_lang) + 1);
+		if ((timezonecopy = strdup(timezone)) == NULL)
+			oracleError_i(FDW_OUT_OF_MEMORY,
+				"error connecting to Oracle: failed to allocate %d bytes of memory",
+				strlen(timezone) + 1);
 
 		/* set Oracle environment */
-		setOracleEnvironment(nlscopy);
+		setOracleEnvironment(nlscopy, timezonecopy);
 
 		/* use OCI_NCHAR_LITERAL_REPLACE_ON only if we have to convert national characters */
 		if (have_nchar)
@@ -225,6 +231,7 @@ oracleSession
 		}
 
 		envp->nls_lang = nlscopy;
+		envp->timezone = timezonecopy;
 		envp->envhp = envhp;
 		envp->errhp = errhp;
 		envp->srvlist = NULL;
@@ -1388,14 +1395,16 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
  * 		NLS_TIMESTAMP_TZ_FORMAT
  * 		NLS_NUMERIC_CHARACTERS
  * 		NLS_CALENDAR
+ * 		ORA_SDTZ
  */
 void
-setOracleEnvironment(char *nls_lang)
+setOracleEnvironment(char *nls_lang, char *timezone)
 {
 	/* other environment variables that control Oracle formats */
 	if (putenv("NLS_DATE_LANGUAGE=AMERICAN") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_DATE_LANGUAGE cannot be set.");
@@ -1404,6 +1413,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_DATE_FORMAT=YYYY-MM-DD HH24:MI:SS BC") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_DATE_FORMAT cannot be set.");
@@ -1412,6 +1422,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_TIMESTAMP_FORMAT=YYYY-MM-DD HH24:MI:SS.FF9 BC") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_TIMESTAMP_FORMAT cannot be set.");
@@ -1420,6 +1431,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_TIMESTAMP_TZ_FORMAT=YYYY-MM-DD HH24:MI:SS.FF9TZH:TZM BC") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_TIMESTAMP_TZ_FORMAT cannot be set.");
@@ -1428,6 +1440,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_NUMERIC_CHARACTERS=.,") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_NUMERIC_CHARACTERS cannot be set.");
@@ -1436,6 +1449,7 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_CALENDAR=") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_CALENDAR cannot be set.");
@@ -1444,14 +1458,26 @@ setOracleEnvironment(char *nls_lang)
 	if (putenv("NLS_NCHAR=") != 0)
 	{
 		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_NCHAR cannot be set.");
 	}
 
-	if (putenv(nls_lang) != 0)
+	if (putenv(timezone) != 0)
 	{
 		free(nls_lang);
+		free(timezone);
+		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
+			"error connecting to Oracle",
+			"Environment variable ORA_SDTZ cannot be set.");
+	}
+
+	if (putenv(nls_lang) != 0)
+	{
+		putenv("ORA_SDTZ=");
+		free(nls_lang);
+		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
 			"error connecting to Oracle",
 			"Environment variable NLS_LANG cannot be set.");
@@ -3169,6 +3195,8 @@ removeEnvironment(OCIEnv *envhp)
 	/* free the memory */
 	(void)putenv("NLS_LANG=");
 	free(envp->nls_lang);
+	(void)putenv("ORA_SDTZ=");
+	free(envp->timezone);
 	free(envp);
 }
 
