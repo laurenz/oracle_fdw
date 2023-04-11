@@ -76,7 +76,7 @@ static ora_geometry null_geometry = { NULL, NULL, -1, NULL, -1, NULL };
 static void getServerVersion(struct srvEntry *srvp, OCIError *errhp);
 static void oracleSetSavepoint(oracleSession *session, int nest_level);
 static void setOracleEnvironment(char *nls_lang, char *timezone);
-static void oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
+static OCIStmt *oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind);
 static sword checkerr(sword status, dvoid *handle, ub4 handleType);
 static char *copyOraText(const char *string, int size, int quote);
 static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect);
@@ -1278,6 +1278,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 	ub2 res_len, res_type = SQLT_STR;
 	sb2 res_ind;
 	sword result;
+	OCIStmt *stmthp;
 	const char * const desc_query =
 		"SELECT rtrim(lpad(' ',2*level-2)||operation||' '||options||' '||object_name||' '"
 		"||CASE WHEN access_predicates IS NULL THEN NULL ELSE '(condition '||access_predicates||')' END"
@@ -1288,7 +1289,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 		" ORDER BY id";
 
 	/* execute the query and get the first result row */
-	oracleQueryPlan(session, query, desc_query, 1, (dvoid **)&r, &res_size, &res_type, &res_len, &res_ind);
+	stmthp = oracleQueryPlan(session, query, desc_query, 1, (dvoid **)&r, &res_size, &res_type, &res_len, &res_ind);
 
 	*nrows = 0;
 	do
@@ -1305,7 +1306,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 
 		/* fetch next row */
 		result = checkerr(
-			OCIStmtFetch2(session->stmthp, session->envp->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
+			OCIStmtFetch2(stmthp, session->envp->errhp, 1, OCI_FETCH_NEXT, 0, OCI_DEFAULT),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR);
 
 		if (result != OCI_SUCCESS && result != OCI_NO_DATA)
@@ -1318,7 +1319,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 	while (result != OCI_NO_DATA);
 
 	/* close the statement */
-	oracleCloseStatement(session);
+	freeHandle(stmthp, session->connp, session->envp->errhp);
 }
 
 /*
@@ -1498,27 +1499,22 @@ setOracleEnvironment(char *nls_lang, char *timezone)
  * 		while the arrays "res", "res_len" and "res_ind" contain output parameters
  * 		for the result, the actual lenth of the result and NULL indicators.
  */
-void
+OCIStmt *
 oracleQueryPlan(oracleSession *session, const char *query, const char *desc_query, int nres, dvoid **res, sb4 *res_size, ub2 *res_type, ub2 *res_len, sb2 *res_ind)
 {
 	int child_nr, i;
 	const char * const sql_id_query = "SELECT sql_id, child_number FROM (SELECT sql_id, child_number FROM v$sql WHERE sql_text LIKE :sql ORDER BY last_active_time DESC) WHERE rownum=1";
 	char sql_id[20], query_head[50], *p;
+	OCIStmt *stmthp = NULL;
 	OCIDefine *defnhp;
 	OCIBind *bndhp;
 	sb2 ind1, ind2, ind3;
 	ub2 len1, len2;
 	ub4 prefetch_rows = 50;
 
-	/* make sure there is no statement handle stored in session */
-	if (session->stmthp != NULL)
-	{
-		oracleError(FDW_ERROR, "oracleQueryPlan internal error: statement handle is not NULL");
-	}
-
 	/* prepare the query */
 	if (checkerr(
-		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+		OCIStmtPrepare2(session->connp->svchp, &stmthp, session->envp->errhp,
 			(text *)query, (ub4)strlen(query), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
@@ -1529,12 +1525,12 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
 		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* set prefetch options */
 	if (checkerr(
-		OCIAttrSet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
+		OCIAttrSet((dvoid *)stmthp, OCI_HTYPE_STMT, (dvoid *)&prefetch_rows, 0,
 			OCI_ATTR_PREFETCH_ROWS, session->envp->errhp),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
@@ -1545,7 +1541,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* parse and describe the query, store it in the library cache */
 	if (checkerr(
-		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)0, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)0, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DESCRIBE_ONLY),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
@@ -1554,8 +1550,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 			oraMessage);
 	}
 
-	freeHandle(session->stmthp, session->connp, session->envp->errhp);
-	session->stmthp = NULL;
+	freeHandle(stmthp, session->connp, session->envp->errhp);
+	stmthp = NULL;
 
 	/*
 	 * Get the SQL_ID and CHILD_NUMBER from V$SQL.
@@ -1572,7 +1568,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* prepare */
 	if (checkerr(
-		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+		OCIStmtPrepare2(session->connp->svchp, &stmthp, session->envp->errhp,
 			(text *)sql_id_query, (ub4)strlen(sql_id_query), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
@@ -1583,14 +1579,14 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
 		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* bind */
 	bndhp = NULL;
 	ind3 = 0;
 	if (checkerr(
-		OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":sql",
+		OCIBindByName(stmthp, &bndhp, session->envp->errhp, (text *)":sql",
 			(sb4)4, (dvoid *)query_head, (sb4)(strlen(query_head) + 1),
 			SQLT_STR, (dvoid *)&ind3,
 			NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
@@ -1605,7 +1601,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	sql_id[19] = '\0';
 	defnhp = NULL;
 	if (checkerr(
-		OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
+		OCIDefineByPos(stmthp, &defnhp, session->envp->errhp, (ub4)1,
 			(dvoid *)sql_id, (sb4)19,
 			SQLT_STR, (dvoid *)&ind1,
 			(ub2 *)&len1, NULL, OCI_DEFAULT),
@@ -1618,7 +1614,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	defnhp = NULL;
 	if (checkerr(
-		OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)2,
+		OCIDefineByPos(stmthp, &defnhp, session->envp->errhp, (ub4)2,
 			(dvoid *)&child_nr, (sb4)sizeof(int),
 			SQLT_INT, (dvoid *)&ind2,
 			(ub2 *)&len2, NULL, OCI_DEFAULT),
@@ -1631,7 +1627,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* execute */
 	if (checkerr(
-		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
@@ -1647,8 +1643,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 				oraMessage);
 	}
 
-	freeHandle(session->stmthp, session->connp, session->envp->errhp);
-	session->stmthp = NULL;
+	freeHandle(stmthp, session->connp, session->envp->errhp);
+	stmthp = NULL;
 
 	/*
 	 * Run the final desc_query.
@@ -1656,7 +1652,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* prepare */
 	if (checkerr(
-		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
+		OCIStmtPrepare2(session->connp->svchp, &stmthp, session->envp->errhp,
 			(text *)desc_query, (ub4)strlen(desc_query), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
@@ -1667,14 +1663,14 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
+	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
 		FDW_UNABLE_TO_CREATE_EXECUTION, "");
 
 	/* bind */
 	bndhp = NULL;
 	ind1 = 0;
 	if (checkerr(
-		OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":sql_id",
+		OCIBindByName(stmthp, &bndhp, session->envp->errhp, (text *)":sql_id",
 			(sb4)7, (dvoid *)sql_id, (sb4)strlen(sql_id) + 1,
 			SQLT_STR, (dvoid *)&ind1,
 			NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
@@ -1688,7 +1684,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	bndhp = NULL;
 	ind2 = 0;
 	if (checkerr(
-		OCIBindByName(session->stmthp, &bndhp, session->envp->errhp, (text *)":child_number",
+		OCIBindByName(stmthp, &bndhp, session->envp->errhp, (text *)":child_number",
 			(sb4)13, (dvoid *)&child_nr, (sb4)sizeof(int),
 			SQLT_INT, (dvoid *)&ind2,
 			NULL, NULL, (ub4)0, NULL, OCI_DEFAULT),
@@ -1704,7 +1700,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	{
 		defnhp = NULL;
 		if (checkerr(
-			OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)(i + 1),
+			OCIDefineByPos(stmthp, &defnhp, session->envp->errhp, (ub4)(i + 1),
 				(dvoid *)res[i], res_size[i],
 				res_type[i], (dvoid *)&res_ind[i],
 				&res_len[i], NULL, OCI_DEFAULT),
@@ -1718,7 +1714,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 
 	/* execute */
 	if (checkerr(
-		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
@@ -1733,6 +1729,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 				"error describing query: OCIStmtExecute failed to execute remote plan query",
 				oraMessage);
 	}
+
+	return stmthp;
 }
 
 /*
