@@ -622,7 +622,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 			errno = 0;
 			lob_prefetch = strtol(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || lob_prefetch < 0 || lob_prefetch > 10240 )
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || lob_prefetch < 0 || lob_prefetch > 536870912 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
@@ -2414,7 +2414,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			lob_prefetch = strVal(def->arg);
 			errno = 0;
 			lob_prefetch_val = strtol(lob_prefetch, &endptr, 0);
-			if (lob_prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || lob_prefetch_val < 0 || lob_prefetch_val > 10240 )
+			if (lob_prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || lob_prefetch_val < 0 || lob_prefetch_val > 536870912 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
