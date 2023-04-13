@@ -609,11 +609,11 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 			errno = 0;
 			prefetch = strtol(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 1 || prefetch > 10240 )
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 1 || prefetch > 1000 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 0 and 10240.")));
+						errhint("Valid values in this context are integers between 0 and 1000.")));
 		}
 
 		/* check valid values for "lob_prefetch" */
@@ -2406,11 +2406,11 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			prefetch = strVal(def->arg);
 			errno = 0;
 			prefetch_val = strtol(prefetch, &endptr, 0);
-			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 1 || prefetch_val > 10240 )
+			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 1 || prefetch_val > 1000 )
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 0 and 10240.")));
+						errhint("Valid values in this context are integers between 0 and 1000.")));
 		}
 		else if (strcmp(def->defname, OPT_LOB_PREFETCH) == 0)
 		{
