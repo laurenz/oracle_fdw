@@ -273,7 +273,7 @@ Foreign table options
 
   Sets the number of rows that will be fetched with a single round-trip between
   PostgreSQL and Oracle during a foreign table scan.  The value must be between
-  1 and 10240.
+  1 and 1000.
 
   Higher values can speed up performance, but will use more memory on the
   PostgreSQL server.
