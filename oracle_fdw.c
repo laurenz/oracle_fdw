@@ -189,6 +189,7 @@ struct OracleFdwOption
 #define OPT_SAMPLE "sample_percent"
 #define OPT_PREFETCH "prefetch"
 #define OPT_LOB_PREFETCH "lob_prefetch"
+#define OPT_SET_TIMEZONE "set_timezone"
 
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
@@ -219,7 +220,8 @@ static struct OracleFdwOption valid_options[] = {
 	{OPT_PREFETCH, ForeignTableRelationId, false},
 	{OPT_LOB_PREFETCH, ForeignTableRelationId, false},
 	{OPT_KEY, AttributeRelationId, false},
-	{OPT_STRIP_ZEROS, AttributeRelationId, false}
+	{OPT_STRIP_ZEROS, AttributeRelationId, false},
+	{OPT_SET_TIMEZONE, ForeignServerRelationId, false}
 };
 
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
@@ -531,6 +533,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 				|| strcmp(def->defname, OPT_KEY) == 0
 				|| strcmp(def->defname, OPT_STRIP_ZEROS) == 0
 				|| strcmp(def->defname, OPT_NCHAR) == 0
+				|| strcmp(def->defname, OPT_SET_TIMEZONE) == 0
 			)
 		{
 			char *val = strVal(def->arg);
@@ -2244,7 +2247,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
-	char *nls_lang = NULL, *timezone = NULL, *user = NULL, *password = NULL,
+	char *nls_lang = NULL, *user = NULL, *password = NULL,
 		 *dbserver = NULL, *dblink = NULL, *max_long = NULL,
 		 *sample_percent = NULL, *prefetch = NULL, *lob_prefetch = NULL;
 	oraType type;
@@ -2254,7 +2257,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	oracleSession *session;
 	fold_t foldcase = CASE_SMART;
 	StringInfoData buf;
-	bool readonly = false, firstcol = true;
+	bool readonly = false, firstcol = true, set_timezone = false;
 	int collation = DEFAULT_COLLATION_OID;
 	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
 	bool have_nchar = false;
@@ -2426,21 +2429,35 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are integers between 0 and 536870912.")));
 		}
+		else if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
+		{
+			char *s = strVal(def->arg);
+			if (pg_strcasecmp(s, "on") == 0
+					|| pg_strcasecmp(s, "yes") == 0
+					|| pg_strcasecmp(s, "true") == 0)
+				set_timezone = true;
+			else if (pg_strcasecmp(s, "off") == 0
+					|| pg_strcasecmp(s, "no") == 0
+					|| pg_strcasecmp(s, "false") == 0)
+				set_timezone = false;
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						errmsg("invalid value for option \"%s\"", def->defname)));
+		}
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
 					errmsg("invalid option \"%s\"", def->defname),
-					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s, %s",
+					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s, %s, %s",
 						"case, collation", OPT_READONLY, OPT_DBLINK,
-						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH)));
+						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH, OPT_SET_TIMEZONE)));
 	}
 
 	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
-	/* environment variable for the Oracle time zone */
-	timezone = getTimezone();
 
 	/* connect to Oracle database */
 	session = oracleGetSession(
@@ -2449,7 +2466,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		user,
 		password,
 		nls_lang,
-		timezone,
+		NULL,  /* don't need time zone */
 		(int)have_nchar,
 		NULL,
 		1
@@ -2489,6 +2506,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				appendStringInfo(&buf, ", prefetch '%s'", prefetch);
 			if (lob_prefetch)
 				appendStringInfo(&buf, ", lob_prefetch '%s'", lob_prefetch);
+			if (set_timezone)
+				appendStringInfo(&buf, ", set_timezone 'true'");
 			appendStringInfo(&buf, ")");
 
 			result = lappend(result, pstrdup(buf.data));
@@ -2644,7 +2663,8 @@ struct OracleFdwState
 	ListCell *cell;
 	char *isolationlevel = NULL;
 	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL,
-		 *sample = NULL, *fetch = NULL, *lob_prefetch = NULL, *nchar = NULL;
+		 *sample = NULL, *fetch = NULL, *lob_prefetch = NULL, *nchar = NULL,
+		 *set_timezone = NULL;
 	long max_long;
 	int has_geometry = 0;
 
@@ -2682,6 +2702,8 @@ struct OracleFdwState
 			lob_prefetch = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
 			nchar = strVal(def->arg);
+		if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
+			set_timezone = strVal(def->arg);
 	}
 
 	/* set isolation_level (or use default) */
@@ -2726,6 +2748,15 @@ struct OracleFdwState
 	else
 		fdwState->have_nchar = false;
 
+	/* check if we should set the Oacle time zone */
+	if (set_timezone != NULL
+		&& (pg_strcasecmp(set_timezone, "on") == 0
+			|| pg_strcasecmp(set_timezone, "yes") == 0
+			|| pg_strcasecmp(set_timezone, "true") == 0))
+		fdwState->timezone = getTimezone();
+	else
+		fdwState->timezone = NULL;
+
 	/* check if options are ok */
 	if (table == NULL)
 		ereport(ERROR,
@@ -2734,8 +2765,6 @@ struct OracleFdwState
 
 	/* guess a good NLS_LANG environment setting */
 	fdwState->nls_lang = guessNlsLang(fdwState->nls_lang);
-	/* Oracle environment variable for the time zone */
-	fdwState->timezone = getTimezone();
 
 	/* connect to Oracle database */
 	fdwState->session = oracleGetSession(
@@ -5400,12 +5429,19 @@ oracleConnectServer(Name srvname)
 				|| pg_strcasecmp(nchar, "true") == 0))
 			have_nchar = true;
 		}
+		if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
+		{
+			char *settz = strVal(def->arg);
+
+			if ((pg_strcasecmp(settz, "on") == 0
+				|| pg_strcasecmp(settz, "yes") == 0
+				|| pg_strcasecmp(settz, "true") == 0))
+			timezone = getTimezone();
+		}
 	}
 
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
-	/* Oracle environment variable for the time zone */
-	timezone = getTimezone();
 
 	/* connect to Oracle database */
 	return oracleGetSession(
@@ -5891,7 +5927,10 @@ struct OracleFdwState
 	copy->user = pstrdup(orig->user);
 	copy->password = pstrdup(orig->password);
 	copy->nls_lang = pstrdup(orig->nls_lang);
-	copy->timezone = pstrdup(orig->timezone);
+	if (orig->timezone == NULL)
+		copy->timezone = NULL;
+	else
+		copy->timezone = pstrdup(orig->timezone);
 	copy->session = NULL;
 	copy->query = NULL;
 	copy->paramList = NULL;

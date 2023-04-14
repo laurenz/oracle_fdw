@@ -1465,7 +1465,8 @@ setOracleEnvironment(char *nls_lang, char *timezone)
 			"Environment variable NLS_NCHAR cannot be set.");
 	}
 
-	if (putenv(timezone) != 0)
+	/* empty string means "don't set" */
+	if (timezone[0] != '\0' && putenv(timezone) != 0)
 	{
 		free(nls_lang);
 		free(timezone);
@@ -1476,7 +1477,8 @@ setOracleEnvironment(char *nls_lang, char *timezone)
 
 	if (putenv(nls_lang) != 0)
 	{
-		putenv("ORA_SDTZ=");
+		if (timezone[0] != '\0')
+			putenv("ORA_SDTZ=");
 		free(nls_lang);
 		free(timezone);
 		oracleError_d(FDW_UNABLE_TO_ESTABLISH_CONNECTION,
@@ -3193,7 +3195,8 @@ removeEnvironment(OCIEnv *envhp)
 	/* free the memory */
 	(void)putenv("NLS_LANG=");
 	free(envp->nls_lang);
-	(void)putenv("ORA_SDTZ=");
+	if (envp->timezone[0] != '\0')
+		(void)putenv("ORA_SDTZ=");
 	free(envp->timezone);
 	free(envp);
 }

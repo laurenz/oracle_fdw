@@ -5,7 +5,7 @@
 SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
-CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true');
+CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true', set_timezone 'true');
 CREATE USER MAPPING FOR CURRENT_ROLE SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 -- drop the Oracle tables if they exist
 DO
@@ -918,7 +918,15 @@ SELECT * FROM typetest2 ORDER BY id;
   2 | Wed Dec 30 16:00:00 2020 PST | Thu Dec 31 00:00:00 2020 | 12-31-2020
 (2 rows)
 
-SET timezone = 'Asia/Kolkata';
+-- we need to re-establish the connection after changing "timezone"
+SELECT oracle_close_connections();
+ oracle_close_connections 
+--------------------------
+ 
+(1 row)
+
+BEGIN;
+SET LOCAL timezone = 'Asia/Kolkata';
 INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    3,
    '2020-12-31 00:00:00 UTC',
@@ -928,9 +936,16 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
 SELECT * FROM typetest2 ORDER BY id;
  id |             ts1              |           ts2            |    ts3     
 ----+------------------------------+--------------------------+------------
-  1 | Thu Aug 01 05:30:00 2002 IST | Wed Jul 31 17:00:00 2002 | 07-31-2002
-  2 | Thu Dec 31 05:30:00 2020 IST | Thu Dec 31 00:00:00 2020 | 12-31-2020
+  1 | Thu Aug 01 05:30:00 2002 IST | Thu Aug 01 05:30:00 2002 | 08-01-2002
+  2 | Thu Dec 31 05:30:00 2020 IST | Thu Dec 31 13:30:00 2020 | 12-31-2020
   3 | Thu Dec 31 05:30:00 2020 IST | Thu Dec 31 00:00:00 2020 | 12-31-2020
 (3 rows)
 
-RESET timezone;
+COMMIT;
+-- we need to re-establish the connection after changing "timezone"
+SELECT oracle_close_connections();
+ oracle_close_connections 
+--------------------------
+ 
+(1 row)
+

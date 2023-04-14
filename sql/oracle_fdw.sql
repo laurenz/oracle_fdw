@@ -8,7 +8,7 @@ SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
-CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true');
+CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true', set_timezone 'true');
 
 CREATE USER MAPPING FOR CURRENT_ROLE SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 
@@ -580,7 +580,10 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    '2020-12-31'
 );
 SELECT * FROM typetest2 ORDER BY id;
-SET timezone = 'Asia/Kolkata';
+-- we need to re-establish the connection after changing "timezone"
+SELECT oracle_close_connections();
+BEGIN;
+SET LOCAL timezone = 'Asia/Kolkata';
 INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    3,
    '2020-12-31 00:00:00 UTC',
@@ -588,4 +591,6 @@ INSERT INTO typetest2 (id, ts1, ts2, ts3) VALUES (
    '2020-12-31'
 );
 SELECT * FROM typetest2 ORDER BY id;
-RESET timezone;
+COMMIT;
+-- we need to re-establish the connection after changing "timezone"
+SELECT oracle_close_connections();
