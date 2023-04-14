@@ -13,11 +13,15 @@ Version 2.6.0
     Report and diagnosis by "jopoly".
   - Don't free() strings in the environment.
     This could lead to crashes and unpredictable behavior.
-  - Set the Oracle session time zone from the PostgreSQL session time zone.
-    That makes TIMESTAMP WITH LOCAL TIME ZONE translate correctly.
+  - Conversions from TIMESTAMP WITH LOCAL TIME ZONE to "timestamp without time
+    zone" were incorrect.  To fix, set the Oracle session time zone from the
+    PostgreSQL parameter "timezone".  Since not all time zones are accepted by
+    all Oracle servers, this must be explicitly enabled by setting the
+    "set_timezone" option on the foreign server.
+    Thanks to Sébastien Caunes for help with this.
   - Make auto_explain work with oracle_fdw.  This used to cause an error:
     oracleQueryPlan internal error: statement handle is not NULL
-    Report by "Jaisus" and Sebastien Caunes.  Sebastien provided the essential
+    Report by "Jaisus" and Sébastien Caunes.  Sébastien provided the essential
     clue that the problem is related to auto_explain.
 
   Enhancements:

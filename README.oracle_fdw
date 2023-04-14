@@ -196,6 +196,28 @@ Foreign server options
   (or 16383 if you have MAX_STRING_SIZE = EXTENDED).
   This error seems to be an Oracle bug.
 
+- **set_timezone** (boolean, optional, defaults to `off`)
+
+  Setting this option to `on` sets the Oracle session time zone to the current
+  value of the PostgreSQL parameter `timezone` when the connection to Oracle
+  is made.  This is only useful if you plan to use Oracle columns of type
+  TIMESTAMP WITH LOCAL TIME ZONE and want to translate them to `timestamp
+  without time zone` in PostgreSQL.
+
+  Note that if you change `timezone` after the Oracle connection has been
+  established, oracle_fdw won't change the Oracle session time zone.  You can
+  call `oracle_close_connections()` in that case, so that a new connection is
+  opened the next time you access a foreign table.
+
+  If Oracle does not recognize the time zone, connections will fail with an
+  error like
+
+      ORA-01882: timezone region not found
+
+  In that case, either use a different `timezone` or leave the option set `off`
+  and set the environment variable ORA_SDTZ to an appropriate value in the
+  environment of the PostgreSQL server.
+
 User mapping options
 --------------------
 
@@ -404,6 +426,9 @@ maximum length of the VARCHAR2 data type (4000 or 32767, depending on the
 NCLOB is currently not supported because Oracle cannot automatically convert
 it to the client encoding.
 
+If you want to convert TIMESTAMP WITH LOCAL TIME ZONE to `timestamp`, consider
+setting the `set_timezone` option on the foreign server.
+
 If you need conversions exceeding the above, define an appropriate view in
 Oracle or PostgreSQL.
 
@@ -597,6 +622,14 @@ following:
     See the [Options](#3-options) section for details.
 
   - **lob_prefetch**: sets the **lob_prefetch** option on all imported tables
+
+    See the [Options](#3-options) section for details.
+
+  - **nchar**: sets the **nchar** option on all imported tables
+
+    See the [Options](#3-options) section for details.
+
+  - **set_timezone**: sets the **set_timezone** option on all imported tables
 
     See the [Options](#3-options) section for details.
 
