@@ -2733,6 +2733,17 @@ struct OracleFdwState
 	else
 		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
 
+	/* the limit for "prefetch" used to be higher than 1000 */
+	if (fdwState->prefetch > 1000)
+	{
+		fdwState->prefetch = 1000;
+
+		ereport(WARNING,
+				(errcode(ERRCODE_WARNING),
+				errmsg("option \"%s\" for foreign table \"%s\" reduced to 1000",
+					   OPT_PREFETCH, pgtablename)));
+	}
+
 	/* convert "lob_prefetch" to number (or use default) */
 	if (lob_prefetch == NULL)
 		fdwState->lob_prefetch = DEFAULT_LOB_PREFETCH;
