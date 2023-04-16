@@ -271,9 +271,7 @@ oracleSession
 			/* clean up */
 			silent = 1;
 			while (srvp->connlist != NULL)
-			{
 				closeSession(envhp, srvhp, srvp->connlist->userhp, 0);
-			}
 			disconnectServer(envhp, srvhp);
 			silent = 0;
 
@@ -542,9 +540,7 @@ oracleSession
 
 				silent = 1;
 				while (srvp->connlist != NULL)
-				{
 					closeSession(envhp, srvhp, srvp->connlist->userhp, 0);
-				}
 				disconnectServer(envhp, srvhp);
 				silent = 0;
 				srvp = NULL;
@@ -611,9 +607,7 @@ oracleCloseConnections(void)
 		while (envlist->srvlist != NULL)
 		{
 			while (envlist->srvlist->connlist != NULL)
-			{
 				closeSession(envlist->envhp, envlist->srvlist->srvhp, envlist->srvlist->connlist->userhp, 0);
-			}
 			disconnectServer(envlist->envhp, envlist->srvlist->srvhp);
 		}
 		removeEnvironment(envlist->envhp);
@@ -818,7 +812,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 	}
 
 	if (! found)
-		oracleError(FDW_ERROR, "oracleRollbackSavepoint internal error: handle not found in cache");
+		oracleError(FDW_ERROR, "oracleEndSubtransaction internal error: handle not found in cache");
 
 	snprintf(message, 59, "oracle_fdw: rollback to savepoint s%d", nest_level);
 	oracleDebug2(message);
@@ -874,7 +868,7 @@ struct oraTable
 *oracleDescribe(oracleSession *session, char *dblink, char *schema, char *table, char *pgname, long max_long, int *has_geometry)
 {
 	struct oraTable *reply;
-	OCIStmt *stmthp;
+	OCIStmt *stmthp = NULL;
 	OCIParam *colp;
 	ub2 oraType, charsize, bin_size;
 	ub1 csfrm;
@@ -1329,6 +1323,10 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 void
 oracleSetSavepoint(oracleSession *session, int nest_level)
 {
+	/* make sure there is no active statement */
+	if (session->stmthp != NULL)
+		oracleError(FDW_ERROR, "oracleSetSavepoint internal error: statement handle is not NULL");
+
 	while (session->connp->xact_level < nest_level)
 	{
 		char query[40], message[50];
@@ -1375,9 +1373,7 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 				oraMessage);
 		}
 
-		/* free statement handle */
-		freeHandle(session->stmthp, session->connp, session->envp->errhp);
-		session->stmthp = NULL;
+		oracleCloseStatement(session);
 	}
 }
 
@@ -1759,9 +1755,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 
 	/* make sure there is no statement handle stored in "session" */
 	if (session->stmthp != NULL)
-	{
 		oracleError(FDW_ERROR, "oraclePrepareQuery internal error: statement handle is not NULL");
-	}
 
 	session->last_batch = 0;
 
@@ -2248,9 +2242,7 @@ oracleFetchNext(oracleSession *session, unsigned int prefetch)
 
 	/* make sure there is a statement handle stored in "session" */
 	if (session->stmthp == NULL)
-	{
 		oracleError(FDW_ERROR, "oracleFetchNext internal error: statement handle is NULL");
-	}
 
 	/* if there are still rows in the result set, return the next one */
 	if (session->current_row < session->fetched_rows)
@@ -2297,7 +2289,7 @@ oracleFetchNext(oracleSession *session, unsigned int prefetch)
 void
 oracleExecuteCall(oracleSession *session, char * const stmt)
 {
-	OCIStmt *stmthp;
+	OCIStmt *stmthp = NULL;
 
 	/* prepare the query */
 	if (checkerr(
@@ -2617,22 +2609,21 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 				oraMessage);
 		}
 
-		/* free the statement handle */
-		freeHandle(session->stmthp, session->connp, session->envp->errhp);
-		session->stmthp = NULL;
+		oracleCloseStatement(session);
 
 		/* return -1 if the remote schema does not exist */
 		if (count == 0)
 			return -1;
 	}
 
+	/* when called the first time, execute the query for the table columns */
 	if (session->stmthp == NULL)
 	{
 		if (dblink == NULL)
 			table_suffix = "";
 		else
 		{
-			/* we have to add the quoted datanbase link */
+			/* we have to add the quoted database link */
 			char *qdblink = copyOraText(dblink, strlen(dblink), 1);
 			table_suffix = oracleAlloc(strlen(qdblink) + 2);
 			table_suffix[0] = '@';
@@ -2827,10 +2818,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 
 	if (result == OCI_NO_DATA)
 	{
-		/* free the statement handle */
-		freeHandle(session->stmthp, session->connp, session->envp->errhp);
-		session->stmthp = NULL;
-
+		oracleCloseStatement(session);
 		return 0;
 	}
 	else
