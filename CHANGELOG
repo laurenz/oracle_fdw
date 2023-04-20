@@ -37,6 +37,7 @@ Version 2.6.0
     "lob_prefetch" is used to configure how much of the LOBs is fetched
     with the rows to reduce the number of round trips.  This enhancement
     was generously sponsored by Mipih (https://www.mipih.fr/).
+    Thanks for Philippe Florent for help and testing!
 
 Version 2.5.0, released 2022-10-28
 
@@ -70,7 +71,7 @@ Version 2.4.0, released 2021-09-24
     introduced in 2.3.0.
     We don't want that by default, since it causes a noticable performance
     hit and makes UPDATEs with long strings fail with ORA-01461.
-    Problem reports by "threenotrump", "CHunter" and Phil Florent.
+    Problem reports by "threenotrump", "CHunter" and Philippe Florent.
   - Push down LIMIT clauses if possible.
     These are pushed down as FETCH FIRST n ROWS ONLY from Oracle 12.2 on.
     Based on a patch by Gilles Darold, per request from Ilia Sazonov.
@@ -78,7 +79,7 @@ Version 2.4.0, released 2021-09-24
   Bugfixes:
   - Fix a performance regression introduced in 2.3.0 by the fix for NCHAR
     and NVARCHAR2 columns.
-    Reported by Phil Florent.
+    Reported by Philippe Florent.
   - Fix a crash with type coerced array parameters.
     This can make queries fail with a WHERE condition like
        WHERE varcharcol = ANY ($1);
