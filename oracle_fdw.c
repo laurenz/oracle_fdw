@@ -377,10 +377,8 @@ static char *getTimezone(void);
 static oracleSession *oracleConnectServer(Name srvname);
 static List *serializePlanData(struct OracleFdwState *fdwState);
 static Const *serializeString(const char *s);
-static Const *serializeLong(long i);
 static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
-static long deserializeLong(Const *constant);
 static bool optionIsTrue(const char *value);
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
@@ -1937,9 +1935,9 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	for (i=0; i<fdw_state->oraTable->ncols; ++i)
 	{
 		fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size);
-		fdw_state->oraTable->cols[i]->val_len = (unsigned short *)palloc(sizeof(unsigned short));
+		fdw_state->oraTable->cols[i]->val_len = (uint16 *)palloc(sizeof(uint16));
 		fdw_state->oraTable->cols[i]->val_len4 = 0;
-		fdw_state->oraTable->cols[i]->val_null = (short *)palloc(sizeof(short));
+		fdw_state->oraTable->cols[i]->val_null = (int16 *)palloc(sizeof(int16));
 	}
 	fdw_state->rowcount = 0;
 
@@ -3644,9 +3642,9 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 
 			/* allocate memory for return value */
 			fdw_state->oraTable->cols[i]->val = (char *)palloc(fdw_state->oraTable->cols[i]->val_size * fdw_state->prefetch);
-			fdw_state->oraTable->cols[i]->val_len = (unsigned short *)palloc(sizeof(unsigned short) * fdw_state->prefetch);
+			fdw_state->oraTable->cols[i]->val_len = (uint16 *)palloc(sizeof(uint16) * fdw_state->prefetch);
 			fdw_state->oraTable->cols[i]->val_len4 = 0;
-			fdw_state->oraTable->cols[i]->val_null = (short *)palloc(sizeof(short) * fdw_state->prefetch);
+			fdw_state->oraTable->cols[i]->val_null = (int16 *)palloc(sizeof(int16) * fdw_state->prefetch);
 
 			if (first_column)
 				first_column = false;
@@ -5526,7 +5524,7 @@ List
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->used));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->strip_zeros));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pkey));
-		result = lappend(result, serializeLong(fdwState->oraTable->cols[i]->val_size));
+		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->val_size));
 		/* don't serialize val, val_len, val_len4, val_null and varno */
 	}
 
@@ -5564,26 +5562,6 @@ Const
 		return makeNullConst(TEXTOID, -1, InvalidOid);
 	else
 		return makeConst(TEXTOID, -1, InvalidOid, -1, PointerGetDatum(cstring_to_text(s)), false, false);
-}
-
-/*
- * serializeLong
- * 		Create a Const that contains the long integer.
- */
-
-Const
-*serializeLong(long i)
-{
-	if (sizeof(long) <= 4)
-		return makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum((int32)i), false, true);
-	else
-		return makeConst(INT4OID, -1, InvalidOid, 8, Int64GetDatum((int64)i), false,
-#ifdef USE_FLOAT8_BYVAL
-					true
-#else
-					false
-#endif  /* USE_FLOAT8_BYVAL */
-				);
 }
 
 /*
@@ -5689,16 +5667,16 @@ struct OracleFdwState
 		cell = list_next(list, cell);
 		state->oraTable->cols[i]->pkey = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
-		state->oraTable->cols[i]->val_size = deserializeLong(lfirst(cell));
+		state->oraTable->cols[i]->val_size = DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
 		/*
 		 * Allocate memory for the result value.
 		 * Multiply the space to allocate with the prefetch count.
 		 */
 		state->oraTable->cols[i]->val = (char *)palloc(state->oraTable->cols[i]->val_size * state->prefetch);
-		state->oraTable->cols[i]->val_len = (unsigned short *)palloc(sizeof(unsigned short) * state->prefetch);
+		state->oraTable->cols[i]->val_len = (uint16 *)palloc(sizeof(uint16) * state->prefetch);
 		state->oraTable->cols[i]->val_len4 = 0;
-		state->oraTable->cols[i]->val_null = (short *)palloc(sizeof(short) * state->prefetch);
+		state->oraTable->cols[i]->val_null = (int16 *)palloc(sizeof(int16) * state->prefetch);
 	}
 
 	/* length of parameter list */
@@ -5743,20 +5721,6 @@ char
 		return NULL;
 	else
 		return text_to_cstring(DatumGetTextP(constant->constvalue));
-}
-
-/*
- * deserializeLong
- * 		Extracts a long integer from a Const.
- */
-
-long
-deserializeLong(Const *constant)
-{
-	if (sizeof(long) <= 4)
-		return (long)DatumGetInt32(constant->constvalue);
-	else
-		return (long)DatumGetInt64(constant->constvalue);
 }
 
 /*

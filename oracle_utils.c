@@ -2202,7 +2202,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 			 * Should not lose any data in all possible cases
 			 * since LONG and LONG RAW don't work with RETURNING anyway.
 			 */
-			oraTable->cols[param->colnum]->val_len[0] = (unsigned short)oraTable->cols[param->colnum]->val_len4;
+			oraTable->cols[param->colnum]->val_len[0] = (ub2)oraTable->cols[param->colnum]->val_len4;
 
 			/* for geometry columns, we have to get the indicator */
 			if (oraTable->cols[param->colnum]->oratype == ORA_TYPE_GEOMETRY)
@@ -3336,7 +3336,7 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 		*bufpp = column->val;
 		*indp = column->val_null;
 	}
-	column->val_len4 = (unsigned int)column->val_size;
+	column->val_len4 = (ub4)column->val_size;
 	*alenp = &(column->val_len4);
 	*rcodep = NULL;
 

@@ -12,6 +12,7 @@
 /* this one is safe to include and gives us Oid */
 #include "postgres_ext.h"
 
+#include <stdint.h>
 #include <sys/types.h>
 
 /* oracle_fdw version */
@@ -114,22 +115,22 @@ ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE
 
 struct oraColumn
 {
-	char *name;              /* name in Oracle */
-	oraType oratype;         /* data type in Oracle */
-	int scale;               /* "scale" type modifier, used for NUMBERs */
-	char *pgname;            /* PostgreSQL column name */
-	int pgattnum;            /* PostgreSQL attribute number */
-	Oid pgtype;              /* PostgreSQL data type */
-	int pgtypmod;            /* PostgreSQL type modifier */
-	int used;                /* is the column used in the query? */
-	int strip_zeros;         /* should ASCII zero be removed from Oracle strings? */
-	int pkey;                /* nonzero for primary keys, later set to the resjunk attribute number */
-	char *val;               /* buffer for Oracle to return results in (LOB locators for LOBs) */
-	long val_size;           /* allocated size of one element in val */
-	unsigned short *val_len; /* array of actual lengths of val */
-	unsigned int val_len4;   /* actual length of val - for bind callbacks */
-	short *val_null;         /* indicators for NULL values */
-	int varno;               /* range table index of this column's relation */
+	char *name;         /* name in Oracle */
+	oraType oratype;    /* data type in Oracle */
+	int scale;          /* "scale" type modifier, used for NUMBERs */
+	char *pgname;       /* PostgreSQL column name */
+	int pgattnum;       /* PostgreSQL attribute number */
+	Oid pgtype;         /* PostgreSQL data type */
+	int pgtypmod;       /* PostgreSQL type modifier */
+	int used;           /* is the column used in the query? */
+	int strip_zeros;    /* should ASCII zero be removed from Oracle strings? */
+	int pkey;           /* nonzero for primary keys, later set to the resjunk attribute number */
+	char *val;          /* buffer for Oracle to return results in (LOB locators for LOBs) */
+	int32_t val_size;   /* allocated size of one element in val */
+	uint16_t *val_len;  /* array of actual lengths of val */
+	uint32_t val_len4;  /* actual length of val - for bind callbacks */
+	int16_t *val_null;  /* indicators for NULL values */
+	int varno;          /* range table index of this column's relation */
 };
 
 struct oraTable
