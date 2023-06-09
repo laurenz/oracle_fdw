@@ -23,6 +23,9 @@ Version 2.6.0
     oracleQueryPlan internal error: statement handle is not NULL
     Report by "Jaisus" and Sébastien Caunes.  Sébastien provided the essential
     clue that the problem is related to auto_explain.
+  - Fix "OCI-22061: invalid format text" errors when inserting some numbers
+    with scientific notation into a foreign table.
+    Report and analysis by "liubeck".
 
   Enhancements:
   - Skip Oracle savepoint management if the foreign server option

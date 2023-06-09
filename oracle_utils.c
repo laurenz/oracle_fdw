@@ -1978,21 +1978,24 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
 					 * Construct number format.
 					 */
 					value_len = strlen(param->value);
-					num_format = oracleAlloc(value_len + 1);
+					num_format = oracleAlloc(value_len + 3);
 					/* fill everything with '9' */
 					memset(num_format, '9', value_len);
 					num_format[value_len] = '\0';
 					/* write 'D' in the decimal point position */
 					if ((pos = strchr(param->value, '.')) != NULL)
 						num_format[pos - param->value] = 'D';
-					/* replace the scientific notation part with 'E' */
+					/* replace the scientific notation part with 'EEEE' */
 					if ((pos = strchr(param->value, 'e')) != NULL)
-						memset(num_format + (pos - param->value), 'E', value_len - (pos - param->value));
+					{
+						memset(num_format + (pos - param->value), 'E', 4);
+						num_format[(pos - param->value) + 4] = '\0';
+					}
 
 					/* convert parameter string to NUMBER */
 					if (checkerr(
 						OCINumberFromText(session->envp->errhp, (const OraText *)param->value,
-							(ub4)value_len, (const OraText *)num_format, (ub4)value_len,
+							(ub4)value_len, (const OraText *)num_format, (ub4)strlen(num_format),
 							(const OraText *)NULL, (ub4)0, number),
 						(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 					{
