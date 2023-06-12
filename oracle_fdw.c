@@ -3810,7 +3810,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	Expr *rightexpr;
 	ArrayExpr *array;
 	ArrayCoerceExpr *arraycoerce;
-#if (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000)
+#if PG_VERSION_NUM >= 100000
 	SQLValueFunction *sqlvalfunc;
 #endif  /* PG_VERSION_NUM */
 	regproc typoutput;
@@ -4720,7 +4720,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 
 			break;
-#if (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000)
+#if PG_VERSION_NUM >= 100000
 		case T_SQLValueFunction:
 			sqlvalfunc = (SQLValueFunction *)expr;
 
@@ -4743,7 +4743,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 
 			break;
-#endif  /* (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000) */
+#endif  /* PG_VERSION_NUM >= 100000 */
 		default:
 			/* we cannot translate this to Oracle */
 			return NULL;
@@ -5096,7 +5096,7 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 		case T_PlaceHolderVar:
 			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable, foreignrelid);
 			break;
-#if (PG_VERSION_NUM >= 100000) && (PG_VERSION_NUM < 160000)
+#if PG_VERSION_NUM >= 100000
 		case T_SQLValueFunction:
 			break;  /* contains no column references */
 #endif  /* PG_VERSION_NUM */
