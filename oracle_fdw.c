@@ -5986,8 +5986,6 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 	{
 		case ORA_TYPE_NUMBER:
 		case ORA_TYPE_FLOAT:
-		case ORA_TYPE_BINARYFLOAT:
-		case ORA_TYPE_BINARYDOUBLE:
 			param->bindType = BIND_NUMBER;
 			break;
 		case ORA_TYPE_LONG:
