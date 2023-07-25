@@ -1744,9 +1744,6 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 {
 	int i, j, col_pos, is_select;
 	OCIDefine *defnhp;
-	static char dummy[4];
-	static sb4 dummy_size = 4;
-	static sb2 dummy_null;
 	const ub1 nchar = SQLCS_NCHAR;
 	const boolean is_true = TRUE;
 
@@ -1917,10 +1914,14 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 		 * No columns selected (i.e., SELECT '1' FROM).
 		 * Define dummy result columnn.
 		 */
+		sb4 dummy_size = 4;
+		char *dummy = oracleAlloc(dummy_size * prefetch);
+		sb2 *dummy_null = oracleAlloc(sizeof(sb2) * prefetch);
+
 		defnhp = NULL;
 		if (checkerr(
 			OCIDefineByPos(session->stmthp, &defnhp, session->envp->errhp, (ub4)1,
-				(dvoid *)dummy, dummy_size, SQLT_STR, (dvoid *)&dummy_null,
+				(dvoid *)dummy, dummy_size, SQLT_STR, (dvoid *)dummy_null,
 				NULL, NULL, OCI_DEFAULT),
 			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 		{
