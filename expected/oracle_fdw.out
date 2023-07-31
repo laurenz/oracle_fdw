@@ -968,6 +968,7 @@ SELECT oracle_close_connections();
 --------------------------
  
 (1 row)
+
 RESET timezone;
 /*
  * Test generated columns
