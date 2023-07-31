@@ -94,7 +94,9 @@
 #include "optimizer/optimizer.h"
 #include "access/heapam.h"
 #endif
-#if PG_VERSION_NUM >= 150002
+#if (PG_VERSION_NUM >= 130010 && PG_VERSION_NUM < 140000) || \
+	(PG_VERSION_NUM >= 140007 && PG_VERSION_NUM < 150000) || \
+	(PG_VERSION_NUM >= 150002)
 #include "optimizer/inherit.h"
 #endif
 
@@ -1574,7 +1576,9 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	}
 #else
 	check_user = rte->checkAsUser;
-#if PG_VERSION_NUM >= 150002
+#if (PG_VERSION_NUM >= 130010 && PG_VERSION_NUM < 140000) || \
+	(PG_VERSION_NUM >= 140007 && PG_VERSION_NUM < 150000) || \
+	(PG_VERSION_NUM >= 150002 && PG_VERSION_NUM < 160000)
 	if (root->parse->commandType != CMD_UPDATE)
 	{
 		updated_cols = bms_copy(rte->updatedCols);
@@ -1585,10 +1589,14 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	updated_cols = rte->updatedCols;
 #else
 	updated_cols = bms_copy(rte->modifiedCols);
-#endif  /* PG_VERSION_NUM >= 150002 */
+#endif  /* (PG_VERSION_NUM >= 130010 && PG_VERSION_NUM < 140000) || \
+		   (PG_VERSION_NUM >= 140007 && PG_VERSION_NUM < 150000) || \
+		   (PG_VERSION_NUM >= 150002 && PG_VERSION_NUM < 160000) */
 #endif  /* PG_VERSION_NUM >= 160000 */
 
-#if PG_VERSION_NUM >= 150002
+#if (PG_VERSION_NUM >= 130010 && PG_VERSION_NUM < 140000) || \
+	(PG_VERSION_NUM >= 140007 && PG_VERSION_NUM < 150000) || \
+	(PG_VERSION_NUM >= 150002)
 	else
 	{
 		RelOptInfo *relOtp = find_base_rel(root, resultRelation);
