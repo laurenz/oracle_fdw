@@ -26,6 +26,8 @@ Version 2.6.0
   - Fix "OCI-22061: invalid format text" errors when inserting some numbers
     with scientific notation into a foreign table.
     Report and analysis by "liubeck".
+  - Support whole-row references in RETURNING clauses.
+    Report and patch by Nguyen Ngoc Son.
 
   Enhancements:
   - Skip Oracle savepoint management if the foreign server option

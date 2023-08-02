@@ -1697,7 +1697,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 		if (returningList != NIL)
 		{
-			bool	have_wholerow = false;
+			bool have_wholerow;
 
 			/* get all the attributes mentioned there */
 			pull_varattnos((Node *) returningList, resultRelation, &attrs_used);

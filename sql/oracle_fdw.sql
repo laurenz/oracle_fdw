@@ -37,14 +37,6 @@ EXCEPTION
       NULL;
 END;$$;
 
-DO
-$$BEGIN
-   SELECT oracle_execute('oracle', 'DROP TABLE scott.returningtest PURGE');
-EXCEPTION
-   WHEN OTHERS THEN
-      NULL;
-END;$$;
-
 SELECT oracle_execute(
           'oracle',
           E'CREATE TABLE scott.typetest1 (\n'
@@ -86,16 +78,6 @@ SELECT oracle_execute(
           E'CREATE TABLE scott.gis (\n'
           '   id  NUMBER(5) PRIMARY KEY,\n'
           '   g   MDSYS.SDO_GEOMETRY\n'
-          ') SEGMENT CREATION IMMEDIATE'
-       );
-
-SELECT oracle_execute(
-          'oracle',
-          E'CREATE TABLE scott.returningtest (\n'
-          '   id  NUMBER(5) PRIMARY KEY,\n'
-          '   c   CHAR(10 CHAR),\n'
-          '   nc  NCHAR(10),\n'
-          '   vc  VARCHAR2(10 CHAR)\n'
           ') SEGMENT CREATION IMMEDIATE'
        );
 
@@ -191,13 +173,6 @@ CREATE FOREIGN TABLE typetest2 (
    ts2 timestamp without time zone,
    ts3 date
 ) SERVER oracle OPTIONS (table 'TYPETEST2');
-
-CREATE FOREIGN TABLE returningtest (
-   id  integer OPTIONS (key 'yes') NOT NULL,
-   c   character(10),
-   nc  character(10),
-   vc  character varying(10)
-) SERVER oracle OPTIONS (table 'RETURNINGTEST');
 
 /*
  * INSERT some rows into "typetest1".
@@ -323,19 +298,10 @@ DELETE FROM typetest1 WHERE FALSE;
 UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
 -- test deparsing of ScalarArrayOpExpr where the RHS has different element type than the LHS
 SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
--- test returning a whole row
-INSERT INTO returningtest (id, c, nc, vc) VALUES (
-   1,
-   'fixed char',
-   'nat''l char',
-   'varlena'
-) RETURNING id, c, nc, vc;
-INSERT INTO returningtest (id) VALUES (
-   2
-) RETURNING returningtest;
-UPDATE returningtest SET c = 'updated' WHERE id = 1 RETURNING returningtest;
-DELETE FROM returningtest WHERE id = 1 RETURNING returningtest;
-
+-- test whole-row references with RETURNING (bug #568)
+INSERT INTO shorty (id, c) VALUES (5, 'return me') RETURNING shorty;
+UPDATE shorty SET c = 'changed' WHERE id = 5 RETURNING shorty;
+DELETE FROM shorty WHERE id = 5 RETURNING shorty;
 
 /*
  * Test "strip_zeros" column option.
