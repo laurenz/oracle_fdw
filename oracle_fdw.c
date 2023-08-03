@@ -56,6 +56,7 @@
 #endif  /* PG_VERSION_NUM */
 #include "optimizer/pathnode.h"
 #if PG_VERSION_NUM >= 130000
+#include "optimizer/inherit.h"
 #include "optimizer/paths.h"
 #endif  /* PG_VERSION_NUM */
 #include "optimizer/planmain.h"
@@ -1553,27 +1554,41 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	bool has_trigger = false, firstcol;
 	char paramName[10];
 	TupleDesc tupdesc;
-	Bitmapset *updated_cols;
+	Bitmapset *updated_cols = NULL;
 	Oid check_user;
 
 	/*
-	 * Get the updated columns and the user for permission checks.
-	 * We put that here at the beginning, since the way to do that changed
-	 * considerably over the different PostgreSQL versions.
+	 * Get the user for permission checks.
 	 */
 #if PG_VERSION_NUM >= 160000
 	RTEPermissionInfo *perminfo = getRTEPermissionInfo(root->parse->rteperminfos, rte);
 
 	check_user = perminfo->checkAsUser;
-	updated_cols = perminfo->updatedCols;
 #else
 	check_user = rte->checkAsUser;
-#if PG_VERSION_NUM >= 90500
-	updated_cols = rte->updatedCols;
-#else
-	updated_cols = bms_copy(rte->modifiedCols);
-#endif  /* PG_VERSION_NUM >= 90500 */
 #endif  /* PG_VERSION_NUM >= 160000 */
+
+	/*
+	 * Get all updated columns.
+	 * For PostgreSQL v12 and better, we have to consider generated columns.
+	 * This changed quite a bit over the versions.
+	 * Note also that this changed in 13.10, 14.7 and 15.2, so oracle_fdw
+	 * won't build with older minor versions.
+	 */
+	if (operation == CMD_UPDATE)
+	{
+#if PG_VERSION_NUM >= 130000
+		RelOptInfo *roi = find_base_rel(root, resultRelation);
+
+		updated_cols = get_rel_all_updated_cols(root, roi);
+#elif PG_VERSION_NUM >= 120000
+		updated_cols = bms_union(rte->updatedCols, rte->extraUpdatedCols);
+#elif PG_VERSION_NUM >= 90500
+		updated_cols = rte->updatedCols;
+#else
+		updated_cols = bms_copy(rte->modifiedCols);
+#endif  /* PG_VERSION_NUM */
+	}
 
 #if PG_VERSION_NUM >= 90500
 	/* we don't support INSERT ... ON CONFLICT */
