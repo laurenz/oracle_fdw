@@ -1703,7 +1703,7 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 			pull_varattnos((Node *) returningList, resultRelation, &attrs_used);
 
 			/* If there's a whole-row reference, we'll need all the columns. */
-			have_wholerow = bms_is_member(0 - FirstLowInvalidHeapAttributeNumber,
+			have_wholerow = bms_is_member(InvalidAttrNumber - FirstLowInvalidHeapAttributeNumber,
 										  attrs_used);
 
 			/* mark the corresponding columns as used */
