@@ -302,6 +302,17 @@ SELECT id FROM typetest1 WHERE vc = ANY ('{zzzzz}'::name[]);
 INSERT INTO shorty (id, c) VALUES (5, 'return me') RETURNING shorty;
 UPDATE shorty SET c = 'changed' WHERE id = 5 RETURNING shorty;
 DELETE FROM shorty WHERE id = 5 RETURNING shorty;
+-- test generated columns (bug #567)
+CREATE FOREIGN TABLE gen (
+   id integer OPTIONS (key 'on') NOT NULL,
+   c character(10) GENERATED ALWAYS AS ('nr ' || id::text) STORED
+) SERVER oracle OPTIONS (schema 'SCOTT', table 'TYPETEST1');
+INSERT INTO gen (id) VALUES (5);
+SELECT id, c FROM gen WHERE id = 5;
+UPDATE gen SET id = 6 WHERE id = 5;
+SELECT id, c FROM gen WHERE id = 6;
+DELETE FROM gen WHERE id = 6;
+DROP FOREIGN TABLE gen;
 
 /*
  * Test "strip_zeros" column option.
