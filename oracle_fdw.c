@@ -915,6 +915,9 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 #if PG_VERSION_NUM >= 90500
 					NULL,  /* no extra plan */
 #endif  /* PG_VERSION_NUM */
+#if PG_VERSION_NUM >= 170000
+					NIL,   /* no fdw_restrictinfo */
+#endif  /* PG_VERSION_NUM */
 					NIL
 			)
 	);
@@ -1016,7 +1019,7 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 	joinpath = create_foreignscan_path(
 #else
 	joinpath = create_foreign_join_path(
-#endif
+#endif  /* PG_VERSION_NUM */
 									   root,
 									   joinrel,
 									   NULL,	/* default pathtarget */
@@ -1026,6 +1029,9 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 									   NIL, 	/* no pathkeys */
 									   joinrel->lateral_relids,
 									   NULL,	/* no epq_path */
+#if PG_VERSION_NUM >= 170000
+									   NIL,		/* no fdw_restrictinfo */
+#endif  /* PG_VERSION_NUM */
 									   NIL);	/* no fdw_private */
 
 	/* add generated path to joinrel */
