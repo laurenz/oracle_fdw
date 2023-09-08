@@ -1,4 +1,5 @@
-Version 2.6.0
+Version 2.6.0, released 2023-09-08
+
   Note: This release will fail to build with minor releases below 13.10,
         14.7 and 15.2.  Other major versions are not affected.  oracle_fdw
         binaries built with later minor releases won't load with older
