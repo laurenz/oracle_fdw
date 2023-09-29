@@ -836,7 +836,7 @@ plans stored in the library cache.  For that, an Oracle query is *explicitly
 described*, which forces Oracle to parse the query.  The hard part is to find
 the SQL_ID and CHILD_NUMBER of the statement in V$SQL because the SQL_TEXT
 column contains only the first 1000 bytes of the query.
-Therefore, oracle_fdw adds a comment to the query that contains an MD5 hash
+Therefore, oracle_fdw adds a comment to the query that contains a hash
 of the query text.  This is used to search in V$SQL.
 The actual execution plan or cost information is retrieved from V$SQL_PLAN.
 
