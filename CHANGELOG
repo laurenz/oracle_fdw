@@ -1,3 +1,10 @@
+Version 2.7.0
+
+  Bugfixes:
+  - Don't push down LIMIT without an ORDER BY clause.
+    This can lead to wrong results in some cases.
+    Report by "fbattke".
+
 Version 2.6.0, released 2023-09-08
 
   Note: This release will fail to build with minor releases below 13.10,

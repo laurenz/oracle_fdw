@@ -6918,9 +6918,9 @@ getIsolationLevel(const char *isolation_level)
 /*
  * pushdownOrderBy
  * 		Attempt to push down the ORDER BY clause.
- * 		If the complete clause can be pushed down, save "order_clause"
- * 		and "usable_pathkeys" in "fdwState" and return "true"
- * 		(this will also return "true" if there is no ORDER BY clause).
+ * 		If there is an ORDER BY clause and the complete clause can be pushed
+ * 		down, save "order_clause" and "usable_pathkeys" in "fdwState" and
+ * 		return "true".
  */
 bool
 pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *fdwState)
@@ -7030,7 +7030,7 @@ pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *f
 		fdwState->usable_pathkeys = usable_pathkeys;
 	}
 
-	return (root->query_pathkeys == NIL || usable_pathkeys != NIL);
+	return (root->query_pathkeys != NIL && usable_pathkeys != NIL);
 }
 
 /*
