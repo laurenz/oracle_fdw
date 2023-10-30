@@ -343,15 +343,15 @@ EXPLAIN (COSTS off) SELECT typetest1 FROM typetest1;
  * Test parameters.
  */
 
-PREPARE stmt(integer, date, timestamp) AS SELECT d FROM typetest1 WHERE id = $1 AND d < $2 AND ts < $3;
+PREPARE stmt(integer, date, timestamp, uuid) AS SELECT d FROM typetest1 WHERE id = $1 AND d < $2 AND ts < $3 AND u = $4;
 -- six executions to switch to generic plan
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
 DEALLOCATE stmt;
 -- test NULL parameters
 SELECT id FROM typetest1 WHERE vc = (SELECT NULL::text);

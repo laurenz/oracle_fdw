@@ -472,46 +472,46 @@ EXPLAIN (COSTS off) SELECT typetest1 FROM typetest1;
 /*
  * Test parameters.
  */
-PREPARE stmt(integer, date, timestamp) AS SELECT d FROM typetest1 WHERE id = $1 AND d < $2 AND ts < $3;
+PREPARE stmt(integer, date, timestamp, uuid) AS SELECT d FROM typetest1 WHERE id = $1 AND d < $2 AND ts < $3 AND u = $4;
 -- six executions to switch to generic plan
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
      d      
 ------------
  10-21-1968
 (1 row)
 
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
      d      
 ------------
  10-21-1968
 (1 row)
 
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
      d      
 ------------
  10-21-1968
 (1 row)
 
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
      d      
 ------------
  10-21-1968
 (1 row)
 
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
      d      
 ------------
  10-21-1968
 (1 row)
 
-EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
-                                                                                       QUERY PLAN                                                                                        
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
+                                                                                                     QUERY PLAN                                                                                                      
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*e7109a5ab160454*/ r1."ID", r1."D", r1."TS" FROM "TYPETEST1" r1 WHERE (r1."D" < CAST (:p1 AS DATE)) AND (r1."TS" < CAST (:p2 AS TIMESTAMP)) AND (r1."ID" = :p3)
+   Oracle query: SELECT /*948d44ca5107f0d1*/ r1."ID", r1."U", r1."D", r1."TS" FROM "TYPETEST1" r1 WHERE (r1."D" < CAST (:p1 AS DATE)) AND (r1."TS" < CAST (:p2 AS TIMESTAMP)) AND (r1."ID" = :p3) AND (r1."U" = :p4)
 (2 rows)
 
-EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
      d      
 ------------
  10-21-1968

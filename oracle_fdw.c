@@ -1300,7 +1300,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		if (paramDesc->type == TEXTOID || paramDesc->type == VARCHAROID
 				|| paramDesc->type == BPCHAROID || paramDesc->type == CHAROID
 				|| paramDesc->type == DATEOID || paramDesc->type == TIMESTAMPOID
-				|| paramDesc->type == TIMESTAMPTZOID)
+				|| paramDesc->type == TIMESTAMPTZOID || paramDesc->type == UUIDOID)
 			paramDesc->bindType = BIND_STRING;
 		else
 			paramDesc->bindType = BIND_NUMBER;
@@ -6571,6 +6571,10 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 
 				/* convert the parameter value into a string */
 				param->value = DatumGetCString(OidFunctionCall1(typoutput, datum));
+
+				/* strip hyphens from UUID values */
+				if (param->type == UUIDOID)
+					convertUUID(param->value);
 			}
 		}
 
