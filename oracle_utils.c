@@ -42,7 +42,7 @@ static int readonly = 0;
 
 /*
  * Linked list for temporary Oracle handles and descriptors.
- * Stores statement and describe handles as well as timetamp and LOB descriptors.
+ * Stores statement handles as well as timestamp and LOB descriptors.
  * Other handles are stored in the handle cache below.
  */
 
