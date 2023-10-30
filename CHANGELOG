@@ -4,6 +4,11 @@ Version 2.7.0
   - Don't push down LIMIT without an ORDER BY clause.
     This can lead to wrong results in some cases.
     Report by "fbattke".
+  - Fix support for query parameters of type "uuid".
+    This led to errors like
+       error executing query: OCINumberFromText failed to convert parameter
+       OCI-22062: invalid input string [8feee298-7ce5-4761-9487-34cab831fead]
+    Report by "victorras".
 
 Version 2.6.0, released 2023-09-08
 
