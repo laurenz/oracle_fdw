@@ -30,7 +30,7 @@ struct connEntry
 	OCISvcCtx *svchp;
 	OCISession *userhp;
 	OCIType *geomtype;
-	struct handleEntry *handlelist;
+	struct stmtHandleEntry *stmtlist;
 	int xact_level;  /* 0 = none, 1 = main, else subtransaction */
 	struct connEntry *next;
 };

@@ -41,23 +41,21 @@ static int oci_initialized = 0;
 static int readonly = 0;
 
 /*
- * Linked list for temporary Oracle handles and descriptors.
- * Stores statement handles as well as timestamp and LOB descriptors.
- * Other handles are stored in the handle cache below.
+ * Linked list of open Oracle statement handles.
+ * Each of these has a linked list of LOB locators.
  */
 
-typedef enum handleKind
+struct lobLocatorEntry
 {
-	HK_DESCRIPTOR,
-	HK_STATEMENT
-} handleKind;
+	OCILobLocator *lobloc;
+	struct lobLocatorEntry *next;
+};
 
-struct handleEntry
+struct stmtHandleEntry
 {
-	dvoid *handlep;
-	ub4 type;
-	handleKind kind;
-	struct handleEntry *next;
+	OCIStmt *stmthp;
+	struct lobLocatorEntry *loclist;
+	struct stmtHandleEntry *next;
 };
 
 /*
@@ -82,8 +80,9 @@ static char *copyOraText(const char *string, int size, int quote);
 static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect);
 static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
-static void allocHandle(dvoid **handlep, ub4 type, handleKind kind, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
-static void freeHandle(dvoid *handlep, struct connEntry *connp, OCIError *errhp);
+static void registerStmt(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp);
+static OCILobLocator *allocLobLocator(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
+static void freeStmt(OCIStmt *stmthp, struct connEntry *connp, OCIError *errhp);
 static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
 static sb4 bind_in_callback(void *ictxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 *alenp, ub1 *piecep, void **indpp);
@@ -512,7 +511,7 @@ oracleSession
 		connp->svchp = svchp;
 		connp->userhp = userhp;
 		connp->geomtype = NULL;
-		connp->handlelist = NULL;
+		connp->stmtlist = NULL;
 		connp->xact_level = 0;
 		connp->next = srvp->connlist;
 		srvp->connlist = connp;
@@ -581,7 +580,7 @@ oracleSession
 
 /*
  * oracleCloseStatement
- * 		Close any open statement associated with the session.
+ * 		Close the current statement associated with the session.
  */
 void
 oracleCloseStatement(oracleSession *session)
@@ -589,8 +588,7 @@ oracleCloseStatement(oracleSession *session)
 	/* free statement handle, if it exists */
 	if (session->stmthp != NULL)
 	{
-		/* free the statement handle */
-		freeHandle(session->stmthp, session->connp, session->envp->errhp);
+		freeStmt(session->stmthp, session->connp, session->envp->errhp);
 		session->stmthp = NULL;
 	}
 }
@@ -699,9 +697,9 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 		oracleError(FDW_ERROR, "oracleEndTransaction internal error: handle not found in cache");
 	}
 
-	/* free handles */
-	while (connp->handlelist != NULL)
-		freeHandle(connp->handlelist->handlep, connp, envp->errhp);
+	/* close all statements and free their LOB descriptors */
+	while (connp->stmtlist != NULL)
+		freeStmt(connp->stmtlist->stmthp, connp, envp->errhp);
 
 	/* free objects in cache (might be left behind in case of errors) */
 	(void)OCICacheFree(envp->envhp, envp->errhp, NULL);
@@ -831,8 +829,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 	}
 
 	/* register the statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, envp->envhp, connp,
-		FDW_OUT_OF_MEMORY, "");
+	registerStmt(stmthp, envp->envhp, connp);
 
 	/* rollback to savepoint */
 	if (checkerr(
@@ -845,8 +842,8 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 			oraMessage);
 	}
 
-	/* free statement handle */
-	freeHandle(stmthp, connp, envp->errhp);
+	/* free the statement handle */
+	freeStmt(stmthp, connp, envp->errhp);
 }
 
 /*
@@ -931,8 +928,7 @@ struct oraTable
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_REPLY, "");
+	registerStmt(stmthp, session->envp->envhp, session->connp);
 
 	/* execute query */
 	if (checkerr(
@@ -1252,7 +1248,7 @@ struct oraTable
 	}
 
 	/* free statement handle, this takes care of the parameter handles */
-	freeHandle(stmthp, session->connp, session->envp->errhp);
+	freeStmt(stmthp, session->connp, session->envp->errhp);
 
 	return reply;
 }
@@ -1313,7 +1309,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
 	while (result != OCI_NO_DATA);
 
 	/* close the statement */
-	freeHandle(stmthp, session->connp, session->envp->errhp);
+	freeStmt(stmthp, session->connp, session->envp->errhp);
 }
 
 /*
@@ -1359,8 +1355,7 @@ oracleSetSavepoint(oracleSession *session, int nest_level)
 		}
 
 		/* register statement handle */
-		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-			FDW_OUT_OF_MEMORY, "");
+		registerStmt(session->stmthp, session->envp->envhp, session->connp);
 
 		/* set savepoint */
 		if (checkerr(
@@ -1523,8 +1518,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION, "");
+	registerStmt(stmthp, session->envp->envhp, session->connp);
 
 	/* set prefetch options */
 	if (checkerr(
@@ -1548,7 +1542,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 			oraMessage);
 	}
 
-	freeHandle(stmthp, session->connp, session->envp->errhp);
+	freeStmt(stmthp, session->connp, session->envp->errhp);
 	stmthp = NULL;
 
 	/*
@@ -1577,8 +1571,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION, "");
+	registerStmt(stmthp, session->envp->envhp, session->connp);
 
 	/* bind */
 	bndhp = NULL;
@@ -1641,7 +1634,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 				oraMessage);
 	}
 
-	freeHandle(stmthp, session->connp, session->envp->errhp);
+	freeStmt(stmthp, session->connp, session->envp->errhp);
 	stmthp = NULL;
 
 	/*
@@ -1661,8 +1654,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION, "");
+	registerStmt(stmthp, session->envp->envhp, session->connp);
 
 	/* bind */
 	bndhp = NULL;
@@ -1769,8 +1761,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION, "");
+	registerStmt(session->stmthp, session->envp->envhp, session->connp);
 
 	/* loop through table columns */
 	col_pos = 0;
@@ -1802,10 +1793,11 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				{
 					/* allocate an array of LOB locators, store the pointers in "val" */
 					for (j = 0; j < prefetch; ++j)
-						allocHandle((void **)(oraTable->cols[i]->val + j * sizeof(OCILobLocator *)),
-							OCI_DTYPE_LOB, HK_DESCRIPTOR, session->envp->envhp, session->connp,
-							FDW_UNABLE_TO_CREATE_EXECUTION,
-							"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+						((OCILobLocator **)oraTable->cols[i]->val)[j] =
+							allocLobLocator(
+								session->stmthp, session->envp->envhp, session->connp,
+								FDW_UNABLE_TO_CREATE_EXECUTION,
+								"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 				}
 
 				/* define result value */
@@ -1900,9 +1892,11 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
 				{
 					/* allocate a LOB locator, store a pointer to it in "val" */
-					allocHandle((void **)oraTable->cols[i]->val, OCI_DTYPE_LOB, HK_DESCRIPTOR, session->envp->envhp, session->connp,
-						FDW_UNABLE_TO_CREATE_EXECUTION,
-						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+					((OCILobLocator **)oraTable->cols[i]->val)[0] =
+						allocLobLocator(
+							session->stmthp, session->envp->envhp, session->connp,
+							FDW_UNABLE_TO_CREATE_EXECUTION,
+							"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 				}
 			}
 		}
@@ -2308,8 +2302,7 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 	}
 
 	/* register statement handle */
-	allocHandle((void **)&stmthp, OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-		FDW_UNABLE_TO_CREATE_EXECUTION, "");
+	registerStmt(stmthp, session->envp->envhp, session->connp);
 
 	if (checkerr(
 		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)1, (ub4)0,
@@ -2326,7 +2319,7 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 	}
 
 	/* free the statement handle */
-	freeHandle(stmthp, session->connp, session->envp->errhp);
+	freeStmt(stmthp, session->connp, session->envp->errhp);
 }
 
 /*
@@ -2572,9 +2565,8 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 				oraMessage);
 		}
 
-		/* create statement handle */
-		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-			FDW_UNABLE_TO_CREATE_EXECUTION, "");
+		/* register statement handle */
+		registerStmt(session->stmthp, session->envp->envhp, session->connp);
 
 		/* bind the parameter */
 		if (checkerr(
@@ -2652,8 +2644,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		}
 
 		/* register statement handle */
-		allocHandle((void **)&(session->stmthp), OCI_HTYPE_STMT, HK_STATEMENT, session->envp->envhp, session->connp,
-			FDW_UNABLE_TO_CREATE_EXECUTION, "");
+		registerStmt(session->stmthp, session->envp->envhp, session->connp);
 
 		/* set prefetch options */
 		if (checkerr(
@@ -2946,7 +2937,7 @@ char
 		result[size] = '\0';
 		return result;
 	}
-		
+
 	if (quote)
 	{
 		for (i=0; i<size; ++i)
@@ -3194,83 +3185,110 @@ removeEnvironment(OCIEnv *envhp)
 }
 
 /*
- * allocHandle
- * 		Allocate an Oracle handle or descriptor, keep it in the cached list.
+ * registerStmt
+ * 		Add the statement handle to the connection entry's linked list.
  */
 
 void
-allocHandle(dvoid **handlepp, ub4 type, handleKind kind, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
+registerStmt(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp)
 {
-	struct handleEntry *entry;
-	sword rc;
+	struct stmtHandleEntry *entry;
 
-	/* create entry for linked list */
-	if ((entry = malloc(sizeof(struct handleEntry))) == NULL)
+	/* create entry for the linked list */
+	if ((entry = malloc(sizeof(struct stmtHandleEntry))) == NULL)
 	{
 		oracleError_i(FDW_OUT_OF_MEMORY,
 			"error allocating handle: failed to allocate %d bytes of memory",
-			sizeof(struct handleEntry));
+			sizeof(struct stmtHandleEntry));
 	}
 
-	switch (kind)
-	{
-		case HK_DESCRIPTOR:
-			rc = OCIDescriptorAlloc((const dvoid *)envhp, handlepp, type, (size_t)0, NULL);
-			break;
-		case HK_STATEMENT:
-			/* handle already allocated by OCIStmtPrepare2 */
-			rc = 0;
-	}
-
-	if (rc != OCI_SUCCESS)
-	{
-		free(entry);
-		oracleError(error, errmsg);
-	}
-
-	/* add handle to linked list */
-	entry->handlep = *handlepp;
-	entry->type = type;
-	entry->kind = kind;
-	entry->next = connp->handlelist;
-	connp->handlelist = entry;
+	/* add the handle to the linked list */
+	entry->stmthp = stmthp;
+	entry->loclist = NULL;
+	entry->next = connp->stmtlist;
+	connp->stmtlist = entry;
 }
 
 /*
- * freeHandle
- * 		Free an Oracle handle or descriptor, remove it from the cached list.
+ * allocLobLocator
+ * 		Allocate an Oracle LOB locator, store it in the statement's linked list.
+ */
+
+OCILobLocator *
+allocLobLocator(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
+{
+	struct stmtHandleEntry *entry;
+	struct lobLocatorEntry *locentry;
+	OCILobLocator *loblocp;
+
+	/* find the statement handle in the linked list */
+	for (entry = connp->stmtlist; entry != NULL; entry = entry->next)
+		if (entry->stmthp == stmthp)
+			break;
+
+	if (entry == NULL)
+		oracleError(FDW_ERROR, "internal error allocating LOB locator: statement not found in list");
+
+	/* create entry for the linked list */
+	if ((locentry = malloc(sizeof(struct lobLocatorEntry))) == NULL)
+	{
+		oracleError_i(FDW_OUT_OF_MEMORY,
+			"error allocating handle: failed to allocate %d bytes of memory",
+			sizeof(struct lobLocatorEntry));
+	}
+
+	if (OCIDescriptorAlloc((const dvoid *)envhp, (void **)&loblocp, OCI_DTYPE_LOB, (size_t)0, NULL) != OCI_SUCCESS)
+	{
+		free(locentry);
+		oracleError(error, errmsg);
+	}
+
+	/* add the handle to the linked list */
+	locentry->lobloc = loblocp;
+	locentry->next = entry->loclist;
+	entry->loclist = locentry;
+
+	return loblocp;
+}
+
+/*
+ * freeStmt
+ * 		Free an Oracle statement handle and all its LOB locators.
  */
 
 void
-freeHandle(dvoid *handlep, struct connEntry *connp, OCIError *errhp)
+freeStmt(OCIStmt *stmthp, struct connEntry *connp, OCIError *errhp)
 {
-	struct handleEntry *entry, *preventry = NULL;
+	struct stmtHandleEntry *entry, *preventry = NULL;
+	struct lobLocatorEntry *locentry;
 
 	/* find it in the linked list */
-	for (entry = connp->handlelist; entry != NULL; entry = entry->next)
+	for (entry = connp->stmtlist; entry != NULL; entry = entry->next)
 	{
-		if (entry->handlep == handlep)
+		if (entry->stmthp == stmthp)
 			break;
 
 		preventry = entry;
 	}
 
 	if (entry == NULL)
-		oracleError(FDW_ERROR, "internal error freeing handle: not found in cache");
+		oracleError(FDW_ERROR, "internal error freeing statement handle: not found in list");
 
-	/* free the handle */
-	switch (entry->kind)
+	/* free all the LOB descriptors */
+	while (entry->loclist != NULL)
 	{
-		case HK_DESCRIPTOR:
-			(void)OCIDescriptorFree(handlep, entry->type);
-			break;
-		case HK_STATEMENT:
-			(void)OCIStmtRelease((OCIStmt *)handlep, errhp, (const OraText *)NULL, (ub4)0, OCI_DEFAULT);
+		(void)OCIDescriptorFree(entry->loclist->lobloc, OCI_DTYPE_LOB);
+		locentry = entry->loclist->next;
+		free(entry->loclist);
+		entry->loclist = locentry;
 	}
+
+	/* free the statement handle */
+	(void)OCIStmtRelease(stmthp, errhp, (const OraText *)NULL, (ub4)0, OCI_DEFAULT);
 
 	/* remove it */
 	if (preventry == NULL)
-		connp->handlelist = entry->next;
+		connp->stmtlist = entry->next;
 	else
 		preventry->next = entry->next;
 
