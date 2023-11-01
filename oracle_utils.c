@@ -81,7 +81,7 @@ static void closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, in
 static void disconnectServer(OCIEnv *envhp, OCIServer *srvhp);
 static void removeEnvironment(OCIEnv *envhp);
 static void registerStmt(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp);
-static OCILobLocator *allocLobLocator(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
+static void allocLobLocator(OCILobLocator **locpp, OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg);
 static void freeStmt(OCIStmt *stmthp, struct connEntry *connp, OCIError *errhp);
 static ub2 getOraType(oraType arg);
 static sb4 bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp, ub4 **alenp, ub1 *piecep, void **indp, ub2 **rcodep);
@@ -1793,11 +1793,10 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				{
 					/* allocate an array of LOB locators, store the pointers in "val" */
 					for (j = 0; j < prefetch; ++j)
-						((OCILobLocator **)oraTable->cols[i]->val)[j] =
-							allocLobLocator(
-								session->stmthp, session->envp->envhp, session->connp,
-								FDW_UNABLE_TO_CREATE_EXECUTION,
-								"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+						allocLobLocator((OCILobLocator **)oraTable->cols[i]->val + j,
+							session->stmthp, session->envp->envhp, session->connp,
+							FDW_UNABLE_TO_CREATE_EXECUTION,
+							"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 				}
 
 				/* define result value */
@@ -1892,11 +1891,10 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
 				if (type == SQLT_BLOB || type == SQLT_BFILE || type == SQLT_CLOB)
 				{
 					/* allocate a LOB locator, store a pointer to it in "val" */
-					((OCILobLocator **)oraTable->cols[i]->val)[0] =
-						allocLobLocator(
-							session->stmthp, session->envp->envhp, session->connp,
-							FDW_UNABLE_TO_CREATE_EXECUTION,
-							"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
+					allocLobLocator((OCILobLocator **)oraTable->cols[i]->val,
+						session->stmthp, session->envp->envhp, session->connp,
+						FDW_UNABLE_TO_CREATE_EXECUTION,
+						"error executing query: OCIDescriptorAlloc failed to allocate LOB descriptor");
 				}
 			}
 		}
@@ -3214,12 +3212,11 @@ registerStmt(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp)
  * 		Allocate an Oracle LOB locator, store it in the statement's linked list.
  */
 
-OCILobLocator *
-allocLobLocator(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
+void
+allocLobLocator(OCILobLocator **locpp, OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraError error, const char *errmsg)
 {
 	struct stmtHandleEntry *entry;
 	struct lobLocatorEntry *locentry;
-	OCILobLocator *loblocp;
 
 	/* find the statement handle in the linked list */
 	for (entry = connp->stmtlist; entry != NULL; entry = entry->next)
@@ -3237,18 +3234,16 @@ allocLobLocator(OCIStmt *stmthp, OCIEnv *envhp, struct connEntry *connp, oraErro
 			sizeof(struct lobLocatorEntry));
 	}
 
-	if (OCIDescriptorAlloc((const dvoid *)envhp, (void **)&loblocp, OCI_DTYPE_LOB, (size_t)0, NULL) != OCI_SUCCESS)
+	if (OCIDescriptorAlloc((const dvoid *)envhp, (void **)locpp, OCI_DTYPE_LOB, (size_t)0, NULL) != OCI_SUCCESS)
 	{
 		free(locentry);
 		oracleError(error, errmsg);
 	}
 
 	/* add the handle to the linked list */
-	locentry->lobloc = loblocp;
+	locentry->lobloc = *locpp;
 	locentry->next = entry->loclist;
 	entry->loclist = locentry;
-
-	return loblocp;
 }
 
 /*
