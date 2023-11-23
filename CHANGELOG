@@ -14,6 +14,9 @@ Version 2.7.0
     transaction, so running many statements in a single transaction could cause
     out-of-memory errors and server crashes.
     Report by "JosefMachytkaNetApp".
+  - Fix building on Windows with PostgreSQL versions older than v15.
+    This used to report "unresolved external symbol XactReadOnly".
+    Report by "w0pr".
 
 Version 2.6.0, released 2023-09-08
 
