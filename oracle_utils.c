@@ -2511,7 +2511,7 @@ void *oracleGetGeometryType(oracleSession *session)
  * 		Get the next element in the ordered list of tables and their columns for "schema".
  * 		Returns 0 if there are no more columns, -1 if the remote schema does not exist, else 1.
  */
-int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
+int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
 {
 	/* the static variables will contain data returned to the caller */
 	static char s_tabname[129], s_colname[129];
@@ -2530,7 +2530,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		"        AND con.constraint_type = 'P' AND con.owner = :nsp) primkey_col\n"
 		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
 		"  AND col.owner = :nsp\n"
-		"ORDER BY col.table_name, col.column_id";
+		"%s%s%sORDER BY col.table_name, col.column_id";
 	char *column_query = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
 	sb2 ind = 0, ind_tabname, ind_colname, ind_typename, ind_typeowner = OCI_IND_NOTNULL,
@@ -2626,8 +2626,12 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		}
 
 		/* construct the query by appending the dblink to the catalog tables */
-		column_query = oracleAlloc(strlen(column_query_template) - 6 + 3 * strlen(table_suffix) + 1);
-		sprintf(column_query, column_query_template, table_suffix, table_suffix, table_suffix);
+		column_query = oracleAlloc(strlen(column_query_template) - 6 + 3 * strlen(table_suffix) + 1
+								   + (limit_to ? 34 + strlen(limit_to) : 0));
+		sprintf(column_query, column_query_template, table_suffix, table_suffix, table_suffix,
+				(limit_to ? "  AND upper(col.table_name) IN (" : ""),
+				(limit_to ? limit_to : ""),
+				(limit_to ? ")\n" : ""));
 
 		/* prepare the query */
 		if (checkerr(

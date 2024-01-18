@@ -18,6 +18,11 @@ Version 2.7.0
     This used to report "unresolved external symbol XactReadOnly".
     Report by "w0pr".
 
+  Enhancements:
+  - Speed up IMPORT FOREIGN SCHEMA ... LIMIT TO (...) by filtering out tables
+    whose name don't match on the Oracle side.
+    Per suggestion from João Filipe Cavichiolo Storrer.
+
 Version 2.6.0, released 2023-09-08
 
   Note: This release will fail to build with minor releases below 13.10,
