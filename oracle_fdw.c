@@ -2277,7 +2277,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	char *tabname, *colname, oldtabname[129] = { '\0' }, *foldedname;
 	char *nls_lang = NULL, *user = NULL, *password = NULL,
 		 *dbserver = NULL, *dblink = NULL, *max_long = NULL,
-		 *sample_percent = NULL, *prefetch = NULL, *lob_prefetch = NULL;
+		 *sample_percent = NULL, *prefetch = NULL, *lob_prefetch = NULL,
+		 *limit_to = NULL;
 	oraType type;
 	int charlen, typeprec, typescale, nullable, key, rc;
 	List *options, *result = NIL;
@@ -2482,6 +2483,36 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH, OPT_SET_TIMEZONE)));
 	}
 
+	/* if LIMIT TO is used, compose a list of quoted, upper case table names */
+	if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO)
+	{
+		StringInfoData limit;
+		ListCell *lc;
+		bool first_item = true;
+
+		initStringInfo(&limit);
+
+		foreach(lc, stmt->table_list)
+		{
+			RangeVar *rv = (RangeVar *)lfirst(lc);
+
+			if (first_item)
+				first_item = false;
+			else
+				appendStringInfoString(&limit, ", ");
+
+			appendStringInfoString(
+				&limit,
+				quote_literal_cstr(
+					str_toupper(rv->relname, strlen(rv->relname), DEFAULT_COLLATION_OID)
+				)
+			);
+		}
+
+		if (!first_item)
+			limit_to = limit.data;
+	}
+
 	elog(DEBUG1, "oracle_fdw: import schema \"%s\" from foreign server \"%s\"", stmt->remote_schema, server->servername);
 
 	/* guess a good NLS_LANG environment setting */
@@ -2503,7 +2534,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	initStringInfo(&buf);
 	do {
 		/* get the next column definition */
-		rc = oracleGetImportColumn(session, dblink, stmt->remote_schema, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
+		rc = oracleGetImportColumn(session, dblink, stmt->remote_schema, limit_to, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
 
 		if (rc == -1)
 		{
