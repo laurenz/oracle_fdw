@@ -2287,7 +2287,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	fold_t foldcase = CASE_SMART;
 	StringInfoData buf;
 	bool readonly = false, firstcol = true, set_timezone = false;
-	int collation = DEFAULT_COLLATION_OID;
+	Oid collation = DEFAULT_COLLATION_OID;
 	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
 	bool have_nchar = false;
 
@@ -2504,7 +2504,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			appendStringInfoString(
 				&limit,
 				quote_literal_cstr(
-					str_toupper(rv->relname, strlen(rv->relname), DEFAULT_COLLATION_OID)
+					str_toupper(rv->relname, strlen(rv->relname), collation)
 				)
 			);
 		}
