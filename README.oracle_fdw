@@ -819,6 +819,11 @@ The regression tests are run as follows:
 
     $ make installcheck
 
+The regression tests are kept up to date with the latest development version of
+PostgreSQL.  If you run them with older PostgreSQL versions, you can expect
+minor differences, like changed error messages or a different format of the
+psql output.
+
 7 Internals
 ===========
 

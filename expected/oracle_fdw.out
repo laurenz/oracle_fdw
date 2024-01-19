@@ -883,7 +883,7 @@ CREATE FUNCTION f_typetest1() RETURNS TABLE (id integer)
 SET SESSION AUTHORIZATION duff;
 -- this should fail
 SELECT id FROM typetest1 ORDER BY id;
-ERROR:  user mapping not found for "duff"
+ERROR:  user mapping not found for user "duff", server "oracle"
 -- these should succeed
 SELECT id FROM v_typetest1 ORDER BY id;
  id 
