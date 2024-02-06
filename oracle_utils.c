@@ -2354,7 +2354,7 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-			"error fetching result: OCILobFileOpen failed to open BFILE",
+			"error fetching result: OCILobGetLength2 failed get the LOB size",
 			oraMessage);
 	}
 
