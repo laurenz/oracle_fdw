@@ -615,7 +615,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 0 and 1000.")));
+						errhint("Valid values in this context are integers between 1 and 1000.")));
 		}
 
 		/* check valid values for "lob_prefetch" */
