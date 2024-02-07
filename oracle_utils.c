@@ -2392,8 +2392,8 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 		 * On subsequent reads, the amount_* parameters are ignored.
 		 * After the call, "amount_byte" contains the number of bytes read.
 		 */
-		amount_byte = lobsize;      /* ignored for CLOBs */
-		amount_char = amount_byte;  /* ignored for binary LOBs */
+		amount_byte = 0;
+		amount_char = 0;
 		result = checkerr(
 			OCILobRead2(session->connp->svchp, session->envp->errhp, locp, &amount_byte, &amount_char,
 				(oraub8)1, (dvoid *)(*value + *value_len), lob_buf_size,
