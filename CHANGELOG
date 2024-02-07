@@ -17,6 +17,8 @@ Version 2.7.0
   - Fix building on Windows with PostgreSQL versions older than v15.
     This used to report "unresolved external symbol XactReadOnly".
     Report by "w0pr".
+  - Fix crash or empty result when reading larger CLOBs.
+    Report by Rainer Hartwig and Erik van der Vlist.
 
   Enhancements:
   - Speed up IMPORT FOREIGN SCHEMA ... LIMIT TO (...) by filtering out tables
