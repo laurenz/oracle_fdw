@@ -88,6 +88,8 @@ normally be in uppercase.)
 
 Now you can use the table like a regular PostgreSQL table.
 
+If you need to use this extension for container testing purposes. Here is the file [Dockerfile](Dockerfile).
+
 2 Objects created by the extension
 ==================================
 
