@@ -960,12 +960,16 @@ the transaction that got a serialization error.
 Oracle bugs
 -----------
 
-This is a list of Oracle bugs that have affected oracle_fdw in the past.
+This is a list of Oracle bugs that affect or have affected oracle_fdw.
 
 Bug 2728408 can cause `ORA-8177 cannot serialize access for this transaction`
 even if no modification of remote data is attempted.  
 It can occur with Oracle server 8.1.7.4 (install one-off patch 2728408) or
 Oracle server 9.2 (install Patch Set 9.2.0.4 or better).
+
+Oracle client 21c is known not to work for CLOB columns (they appear empty).
+There is no ultimate proof that that is an Oracle bug, but other versions
+are working fine.
 
 Missing Oracle client DLL (on Windows only)
 -------------------------------------------
