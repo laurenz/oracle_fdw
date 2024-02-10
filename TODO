@@ -4,8 +4,17 @@ Help is welcome!
 - Set parameters like NLS_DATE_FORMAT *after* the Oracle connection has been
   established.  Otherwise, an ill-guided Oracle logon trigger could mess up
   our NLS settings.
+  This should not be too hard, but nobody has got around to do it so far.
+
+The following features would be nice to have, but prior attempts to add them
+have failed, which was not necessarily the fault of the contributors.
 
 - Add a sample Docker file to build a container with PostgreSQL and oracle_fdw.
   This can also serve as a cookbook for installing the software.
+  The main problem here is that we'd need a maintainer who knows about Docker.
+  See https://github.com/laurenz/oracle_fdw/pull/644
 
 - Aggregate pushdown.
+  This is a big feature, and the main challenge is to write a patch that can
+  be understood and reviewed by the maintainers.
+  See https://github.com/laurenz/oracle_fdw/issues/569
