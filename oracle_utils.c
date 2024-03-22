@@ -2502,25 +2502,42 @@ void *oracleGetGeometryType(oracleSession *session)
  * 		Get the next element in the ordered list of tables and their columns for "schema".
  * 		Returns 0 if there are no more columns, -1 if the remote schema does not exist, else 1.
  */
-int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key)
+int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key, bool export_tables, bool export_views, bool export_materialized_views);
 {
 	/* the static variables will contain data returned to the caller */
 	static char s_tabname[129], s_colname[129];
 	char typename[129] = { '\0' }, typeowner[129] = { '\0' }, isnull[2] = { '\0' };
 	int count = 0;
+	/* Object_type constats for partial import */
+	const char * const ot_table = "TABLE";
+	/* Also there is "TABLE PARTITION" and "TABLE SUBPARTITION" not applicable values */
+	const char * const ot_view = "VIEW";
+	const char * const ot_materialized_view = "MATERIALIZED VIEW";
 	const char * const schema_query = "SELECT COUNT(*) FROM all_users WHERE username = :nsp";
 	const char * const column_query_template =
 		"SELECT col.table_name, col.column_name, col.data_type, col.data_type_owner,\n"
 		"       col.char_length, col.data_precision, col.data_scale, col.nullable,\n"
-		"       CASE WHEN primkey_col.position IS NOT NULL THEN 1 ELSE 0 END AS primary_key\n"
-		"FROM all_tab_columns%s col,\n"
+		"       CASE WHEN primkey_col.position IS NOT NULL THEN 1 ELSE 0 END AS primary_key,\n"
+		"       obj.object_type\n"
+		"  FROM all_tab_columns%s col\n"
+		"  LEFT JOIN\n"
 		"     (SELECT con.table_name, cons_col.column_name, cons_col.position\n"
-		"      FROM all_constraints%s con, all_cons_columns%s cons_col\n"
-		"      WHERE con.owner = cons_col.owner AND con.table_name = cons_col.table_name\n"
-		"        AND con.constraint_name = cons_col.constraint_name\n"
-		"        AND con.constraint_type = 'P' AND con.owner = :nsp) primkey_col\n"
-		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
-		"  AND col.owner = :nsp\n"
+		"        FROM all_constraints%s con, all_cons_columns%s cons_col\n"
+		"       WHERE con.owner = cons_col.owner\n"
+		"         AND con.table_name = cons_col.table_name\n"
+		"         AND con.constraint_name = cons_col.constraint_name\n"
+		"         AND con.constraint_type = 'P'\n"
+		"         AND con.owner = :nsp) primkey_col\n"
+		"   ON col.table_name = primkey_col.table_name\n"
+		"  AND col.column_name = primkey_col.column_name\n"
+		"INNER JOIN ALL_OBJECTS obj\n"
+		"   ON col.table_name = obj.object_name\n"
+		"  AND col.owner = obj.owner\n"
+		"WHERE col.owner = :nsp\n"
+		/*
+		 * TODO: use bool export_tables, bool export_views, bool export_materialized_views
+		 * to filter object_type
+	  	 */
 		"%s%s%sORDER BY col.table_name, col.column_id";
 	char *column_query = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
