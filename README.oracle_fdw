@@ -607,6 +607,12 @@ following:
   - **readonly**: sets the **readonly** option on all imported tables
 
     See the [Options](#3-options) section for details.
+    
+  - **import_tables**: allow automated import of tables, default `true`.
+
+  - **import_views**: allow automated import of views, default `true`.
+  
+  - **import_materialized_views**: allow automated import of materialized views, default `true`.
 
   - **max_long**: sets the **max_long** option on all imported tables
 

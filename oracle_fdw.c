@@ -191,6 +191,9 @@ struct OracleFdwOption
 #define OPT_PREFETCH "prefetch"
 #define OPT_LOB_PREFETCH "lob_prefetch"
 #define OPT_SET_TIMEZONE "set_timezone"
+#define OPT_EXPORT_TABLES "export_tables"
+#define OPT_EXPORT_VIEWS "export_views"
+#define OPT_EXPORT_MAT_VIEWS "export_materialized_views"
 
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
@@ -2265,6 +2268,29 @@ oracleIsForeignRelUpdatable(Relation rel)
 
 #ifdef IMPORT_API
 /*
+ * boolVal
+ * 		Returns a boolean for option value.
+ */
+bool
+boolVal(DefElem *def)
+{
+	bool result = false;
+	char *s = strVal(def->arg);
+	if (pg_strcasecmp(s, "on") == 0
+			|| pg_strcasecmp(s, "yes") == 0
+			|| pg_strcasecmp(s, "true") == 0)
+		result = true;
+	else if (pg_strcasecmp(s, "off") == 0
+			|| pg_strcasecmp(s, "no") == 0
+			|| pg_strcasecmp(s, "false") == 0)
+		result = false;
+	else
+		ereport(ERROR,
+			(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+			errmsg("invalid value for option \"%s\"", def->defname)));
+}
+
+/*
  * oracleImportForeignSchema
  * 		Returns a List of CREATE FOREIGN TABLE statements.
  */
@@ -2290,6 +2316,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	Oid collation = DEFAULT_COLLATION_OID;
 	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
 	bool have_nchar = false;
+	bool export_tables = true, export_views = true, export_materialized_views = true;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -2329,6 +2356,13 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	foreach(cell, stmt->options)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
+
+		if (strcmp(def->defname, OPT_EXPORT_TABLES) == 0)
+			export_tables = boolVal(def);
+		if (strcmp(def->defname, OPT_EXPORT_VIEWS) == 0)
+			export_views = boolVal(def);
+		if (strcmp(def->defname, OPT_EXPORT_MAT_VIEWS) == 0)
+			export_materialized_views = boolVal(def);
 
 		if (strcmp(def->defname, "case") == 0)
 		{
@@ -2378,19 +2412,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		}
 		else if (strcmp(def->defname, OPT_READONLY) == 0)
 		{
-			char *s = strVal(def->arg);
-			if (pg_strcasecmp(s, "on") == 0
-					|| pg_strcasecmp(s, "yes") == 0
-					|| pg_strcasecmp(s, "true") == 0)
-				readonly = true;
-			else if (pg_strcasecmp(s, "off") == 0
-					|| pg_strcasecmp(s, "no") == 0
-					|| pg_strcasecmp(s, "false") == 0)
-				readonly = false;
-			else
-				ereport(ERROR,
-						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-						errmsg("invalid value for option \"%s\"", def->defname)));
+			readonly = boolVal(def);
 		}
 		else if (strcmp(def->defname, OPT_DBLINK) == 0)
 		{
@@ -2534,7 +2556,23 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	initStringInfo(&buf);
 	do {
 		/* get the next column definition */
-		rc = oracleGetImportColumn(session, dblink, stmt->remote_schema, limit_to, &tabname, &colname, &type, &charlen, &typeprec, &typescale, &nullable, &key);
+		rc = oracleGetImportColumn(
+			session,
+			dblink,
+			stmt->remote_schema,
+			limit_to,
+			&tabname,
+			&colname,
+			&type,
+			&charlen,
+			&typeprec,
+			&typescale,
+			&nullable,
+			&key,
+			export_tables,
+			export_views,
+			export_materialized_views
+		);
 
 		if (rc == -1)
 		{
@@ -3324,7 +3362,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	foreach(lc, otherclauses)
 	{
 		Expr *expr = (Expr *) lfirst(lc);
-	
+
 		if (deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params)))
 			fdwState->remote_conds = lappend(fdwState->remote_conds, expr);
 		else
