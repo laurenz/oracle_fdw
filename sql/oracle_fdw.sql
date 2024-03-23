@@ -12,7 +12,15 @@ CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isola
 
 CREATE USER MAPPING FOR CURRENT_ROLE SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 
--- drop the Oracle tables if they exist
+-- drop the Oracle objects if they exist
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP VIEW scott.ttv');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest1 PURGE');
@@ -60,6 +68,12 @@ SELECT oracle_execute(
           '   ids INTERVAL DAY TO SECOND,\n'
           '   iym INTERVAL YEAR TO MONTH\n'
           ') SEGMENT CREATION IMMEDIATE'
+       );
+
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE VIEW scott.ttv AS\n'
+          'SELECT id, vc FROM scott.typetest1'
        );
 
 SELECT oracle_execute(

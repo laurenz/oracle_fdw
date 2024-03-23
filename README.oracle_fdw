@@ -607,12 +607,13 @@ following:
   - **readonly**: sets the **readonly** option on all imported tables
 
     See the [Options](#3-options) section for details.
-    
-  - **import_tables**: allow automated import of tables, default `true`.
 
-  - **import_views**: allow automated import of views, default `true`.
-  
-  - **import_materialized_views**: allow automated import of materialized views, default `true`.
+  - **import_tables** (default `true`): allow automated import of tables
+
+  - **import_views** (default `true`): allow automated import of views
+
+  - **import_matviews** (default `true`): allow automated import of
+    materialized views
 
   - **max_long**: sets the **max_long** option on all imported tables
 
@@ -772,10 +773,10 @@ If you use Visual Studio 2015 or later and you get errors about missing
 header files including `sys/types.h`, you must install the Universal CRT
 SDK (part of Visual Studio).
 
-Copy `oracle_fdw.dll` into the PostgreSQL library directory and 
-copy `oracle_fdw.control` and the SQL files into the `extension` 
-subdirectory of the PostgreSQL share directory.  
-To find those directories, you can use `pg_config --libdir` and 
+Copy `oracle_fdw.dll` into the PostgreSQL library directory and copy
+`oracle_fdw.control` and the SQL files into the `extension` subdirectory of
+the PostgreSQL share directory.  
+To find those directories, you can use `pg_config --libdir` and
 `pg_config --sharedir`.
 
 Installing the extension:
@@ -823,9 +824,9 @@ the PostGIS binaries must be installed.
 
 The Oracle database must be prepared as follows:
 - A user `scott` with password `tiger` must exist (unless you want to edit
-  the regression test scripts).  The user needs CREATE SESSION and CREATE TABLE
-  system privileges and enough quota on its default tablespace, as well as
-  SELECT privileges on V$SQL and V$SQL_PLAN.
+  the regression test scripts).  The user needs CREATE SESSION, CREATE TABLE
+  and CREATE VIEW system privileges and enough quota on its default tablespace,
+  as well as SELECT privileges on V$SQL and V$SQL_PLAN.
 
 Set the environment for the PostgreSQL server so that it can establish an
 Oracle connection without connect string:

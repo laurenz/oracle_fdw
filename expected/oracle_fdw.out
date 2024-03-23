@@ -7,7 +7,14 @@ CREATE EXTENSION oracle_fdw;
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
 CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true', set_timezone 'true');
 CREATE USER MAPPING FOR CURRENT_ROLE SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
--- drop the Oracle tables if they exist
+-- drop the Oracle objects if they exist
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP VIEW scott.ttv');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest1 PURGE');
@@ -52,6 +59,16 @@ SELECT oracle_execute(
           '   ids INTERVAL DAY TO SECOND,\n'
           '   iym INTERVAL YEAR TO MONTH\n'
           ') SEGMENT CREATION IMMEDIATE'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE VIEW scott.ttv AS\n'
+          'SELECT id, vc FROM scott.typetest1'
        );
  oracle_execute 
 ----------------

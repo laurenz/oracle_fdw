@@ -191,9 +191,12 @@ struct OracleFdwOption
 #define OPT_PREFETCH "prefetch"
 #define OPT_LOB_PREFETCH "lob_prefetch"
 #define OPT_SET_TIMEZONE "set_timezone"
-#define OPT_EXPORT_TABLES "export_tables"
-#define OPT_EXPORT_VIEWS "export_views"
-#define OPT_EXPORT_MAT_VIEWS "export_materialized_views"
+/* these options are only for IMPORT FOREIGN SCHEMA */
+#define OPT_CASE "case"
+#define OPT_COLLATION "collation"
+#define OPT_IMPORT_TABLES "import_tables"
+#define OPT_IMPORT_VIEWS "import_views"
+#define OPT_IMPORT_MATVIEWS "import_matviews"
 
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
@@ -383,7 +386,7 @@ static List *serializePlanData(struct OracleFdwState *fdwState);
 static Const *serializeString(const char *s);
 static struct OracleFdwState *deserializePlanData(List *list);
 static char *deserializeString(Const *constant);
-static bool optionIsTrue(const char *value);
+static bool getBoolVal(DefElem *def);
 static char *deparseDate(Datum datum);
 static char *deparseTimestamp(Datum datum, bool hasTimezone);
 static char *deparseInterval(Datum datum);
@@ -535,21 +538,8 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 				|| strcmp(def->defname, OPT_KEY) == 0
 				|| strcmp(def->defname, OPT_STRIP_ZEROS) == 0
 				|| strcmp(def->defname, OPT_NCHAR) == 0
-				|| strcmp(def->defname, OPT_SET_TIMEZONE) == 0
-			)
-		{
-			char *val = strVal(def->arg);
-			if (pg_strcasecmp(val, "on") != 0
-					&& pg_strcasecmp(val, "off") != 0
-					&& pg_strcasecmp(val, "yes") != 0
-					&& pg_strcasecmp(val, "no") != 0
-					&& pg_strcasecmp(val, "true") != 0
-					&& pg_strcasecmp(val, "false") != 0)
-				ereport(ERROR,
-						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are: on/yes/true or off/no/false")));
-		}
+				|| strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
+			(void)getBoolVal(def);
 
 		/* check valid values for "dblink" */
 		if (strcmp(def->defname, OPT_DBLINK) == 0)
@@ -1491,7 +1481,7 @@ oracleAddForeignUpdateTargets(
 			/* if "key" is set, add a resjunk for this column */
 			if (strcmp(def->defname, OPT_KEY) == 0)
 			{
-				if (optionIsTrue(strVal(def->arg)))
+				if (getBoolVal(def))
 				{
 					Var *var;
 #if PG_VERSION_NUM < 140000
@@ -2257,9 +2247,7 @@ oracleIsForeignRelUpdatable(Relation rel)
 	foreach(cell, GetForeignTable(RelationGetRelid(rel))->options)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
-		char *value = strVal(def->arg);
-		if (strcmp(def->defname, OPT_READONLY) == 0
-				&& optionIsTrue(value))
+		if (strcmp(def->defname, OPT_READONLY) == 0 && getBoolVal(def))
 			return 0;
 	}
 
@@ -2267,29 +2255,6 @@ oracleIsForeignRelUpdatable(Relation rel)
 }
 
 #ifdef IMPORT_API
-/*
- * boolVal
- * 		Returns a boolean for option value.
- */
-bool
-boolVal(DefElem *def)
-{
-	bool result = false;
-	char *s = strVal(def->arg);
-	if (pg_strcasecmp(s, "on") == 0
-			|| pg_strcasecmp(s, "yes") == 0
-			|| pg_strcasecmp(s, "true") == 0)
-		result = true;
-	else if (pg_strcasecmp(s, "off") == 0
-			|| pg_strcasecmp(s, "no") == 0
-			|| pg_strcasecmp(s, "false") == 0)
-		result = false;
-	else
-		ereport(ERROR,
-			(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-			errmsg("invalid value for option \"%s\"", def->defname)));
-}
-
 /*
  * oracleImportForeignSchema
  * 		Returns a List of CREATE FOREIGN TABLE statements.
@@ -2315,8 +2280,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	bool readonly = false, firstcol = true, set_timezone = false;
 	Oid collation = DEFAULT_COLLATION_OID;
 	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
-	bool have_nchar = false;
-	bool export_tables = true, export_views = true, export_materialized_views = true;
+	bool have_nchar = false, import_tables = true, import_views = true,
+		 import_matviews = true;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -2342,14 +2307,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
-		{
-			char *nchar = strVal(def->arg);
-
-			if (pg_strcasecmp(nchar, "on") == 0
-					|| pg_strcasecmp(nchar, "yes") == 0
-					|| pg_strcasecmp(nchar, "true") == 0)
-				have_nchar = true;
-		}
+			have_nchar = getBoolVal(def);
 	}
 
 	/* process the options of the IMPORT FOREIGN SCHEMA command */
@@ -2357,14 +2315,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	{
 		DefElem *def = (DefElem *) lfirst(cell);
 
-		if (strcmp(def->defname, OPT_EXPORT_TABLES) == 0)
-			export_tables = boolVal(def);
-		if (strcmp(def->defname, OPT_EXPORT_VIEWS) == 0)
-			export_views = boolVal(def);
-		if (strcmp(def->defname, OPT_EXPORT_MAT_VIEWS) == 0)
-			export_materialized_views = boolVal(def);
-
-		if (strcmp(def->defname, "case") == 0)
+		if (strcmp(def->defname, OPT_CASE) == 0)
 		{
 			char *s = strVal(def->arg);
 			if (strcmp(s, "keep") == 0)
@@ -2379,7 +2330,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errmsg("invalid value for option \"%s\"", def->defname),
 						errhint("Valid values in this context are: %s", "keep, lower, smart")));
 		}
-		else if (strcmp(def->defname, "collation") == 0)
+		else if (strcmp(def->defname, OPT_COLLATION) == 0)
 		{
 			char *s = strVal(def->arg);
 			if (pg_strcasecmp(s, "default") != 0) {
@@ -2412,7 +2363,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		}
 		else if (strcmp(def->defname, OPT_READONLY) == 0)
 		{
-			readonly = boolVal(def);
+			readonly = getBoolVal(def);
 		}
 		else if (strcmp(def->defname, OPT_DBLINK) == 0)
 		{
@@ -2481,29 +2432,26 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						errhint("Valid values in this context are integers between 0 and 536870912.")));
 		}
 		else if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
-		{
-			char *s = strVal(def->arg);
-			if (pg_strcasecmp(s, "on") == 0
-					|| pg_strcasecmp(s, "yes") == 0
-					|| pg_strcasecmp(s, "true") == 0)
-				set_timezone = true;
-			else if (pg_strcasecmp(s, "off") == 0
-					|| pg_strcasecmp(s, "no") == 0
-					|| pg_strcasecmp(s, "false") == 0)
-				set_timezone = false;
-			else
-				ereport(ERROR,
-						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
-						errmsg("invalid value for option \"%s\"", def->defname)));
-		}
+			set_timezone = getBoolVal(def);
+		else if (strcmp(def->defname, OPT_IMPORT_TABLES) == 0)
+			import_tables = getBoolVal(def);
+		else if (strcmp(def->defname, OPT_IMPORT_VIEWS) == 0)
+			import_views = getBoolVal(def);
+		else if (strcmp(def->defname, OPT_IMPORT_MATVIEWS) == 0)
+			import_matviews = getBoolVal(def);
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
 					errmsg("invalid option \"%s\"", def->defname),
-					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s, %s, %s",
-						"case, collation", OPT_READONLY, OPT_DBLINK,
-						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH, OPT_SET_TIMEZONE)));
+					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
+						OPT_CASE, OPT_COLLATION, OPT_READONLY, OPT_DBLINK,
+						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH,
+						OPT_SET_TIMEZONE, OPT_IMPORT_TABLES, OPT_IMPORT_VIEWS, OPT_IMPORT_MATVIEWS)));
 	}
+
+	/* return an empty list if nothing is to be imported */
+	if (!import_tables && !import_views && !import_matviews)
+		return NIL;
 
 	/* if LIMIT TO is used, compose a list of quoted, upper case table names */
 	if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO)
@@ -2569,9 +2517,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			&typescale,
 			&nullable,
 			&key,
-			export_tables,
-			export_views,
-			export_materialized_views
+			(int)import_tables,
+			(int)import_views,
+			(int)import_matviews
 		);
 
 		if (rc == -1)
@@ -2760,10 +2708,10 @@ struct OracleFdwState
 	ListCell *cell;
 	char *isolationlevel = NULL;
 	char *dblink = NULL, *schema = NULL, *table = NULL, *maxlong = NULL,
-		 *sample = NULL, *fetch = NULL, *lob_prefetch = NULL, *nchar = NULL,
-		 *set_timezone = NULL;
+		 *sample = NULL, *fetch = NULL, *lob_prefetch = NULL;
 	long max_long;
 	int has_geometry = 0;
+	bool nchar = false, set_timezone = false;
 
 	/*
 	 * Get all relevant options from the foreign table, the user mapping,
@@ -2798,9 +2746,9 @@ struct OracleFdwState
 		if (strcmp(def->defname, OPT_LOB_PREFETCH) == 0)
 			lob_prefetch = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
-			nchar = strVal(def->arg);
+			nchar = getBoolVal(def);
 		if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
-			set_timezone = strVal(def->arg);
+			set_timezone = getBoolVal(def);
 	}
 
 	/* set isolation_level (or use default) */
@@ -2847,23 +2795,11 @@ struct OracleFdwState
 	else
 		fdwState->lob_prefetch = (unsigned int)strtoul(lob_prefetch, NULL, 0);
 
-	/* convert "nchar" option to boolean (or use "false") */
-	if (nchar != NULL
-		&& (pg_strcasecmp(nchar, "on") == 0
-			|| pg_strcasecmp(nchar, "yes") == 0
-			|| pg_strcasecmp(nchar, "true") == 0))
-		fdwState->have_nchar = true;
-	else
-		fdwState->have_nchar = false;
+	/* should we use the expensive, but correct NCHAR conversion? */
+	fdwState->have_nchar = nchar;
 
-	/* check if we should set the Oacle time zone */
-	if (set_timezone != NULL
-		&& (pg_strcasecmp(set_timezone, "on") == 0
-			|| pg_strcasecmp(set_timezone, "yes") == 0
-			|| pg_strcasecmp(set_timezone, "true") == 0))
-		fdwState->timezone = getTimezone();
-	else
-		fdwState->timezone = NULL;
+	/* check if we should set the Oracle time zone */
+	fdwState->timezone = set_timezone ? getTimezone() : NULL;
 
 	/* check if options are ok */
 	if (table == NULL)
@@ -2985,12 +2921,12 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 			DefElem *def = (DefElem *)lfirst(option);
 
 			/* is it the "key" option and is it set to "true" ? */
-			if (strcmp(def->defname, OPT_KEY) == 0 && optionIsTrue(strVal(def->arg)))
+			if (strcmp(def->defname, OPT_KEY) == 0 && getBoolVal(def))
 			{
 				/* mark the column as primary key column */
 				oraTable->cols[index-1]->pkey = 1;
 			}
-			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && optionIsTrue(strVal(def->arg)))
+			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && getBoolVal(def))
 				oraTable->cols[index-1]->strip_zeros = 1;
 		}
 	}
@@ -5531,23 +5467,9 @@ oracleConnectServer(Name srvname)
 		if (strcmp(def->defname, OPT_PASSWORD) == 0)
 			password = strVal(def->arg);
 		if (strcmp(def->defname, OPT_NCHAR) == 0)
-		{
-			char *nchar = strVal(def->arg);
-
-			if ((pg_strcasecmp(nchar, "on") == 0
-				|| pg_strcasecmp(nchar, "yes") == 0
-				|| pg_strcasecmp(nchar, "true") == 0))
-			have_nchar = true;
-		}
-		if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
-		{
-			char *settz = strVal(def->arg);
-
-			if ((pg_strcasecmp(settz, "on") == 0
-				|| pg_strcasecmp(settz, "yes") == 0
-				|| pg_strcasecmp(settz, "true") == 0))
+			have_nchar = getBoolVal(def);
+		if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0 && getBoolVal(def))
 			timezone = getTimezone();
-		}
 	}
 
 	/* guess a good NLS_LANG environment setting */
@@ -5824,19 +5746,23 @@ char
 		return text_to_cstring(DatumGetTextP(constant->constvalue));
 }
 
-/*
- * optionIsTrue
- * 		Returns true if the string is "true", "on" or "yes".
- */
 bool
-optionIsTrue(const char *value)
+getBoolVal(DefElem *def)
 {
-	if (pg_strcasecmp(value, "on") == 0
-			|| pg_strcasecmp(value, "yes") == 0
-			|| pg_strcasecmp(value, "true") == 0)
+	char *s = strVal(def->arg);
+	if (pg_strcasecmp(s, "on") == 0
+			|| pg_strcasecmp(s, "yes") == 0
+			|| pg_strcasecmp(s, "true") == 0)
 		return true;
-	else
+	else if (pg_strcasecmp(s, "off") == 0
+			|| pg_strcasecmp(s, "no") == 0
+			|| pg_strcasecmp(s, "false") == 0)
 		return false;
+	else
+		ereport(ERROR,
+			(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+			 errmsg("invalid value for option \"%s\"", def->defname),
+			 errhint("Valid values in this context are: on/yes/true or off/no/false")));
 }
 
 /*
