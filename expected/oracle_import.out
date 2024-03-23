@@ -1,6 +1,10 @@
 SET client_min_messages = WARNING;
 CREATE SCHEMA import;
-IMPORT FOREIGN SCHEMA "SCOTT" LIMIT TO ("typetest1") FROM SERVER oracle INTO import OPTIONS (case 'lower', collation 'C');
+IMPORT FOREIGN SCHEMA "SCOTT"
+   LIMIT TO ("typetest1", ttv)
+   FROM SERVER oracle
+   INTO import
+   OPTIONS (case 'lower', collation 'C', import_tables 'true', import_views 'true');
 SELECT t.relname, fs.srvname, ft.ftoptions
 FROM pg_foreign_table ft
      JOIN pg_class t ON ft.ftrelid = t.oid
@@ -8,8 +12,9 @@ FROM pg_foreign_table ft
 WHERE relnamespace = 'import'::regnamespace;
   relname  | srvname |           ftoptions            
 -----------+---------+--------------------------------
+ ttv       | oracle  | {schema=SCOTT,table=TTV}
  typetest1 | oracle  | {schema=SCOTT,table=TYPETEST1}
-(1 row)
+(2 rows)
 
 SELECT attname, atttypid::regtype, attfdwoptions
 FROM pg_attribute

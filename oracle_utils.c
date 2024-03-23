@@ -2502,42 +2502,29 @@ void *oracleGetGeometryType(oracleSession *session)
  * 		Get the next element in the ordered list of tables and their columns for "schema".
  * 		Returns 0 if there are no more columns, -1 if the remote schema does not exist, else 1.
  */
-int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key, bool export_tables, bool export_views, bool export_materialized_views);
+int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key, int import_tables, int import_views, int import_matviews)
 {
 	/* the static variables will contain data returned to the caller */
 	static char s_tabname[129], s_colname[129];
 	char typename[129] = { '\0' }, typeowner[129] = { '\0' }, isnull[2] = { '\0' };
+	char object_types[40] = "", *separator = "";
 	int count = 0;
-	/* Object_type constats for partial import */
-	const char * const ot_table = "TABLE";
-	/* Also there is "TABLE PARTITION" and "TABLE SUBPARTITION" not applicable values */
-	const char * const ot_view = "VIEW";
-	const char * const ot_materialized_view = "MATERIALIZED VIEW";
 	const char * const schema_query = "SELECT COUNT(*) FROM all_users WHERE username = :nsp";
 	const char * const column_query_template =
 		"SELECT col.table_name, col.column_name, col.data_type, col.data_type_owner,\n"
 		"       col.char_length, col.data_precision, col.data_scale, col.nullable,\n"
-		"       CASE WHEN primkey_col.position IS NOT NULL THEN 1 ELSE 0 END AS primary_key,\n"
-		"       obj.object_type\n"
-		"  FROM all_tab_columns%s col\n"
-		"  LEFT JOIN\n"
+		"       CASE WHEN primkey_col.position IS NOT NULL THEN 1 ELSE 0 END AS primary_key\n"
+		"FROM all_tab_columns%s col,\n"
 		"     (SELECT con.table_name, cons_col.column_name, cons_col.position\n"
-		"        FROM all_constraints%s con, all_cons_columns%s cons_col\n"
-		"       WHERE con.owner = cons_col.owner\n"
-		"         AND con.table_name = cons_col.table_name\n"
-		"         AND con.constraint_name = cons_col.constraint_name\n"
-		"         AND con.constraint_type = 'P'\n"
-		"         AND con.owner = :nsp) primkey_col\n"
-		"   ON col.table_name = primkey_col.table_name\n"
-		"  AND col.column_name = primkey_col.column_name\n"
-		"INNER JOIN ALL_OBJECTS obj\n"
-		"   ON col.table_name = obj.object_name\n"
-		"  AND col.owner = obj.owner\n"
-		"WHERE col.owner = :nsp\n"
-		/*
-		 * TODO: use bool export_tables, bool export_views, bool export_materialized_views
-		 * to filter object_type
-	  	 */
+		"      FROM all_constraints%s con, all_cons_columns%s cons_col\n"
+		"      WHERE con.owner = cons_col.owner AND con.table_name = cons_col.table_name\n"
+		"        AND con.constraint_name = cons_col.constraint_name\n"
+		"        AND con.constraint_type = 'P' AND con.owner = :nsp) primkey_col,\n"
+		"     all_objects%s obj\n"
+		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
+		"  AND col.owner = :nsp\n"
+		"  AND col.table_name = obj.object_name AND obj.owner = :nsp\n"
+		"  AND obj.object_type IN (%s)\n"
 		"%s%s%sORDER BY col.table_name, col.column_id";
 	char *column_query = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
@@ -2633,10 +2620,36 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 			strcat(table_suffix, qdblink);
 		}
 
+		/*
+		 * Types of objects to import.
+		 * We can rely that at least one of them is set, because the calling
+		 * code already made sure of that.
+		 */
+		if (import_tables)
+		{
+			strcat(object_types, "'TABLE'");
+			separator = " ,";
+		}
+		if (import_views)
+		{
+			strcat(object_types, separator);
+			strcat(object_types, "'VIEW'");
+			separator = " ,";
+		}
+		if (import_matviews)
+		{
+			strcat(object_types, separator);
+			strcat(object_types, "'MATERIALIZED VIEW'");
+		}
+
 		/* construct the query by appending the dblink to the catalog tables */
-		column_query = oracleAlloc(strlen(column_query_template) - 6 + 3 * strlen(table_suffix) + 1
+		column_query = oracleAlloc(1 + strlen(column_query_template) - 10
+								   + 4 * strlen(table_suffix)
+								   + strlen(object_types)
 								   + (limit_to ? 34 + strlen(limit_to) : 0));
-		sprintf(column_query, column_query_template, table_suffix, table_suffix, table_suffix,
+		sprintf(column_query, column_query_template,
+				table_suffix, table_suffix, table_suffix, table_suffix,
+				object_types,
 				(limit_to ? "  AND upper(col.table_name) IN (" : ""),
 				(limit_to ? limit_to : ""),
 				(limit_to ? ")\n" : ""));

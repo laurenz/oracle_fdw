@@ -2,7 +2,11 @@ SET client_min_messages = WARNING;
 
 CREATE SCHEMA import;
 
-IMPORT FOREIGN SCHEMA "SCOTT" LIMIT TO ("typetest1") FROM SERVER oracle INTO import OPTIONS (case 'lower', collation 'C');
+IMPORT FOREIGN SCHEMA "SCOTT"
+   LIMIT TO ("typetest1", ttv)
+   FROM SERVER oracle
+   INTO import
+   OPTIONS (case 'lower', collation 'C', import_tables 'true', import_views 'true');
 
 SELECT t.relname, fs.srvname, ft.ftoptions
 FROM pg_foreign_table ft

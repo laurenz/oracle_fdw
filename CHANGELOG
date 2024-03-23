@@ -24,6 +24,9 @@ Version 2.7.0
   - Speed up IMPORT FOREIGN SCHEMA ... LIMIT TO (...) by filtering out tables
     whose name don't match on the Oracle side.
     Per suggestion from João Filipe Cavichiolo Storrer.
+  - Add options "import_tables", "import_views" and "import_matviews" to
+    IMPORT FOREIGN SCHEMA.
+    Patch by Michail.
 
 Version 2.6.0, released 2023-09-08
 
