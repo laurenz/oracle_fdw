@@ -2511,12 +2511,12 @@ void *oracleGetGeometryType(oracleSession *session)
  * 		Get the next element in the ordered list of tables and their columns for "schema".
  * 		Returns 0 if there are no more columns, -1 if the remote schema does not exist, else 1.
  */
-int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key, int import_tables, int import_views, int import_matviews)
+int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key, int skip_tables, int skip_views, int skip_matviews)
 {
 	/* the static variables will contain data returned to the caller */
 	static char s_tabname[129], s_colname[129];
 	char typename[129] = { '\0' }, typeowner[129] = { '\0' }, isnull[2] = { '\0' };
-	char object_types[40] = "", *separator = "";
+	char object_types[40] = "";
 	int count = 0;
 	const char * const schema_query = "SELECT COUNT(*) FROM all_users WHERE username = :nsp";
 	const char * const column_query_template =
@@ -2533,7 +2533,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
 		"  AND col.owner = :nsp\n"
 		"  AND col.table_name = obj.object_name AND obj.owner = :nsp\n"
-		"  AND obj.object_type IN (%s)\n"
+		"  AND obj.object_type NOT IN ('silly'%s)\n"
 		"%s%s%sORDER BY col.table_name, col.column_id";
 	char *column_query = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
@@ -2634,22 +2634,12 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		 * We can rely that at least one of them is set, because the calling
 		 * code already made sure of that.
 		 */
-		if (import_tables)
-		{
-			strcat(object_types, "'TABLE'");
-			separator = " ,";
-		}
-		if (import_views)
-		{
-			strcat(object_types, separator);
-			strcat(object_types, "'VIEW'");
-			separator = " ,";
-		}
-		if (import_matviews)
-		{
-			strcat(object_types, separator);
-			strcat(object_types, "'MATERIALIZED VIEW'");
-		}
+		if (skip_tables)
+			strcat(object_types, ", 'TABLE'");
+		if (skip_views)
+			strcat(object_types, ", 'VIEW'");
+		if (skip_matviews)
+			strcat(object_types, ", 'MATERIALIZED VIEW'");
 
 		/* construct the query by appending the dblink to the catalog tables */
 		column_query = oracleAlloc(1 + strlen(column_query_template) - 10

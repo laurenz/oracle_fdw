@@ -194,9 +194,9 @@ struct OracleFdwOption
 /* these options are only for IMPORT FOREIGN SCHEMA */
 #define OPT_CASE "case"
 #define OPT_COLLATION "collation"
-#define OPT_IMPORT_TABLES "import_tables"
-#define OPT_IMPORT_VIEWS "import_views"
-#define OPT_IMPORT_MATVIEWS "import_matviews"
+#define OPT_SKIP_TABLES "skip_tables"
+#define OPT_SKIP_VIEWS "skip_views"
+#define OPT_SKIP_MATVIEWS "skip_matviews"
 
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
@@ -2280,8 +2280,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	bool readonly = false, firstcol = true, set_timezone = false;
 	Oid collation = DEFAULT_COLLATION_OID;
 	oraIsoLevel isolation_level_val = DEFAULT_ISOLATION_LEVEL;
-	bool have_nchar = false, import_tables = true, import_views = true,
-		 import_matviews = true;
+	bool have_nchar = false, skip_tables = false, skip_views = false,
+		 skip_matviews = false;
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(serverOid);
@@ -2433,12 +2433,12 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		}
 		else if (strcmp(def->defname, OPT_SET_TIMEZONE) == 0)
 			set_timezone = getBoolVal(def);
-		else if (strcmp(def->defname, OPT_IMPORT_TABLES) == 0)
-			import_tables = getBoolVal(def);
-		else if (strcmp(def->defname, OPT_IMPORT_VIEWS) == 0)
-			import_views = getBoolVal(def);
-		else if (strcmp(def->defname, OPT_IMPORT_MATVIEWS) == 0)
-			import_matviews = getBoolVal(def);
+		else if (strcmp(def->defname, OPT_SKIP_TABLES) == 0)
+			skip_tables = getBoolVal(def);
+		else if (strcmp(def->defname, OPT_SKIP_VIEWS) == 0)
+			skip_views = getBoolVal(def);
+		else if (strcmp(def->defname, OPT_SKIP_MATVIEWS) == 0)
+			skip_matviews = getBoolVal(def);
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
@@ -2446,12 +2446,8 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 					errhint("Valid options in this context are: %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
 						OPT_CASE, OPT_COLLATION, OPT_READONLY, OPT_DBLINK,
 						OPT_MAX_LONG, OPT_SAMPLE, OPT_PREFETCH, OPT_LOB_PREFETCH,
-						OPT_SET_TIMEZONE, OPT_IMPORT_TABLES, OPT_IMPORT_VIEWS, OPT_IMPORT_MATVIEWS)));
+						OPT_SET_TIMEZONE, OPT_SKIP_TABLES, OPT_SKIP_VIEWS, OPT_SKIP_MATVIEWS)));
 	}
-
-	/* return an empty list if nothing is to be imported */
-	if (!import_tables && !import_views && !import_matviews)
-		return NIL;
 
 	/* if LIMIT TO is used, compose a list of quoted, upper case table names */
 	if (stmt->list_type == FDW_IMPORT_SCHEMA_LIMIT_TO)
@@ -2517,9 +2513,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			&typescale,
 			&nullable,
 			&key,
-			(int)import_tables,
-			(int)import_views,
-			(int)import_matviews
+			(int)skip_tables,
+			(int)skip_views,
+			(int)skip_matviews
 		);
 
 		if (rc == -1)
