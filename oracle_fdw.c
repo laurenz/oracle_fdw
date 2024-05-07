@@ -165,11 +165,6 @@ static Oid GEOMETRYOID = InvalidOid;
 static bool geometry_is_setup = false;
 
 /*
- * Controls the upper limit for prefetch.
- */
-static int max_allowed_prefetch = 1000;
-
-/*
  * Describes the valid options for objects that use this wrapper.
  */
 struct OracleFdwOption
@@ -206,6 +201,7 @@ struct OracleFdwOption
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
 #define DEFAULT_PREFETCH 50
+#define MAXIMUM_PREFETCH 1000
 #define DEFAULT_LOB_PREFETCH 1048576
 
 /*
@@ -609,11 +605,11 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
 
 			errno = 0;
 			prefetch = strtol(val, &endptr, 0);
-			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 1 || prefetch > max_allowed_prefetch )
+			if (val[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch < 1 || prefetch > MAXIMUM_PREFETCH)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 1 and %d.", max_allowed_prefetch)));
+						errhint("Valid values in this context are integers between 1 and %d.", MAXIMUM_PREFETCH)));
 		}
 
 		/* check valid values for "lob_prefetch" */
@@ -2416,11 +2412,11 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			prefetch = strVal(def->arg);
 			errno = 0;
 			prefetch_val = strtol(prefetch, &endptr, 0);
-			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 1 || prefetch_val > max_allowed_prefetch )
+			if (prefetch[0] == '\0' || *endptr != '\0' || errno != 0 || prefetch_val < 1 || prefetch_val > MAXIMUM_PREFETCH)
 				ereport(ERROR,
 						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
 						errmsg("invalid value for option \"%s\"", def->defname),
-						errhint("Valid values in this context are integers between 0 and %d.", max_allowed_prefetch )));
+						errhint("Valid values in this context are integers between 0 and %d.", MAXIMUM_PREFETCH)));
 		}
 		else if (strcmp(def->defname, OPT_LOB_PREFETCH) == 0)
 		{
@@ -2779,15 +2775,18 @@ struct OracleFdwState
 	else
 		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
 
-	/* Reduce "prefetch" if required to meet configured limit */
-	if (fdwState->prefetch > max_allowed_prefetch)
+	/*
+         * reduce "prefetch" if required to meet the configured limit.
+         * the limit for "prefetch" used to be higher than 1000.
+         */
+	if (fdwState->prefetch > MAXIMUM_PREFETCH)
 	{
-		fdwState->prefetch = max_allowed_prefetch;
+		fdwState->prefetch = MAXIMUM_PREFETCH;
 
 		ereport(WARNING,
 				(errcode(ERRCODE_WARNING),
 				errmsg("option \"%s\" for foreign table \"%s\" reduced to %d",
-					   OPT_PREFETCH, pgtablename, max_allowed_prefetch)));
+					   OPT_PREFETCH, pgtablename, MAXIMUM_PREFETCH)));
 	}
 
 	/* convert "lob_prefetch" to number (or use default) */
