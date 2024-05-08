@@ -2776,9 +2776,10 @@ struct OracleFdwState
 		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
 
 	/*
-         * reduce "prefetch" if required to meet the configured limit.
-         * the limit for "prefetch" used to be higher than 1000.
-         */
+	 * Reduce "prefetch" if required to meet the configured limit.  Before
+	 * commit b4e21374b5, the limit was 10240, so there may be foreign tables
+	 * out there that have a higher value set for "prefetch".
+	 */
 	if (fdwState->prefetch > MAXIMUM_PREFETCH)
 	{
 		fdwState->prefetch = MAXIMUM_PREFETCH;
