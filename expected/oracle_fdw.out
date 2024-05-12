@@ -375,7 +375,7 @@ EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SEL
 ----------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
    Oracle query: SELECT /*fdfac5fa5afb2dc8*/ r1."ID", r1."VC" FROM "TYPETEST1" r1 WHERE (r1."VC" IN ('short', :p1)) ORDER BY r1."ID" ASC NULLS LAST
-   InitPlan 1 (returns $0)
+   InitPlan 1
      ->  Result
 (4 rows)
 
