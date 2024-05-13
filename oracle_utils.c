@@ -2533,7 +2533,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		"WHERE col.table_name = primkey_col.table_name(+) AND col.column_name = primkey_col.column_name(+)\n"
 		"  AND col.owner = :nsp\n"
 		"  AND col.table_name = obj.object_name AND obj.owner = :nsp\n"
-		"  AND obj.object_type NOT IN ('silly'%s)\n"
+		"  AND obj.object_type IN ('silly'%s)\n"
 		"%s%s%sORDER BY col.table_name, col.column_id";
 	char *column_query = NULL, *table_suffix = NULL;
 	OCIBind *bndhp = NULL;
@@ -2629,16 +2629,12 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 			strcat(table_suffix, qdblink);
 		}
 
-		/*
-		 * Types of objects to import.
-		 * We can rely that at least one of them is set, because the calling
-		 * code already made sure of that.
-		 */
-		if (skip_tables)
+		/* types of objects to import */
+		if (!skip_tables)
 			strcat(object_types, ", 'TABLE'");
-		if (skip_views)
+		if (!skip_views)
 			strcat(object_types, ", 'VIEW'");
-		if (skip_matviews)
+		if (!skip_matviews)
 			strcat(object_types, ", 'MATERIALIZED VIEW'");
 
 		/* construct the query by appending the dblink to the catalog tables */
