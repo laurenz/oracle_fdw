@@ -31,6 +31,14 @@ END;$$;
 
 DO
 $$BEGIN
+   SELECT oracle_execute('oracle', 'DROP MATERIALIZED VIEW scott.mattest2');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+
+DO
+$$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest2 PURGE');
 EXCEPTION
    WHEN OTHERS THEN
@@ -126,6 +134,13 @@ SELECT oracle_execute(
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC'')\n'
           ')'
+       );
+
+-- a materialized view
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE MATERIALIZED VIEW scott.mattest2 REFRESH COMPLETE AS\n'
+          '   SELECT id, ts1, ts2, ts3 FROM scott.typetest2'
        );
 
 -- create the foreign tables
