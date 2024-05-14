@@ -825,9 +825,10 @@ the PostGIS binaries must be installed.
 
 The Oracle database must be prepared as follows:
 - A user `scott` with password `tiger` must exist (unless you want to edit
-  the regression test scripts).  The user needs CREATE SESSION, CREATE TABLE
-  and CREATE VIEW system privileges and enough quota on its default tablespace,
-  as well as SELECT privileges on V$SQL and V$SQL_PLAN.
+  the regression test scripts).  The user needs CREATE SESSION, CREATE TABLE,
+  CREATE VIEW and CREATE MATERIALIZED VIEW system privileges and enough quota
+  on its default tablespace, as well as SELECT privileges on V$SQL and
+  V$SQL_PLAN.
 
 Set the environment for the PostgreSQL server so that it can establish an
 Oracle connection without connect string:
