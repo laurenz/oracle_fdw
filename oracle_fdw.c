@@ -765,7 +765,12 @@ _PG_init(void)
 	pfree(pgver_str);
 
 	if ((pgver >= 90600 && pgver <= 90608)
-			|| (pgver >= 100000 && pgver <= 100003))
+			|| (pgver >= 100000 && pgver <= 100003)
+			|| (pgver >= 110000 && pgver <= 110010)
+			|| (pgver >= 120000 && pgver <= 120005)
+			|| (pgver >= 130000 && pgver <= 130009)
+			|| (pgver >= 140000 && pgver <= 140006)
+			|| (pgver >= 150000 && pgver <= 150001))
 		ereport(ERROR,
 				(errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
 				errmsg("PostgreSQL version \"%s\" not supported by oracle_fdw",
