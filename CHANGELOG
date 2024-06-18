@@ -19,6 +19,11 @@ Version 2.7.0
     Report by "w0pr".
   - Fix crash or empty result when reading larger CLOBs.
     Report by Rainer Hartwig and Erik van der Vlist.
+  - Bind empty string parameters as NULL values.
+    Failure to do that led to the error
+      ORA-01459: invalid length for variable character string
+    during the attempt to INSERT empty strings in a foreign table.
+    Report by Adrian Boangiu.
 
   Enhancements:
   - Speed up IMPORT FOREIGN SCHEMA ... LIMIT TO (...) by filtering out tables

@@ -6212,6 +6212,22 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 
 				value_len = VARSIZE(datum) - VARHDRSZ;
 
+				/*
+				 * If the value is an empty string, treat it as NULL.
+				 * The main reason for that is that binding an SQLT_LVB with
+				 * an empty string (four zero bytes) causes an ORA-01459.
+				 * The other reason is that Oracle treats empty strings as
+				 * NULL values anyway, so we don't lose much.
+				 * What we do lose is that a CLOB or BLOB column can actually
+				 * contain an empty string, so we should insert it as such,
+				 * but that is enough of a corner case that we can ignore it.
+				 */
+				if (value_len == 0)
+				{
+					param->value = NULL;
+					break;
+				}
+
 				/* the first 4 bytes contain the length */
 				param->value = palloc(value_len + 4);
 				memcpy(param->value, (const char *)&value_len, 4);
