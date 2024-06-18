@@ -291,6 +291,12 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db
    '3 years'
 );
 
+-- try inserting an empty string into a CLOB (will become NULL)
+BEGIN;
+INSERT INTO typetest1 (id, lc) VALUES (5, '');
+SELECT lc IS NULL FROM typetest1 WHERE id = 5;
+ROLLBACK;
+
 /*
  * Test SELECT, UPDATE ... RETURNING, DELETE and transactions.
  */
