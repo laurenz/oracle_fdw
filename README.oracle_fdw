@@ -186,10 +186,9 @@ Foreign server options
 - **nchar** (boolean, optional, defaults to `off`)
 
   Setting this option to `on` chooses a more expensive character conversion
-  on the Oracle side.  This is required if you are using a single-byte
-  Oracle database character set, but have NCHAR or NVARCHAR2 columns
-  containing contain characters that cannot be represented in the database
-  character set.
+  on the Oracle side.  This is required if Oracle tables have NCHAR or
+  NVARCHAR2 columns that contain characters that cannot be represented in the
+  Oracle database character set.
 
   Setting `nchar` to `on` has a noticable performance impact, and it causes
   ORA-01461 errors with UPDATE statements that set strings over 2000 bytes
