@@ -444,7 +444,7 @@ required tables.
 
 Similarly, ORDER BY clauses will be pushed down to Oracle wherever possible.
 Note that no ORDER BY condition that sorts by a character string will be
-pushed down as the sort orders in PostgreSQL an Oracle cannot be guaranteed
+pushed down as the sort orders in PostgreSQL and Oracle cannot be guaranteed
 to be the same.
 
 To make use of that, try to use simple conditions for the foreign table.
