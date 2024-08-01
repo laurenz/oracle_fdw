@@ -1,4 +1,4 @@
-Version 2.7.0
+Version 2.7.0, released 2024-08-01
 
   Bugfixes:
   - Don't push down LIMIT without an ORDER BY clause.
