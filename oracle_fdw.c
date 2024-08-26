@@ -201,7 +201,7 @@ struct OracleFdwOption
 #define DEFAULT_ISOLATION_LEVEL ORA_TRANS_SERIALIZABLE
 #define DEFAULT_MAX_LONG 32767
 #define DEFAULT_PREFETCH 50
-#define MAXIMUM_PREFETCH 1000
+#define MAXIMUM_PREFETCH 10240
 #define DEFAULT_LOB_PREFETCH 1048576
 
 /*
@@ -2779,21 +2779,6 @@ struct OracleFdwState
 		fdwState->prefetch = DEFAULT_PREFETCH;
 	else
 		fdwState->prefetch = (unsigned int)strtoul(fetch, NULL, 0);
-
-	/*
-	 * Reduce "prefetch" if required to meet the configured limit.  Before
-	 * commit b4e21374b5, the limit was 10240, so there may be foreign tables
-	 * out there that have a higher value set for "prefetch".
-	 */
-	if (fdwState->prefetch > MAXIMUM_PREFETCH)
-	{
-		fdwState->prefetch = MAXIMUM_PREFETCH;
-
-		ereport(WARNING,
-				(errcode(ERRCODE_WARNING),
-				errmsg("option \"%s\" for foreign table \"%s\" reduced to %d",
-					   OPT_PREFETCH, pgtablename, MAXIMUM_PREFETCH)));
-	}
 
 	/* convert "lob_prefetch" to number (or use default) */
 	if (lob_prefetch == NULL)
