@@ -294,10 +294,12 @@ Foreign table options
 
   Sets the number of rows that will be fetched with a single round-trip between
   PostgreSQL and Oracle during a foreign table scan.  The value must be between
-  1 and 1000.
+  1 and 10240.
 
   Higher values can speed up performance, but will use more memory on the
-  PostgreSQL server.
+  PostgreSQL server and can lead to out-of-memory errors there.  High values
+  usually won't offer any benefit unless the table rows are very small. Be
+  careful with high values; you have been warned.
 
   Note that there is no prefetching if the Oracle table contains columns of
   the type `MDSYS.SDO_GEOMETRY`.

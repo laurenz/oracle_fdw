@@ -1,3 +1,10 @@
+Version 2.8.0
+
+  Enhancements:
+  - Raise the limit for "prefetch" to 10240 again, like it was before
+    version 2.6.0.  Requested by Martin Nash, "AmebaBrain" and others.
+    Note that high values increase the risk of out-of-memory errors.
+
 Version 2.7.0, released 2024-08-01
 
   Bugfixes:
