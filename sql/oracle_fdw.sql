@@ -326,8 +326,16 @@ ALTER FOREIGN TABLE typetest1 ALTER COLUMN d TYPE timestamp(0) without time zone
 UPDATE typetest1 SET d = '1968-10-10 12:00:00' WHERE id = 1 RETURNING d;
 ROLLBACK;
 -- test if "IN" or "= ANY" expressions are pushed down correctly
+SELECT vc FROM typetest1 WHERE id IN (1, 3, 4) ORDER BY id;
+EXPLAIN (COSTS off) SELECT vc FROM typetest1 WHERE id IN (1, 3, 4) ORDER BY id;
 SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
 EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
+-- test NULLIF pushdown
+SELECT id FROM typetest1 WHERE nullif(id, 1) IS NULL ORDER BY id;
+EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE nullif(id, 1) IS NULL ORDER BY id;
+-- test coalesce() pushdown
+SELECT id FROM typetest1 WHERE coalesce(d, current_date) = current_date ORDER BY id;
+EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE coalesce(d, current_date) = current_date ORDER BY id;
 -- test modifications that need no foreign scan scan (bug #295)
 DELETE FROM typetest1 WHERE FALSE;
 UPDATE shorty SET c = NULL WHERE FALSE RETURNING *;
@@ -348,6 +356,8 @@ UPDATE gen SET id = 6 WHERE id = 5;
 SELECT id, c FROM gen WHERE id = 6;
 DELETE FROM gen WHERE id = 6;
 DROP FOREIGN TABLE gen;
+-- test for "ctid" in the WHERE clause (should fail)
+SELECT id FROM typetest1 WHERE ctid = '(0, 1)';
 
 /*
  * Test "strip_zeros" column option.

@@ -375,7 +375,7 @@ static struct oraTable *build_join_oratable(struct OracleFdwState *fdwState, Lis
 static void getColumnData(Oid foreigntableid, struct oraTable *oraTable);
 static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows, int targrows, double *totalrows, double *totaldeadrows);
 static void appendAsType(StringInfoData *dest, const char *s, Oid type);
-static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params);
+static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool check_only);
 static char *datumToString(Datum datum, Oid type);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
@@ -3165,7 +3165,7 @@ appendConditions(List *exprs, StringInfo buf, RelOptInfo *joinrel, List **params
 			appendStringInfo(buf, " AND ");
 
 		/* deparse and append a join condition */
-		where = deparseExpr(NULL, joinrel, expr, NULL, params_list);
+		where = deparseExpr(NULL, joinrel, expr, NULL, params_list, false);
 		appendStringInfo(buf, "%s", where);
 
 		is_first = false;
@@ -3230,7 +3230,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 		{
 			Expr *expr = (Expr *) lfirst(lc);
 
-			if (!deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params)))
+			if (!deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params), false))
 				return false;
 		}
 
@@ -3290,7 +3290,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 	{
 		Expr *expr = (Expr *) lfirst(lc);
 
-		if (deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params)))
+		if (deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params), false))
 			fdwState->remote_conds = lappend(fdwState->remote_conds, expr);
 		else
 			fdwState->local_conds = lappend(fdwState->local_conds, expr);
@@ -3395,7 +3395,7 @@ foreign_join_ok(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
 				char *tmp = NULL;
 				Expr *expr = (Expr *) lfirst(lc);
 
-				tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params));
+				tmp = deparseExpr(fdwState->session, joinrel, expr, fdwState->oraTable, &(fdwState->params), false);
 				Assert(tmp);
 				appendStringInfo(&where, " %s %s", keyword, tmp);
 				keyword = "AND";
@@ -3813,11 +3813,17 @@ appendAsType(StringInfoData *dest, const char *s, Oid type)
  * 		Returns NULL if that is not possible, else a palloc'ed string.
  * 		As a side effect, all Params incorporated in the WHERE clause
  * 		will be stored in "params".
+ * 		Another side effect is to throw an error if a reference to a system
+ * 		column other than "tableoid" is found in the expression.  For that
+ * 		purpose, processing doesn't stop if the expression cannot be pushed
+ * 		down.  Rather, the parameter "check_only" is set to true in further
+ * 		recursions, which skips constructing a deparsed expression.
  */
 char *
-deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params)
+deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool check_only)
 {
-	char *opername, *left, *right, *arg, oprkind;
+	char *opername, *left = NULL, *right = NULL, *arg = NULL,
+		**case_when, **case_then, *case_else = NULL, **arg_list, oprkind;
 	char parname[10];
 	Param *param;
 	Const *constant;
@@ -3844,9 +3850,10 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 	ArrayIterator iterator;
 	Datum datum;
 	bool first_arg, isNull;
-	int index;
+	int index, list_len;
 	StringInfoData alias;
 	const struct oraTable *var_table;  /* oraTable that belongs to a Var */
+	bool is_check_only = check_only;
 
 	if (expr == NULL)
 		return NULL;
@@ -3858,7 +3865,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			if (constant->constisnull)
 			{
 				/* only translate NULLs of a type Oracle can handle */
-				if (canHandleType(constant->consttype))
+			if (canHandleType(constant->consttype) && !is_check_only)
 				{
 					initStringInfo(&result);
 					appendStringInfo(&result, "NULL");
@@ -3868,8 +3875,12 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 			else
 			{
+				char *c;
+
+				if (is_check_only)
+					return NULL;
 				/* get a string representation of the value */
-				char *c = datumToString(constant->constvalue, constant->consttype);
+				c = datumToString(constant->constvalue, constant->consttype);
 				if (c == NULL)
 					return NULL;
 				else
@@ -3883,7 +3894,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			param = (Param *)expr;
 
 			/* don't try to handle interval parameters */
-			if (! canHandleType(param->paramtype) || param->paramtype == INTERVALOID)
+			if (is_check_only || !canHandleType(param->paramtype) || param->paramtype == INTERVALOID)
 				return NULL;
 
 			/* find the index in the parameter list */
@@ -3938,9 +3949,22 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			{
 				/* the variable belongs to a foreign table, replace it with the name */
 
-				/* we cannot handle system columns */
+				/*
+				 * System columns deserve special attention.
+				 * We cannot push them down, and with the exception of
+				 * "tableoid", it is an error to reference them, because
+				 * they have no meaningful value.
+				 */
 				if (variable->varattno < 1)
-					return NULL;
+				{
+					if (variable->varattno == TableOidAttributeNumber)
+						return NULL;
+
+					ereport(ERROR,
+							(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+							errmsg("cannot reference system columns of Oracle foreign tables"),
+							errdetail("These columns don't have a meaning in Oracle, so using them leads to wrong results.")));
+				}
 
 				/*
 				 * Allow boolean columns here.
@@ -3997,7 +4021,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			{
 				/* treat it like a parameter */
 				/* don't try to handle type interval */
-				if (! canHandleType(variable->vartype) || variable->vartype == INTERVALOID)
+				if (is_check_only || !canHandleType(variable->vartype) || variable->vartype == INTERVALOID)
 					return NULL;
 
 				/* find the index in the parameter list */
@@ -4039,16 +4063,24 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 
 			/* ignore operators in other than the pg_catalog schema */
 			if (schema != PG_CATALOG_NAMESPACE)
-				return NULL;
+				is_check_only = true;
 
-			if (! canHandleType(rightargtype))
-				return NULL;
+			if (!canHandleType(rightargtype))
+				is_check_only = true;
 
 			/*
 			 * Don't translate operations on two intervals.
 			 * INTERVAL YEAR TO MONTH and INTERVAL DAY TO SECOND don't mix well.
 			 */
 			if (leftargtype == INTERVALOID && rightargtype == INTERVALOID)
+				is_check_only = true;
+
+			left = deparseExpr(session, foreignrel, linitial(oper->args), oraTable, params, is_check_only);
+
+			if (oprkind == 'b')
+				right = deparseExpr(session, foreignrel, lsecond(oper->args), oraTable, params, is_check_only);
+
+			if (is_check_only || left == NULL || (oprkind == 'b' && right == NULL))
 				return NULL;
 
 			/* the operators that we can translate */
@@ -4078,24 +4110,9 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 				|| strcmp(opername, "|/") == 0
 				|| strcmp(opername, "@") == 0)
 			{
-				left = deparseExpr(session, foreignrel, linitial(oper->args), oraTable, params);
-				if (left == NULL)
-				{
-					pfree(opername);
-					return NULL;
-				}
-
 				if (oprkind == 'b')
 				{
 					/* binary operator */
-					right = deparseExpr(session, foreignrel, lsecond(oper->args), oraTable, params);
-					if (right == NULL)
-					{
-						pfree(left);
-						pfree(opername);
-						return NULL;
-					}
-
 					initStringInfo(&result);
 					if (strcmp(opername, "~~") == 0)
 					{
@@ -4130,8 +4147,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 						/* the other operators have the same name in Oracle */
 						appendStringInfo(&result, "(%s %s %s)", left, opername, right);
 					}
-					pfree(right);
-					pfree(left);
 				}
 				else
 				{
@@ -4150,7 +4165,6 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 						/* unary + or - */
 						appendStringInfo(&result, "(%s%s)", opername, left);
 					}
-					pfree(left);
 				}
 			}
 			else
@@ -4187,29 +4201,35 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 
 			/* ignore operators in other than the pg_catalog schema */
 			if (schema != PG_CATALOG_NAMESPACE)
-				return NULL;
+				is_check_only = true;
 
 			/* don't try to push down anything but IN and NOT IN expressions */
 			if ((strcmp(opername, "=") != 0 || ! arrayoper->useOr)
 					&& (strcmp(opername, "<>") != 0 || arrayoper->useOr))
-				return NULL;
+				is_check_only = true;
 
 			if (! canHandleType(leftargtype))
-				return NULL;
+				is_check_only = true;
 
-			left = deparseExpr(session, foreignrel, linitial(arrayoper->args), oraTable, params);
+			left = deparseExpr(session, foreignrel, linitial(arrayoper->args), oraTable, params, is_check_only);
 			if (left == NULL)
-				return NULL;
+				is_check_only = true;
 
 			/* begin to compose result */
-			initStringInfo(&result);
-			appendStringInfo(&result, "(%s %s (", left, arrayoper->useOr ? "IN" : "NOT IN");
+			if (!is_check_only)
+			{
+				initStringInfo(&result);
+				appendStringInfo(&result, "(%s %s (", left, arrayoper->useOr ? "IN" : "NOT IN");
+			}
 
-			/* the second (=last) argument can be Const, ArrayExpr or ArrayCoerceExpr */
+			/* we can handle Const, ArrayExpr or ArrayCoerceExpr on the right side */
 			rightexpr = (Expr *)llast(arrayoper->args);
 			switch (rightexpr->type)
 			{
 				case T_Const:
+					if (is_check_only)
+						break;
+
 					/* the second (=last) argument is a Const of ArrayType */
 					constant = (Const *)rightexpr;
 
@@ -4283,14 +4303,15 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 					foreach(cell, array->elements)
 					{
 						/* convert the argument to a string */
-						char *element = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+						char *element = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params, is_check_only);
 
-						/* if any element cannot be converted, give up */
+						/* if any element cannot be converted, we don't push it down */
 						if (element == NULL)
-							return NULL;
+							is_check_only = true;
 
-						/* append the argument */
-						appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", element);
+						if (!is_check_only)
+							appendStringInfo(&result, "%s%s", first_arg ? "" : ", ", element);
+
 						first_arg = false;
 					}
 
@@ -4305,7 +4326,8 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			}
 
 			/* two parentheses close the expression */
-			appendStringInfo(&result, "))");
+			if (!is_check_only)
+				appendStringInfo(&result, "))");
 
 			break;
 		case T_NullIfExpr:
@@ -4319,19 +4341,13 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			ReleaseSysCache(tuple);
 
 			if (! canHandleType(rightargtype))
-				return NULL;
+				is_check_only = true;
 
-			left = deparseExpr(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params);
-			if (left == NULL)
-			{
+			left = deparseExpr(session, foreignrel, linitial(((NullIfExpr *)expr)->args), oraTable, params, is_check_only);
+			right = deparseExpr(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params, is_check_only);
+
+			if (left == NULL || right == NULL || is_check_only)
 				return NULL;
-			}
-			right = deparseExpr(session, foreignrel, lsecond(((NullIfExpr *)expr)->args), oraTable, params);
-			if (right == NULL)
-			{
-				pfree(left);
-				return NULL;
-			}
 
 			initStringInfo(&result);
 			appendStringInfo(&result, "NULLIF(%s, %s)", left, right);
@@ -4340,117 +4356,119 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 		case T_BoolExpr:
 			boolexpr = (BoolExpr *)expr;
 
-			arg = deparseExpr(session, foreignrel, linitial(boolexpr->args), oraTable, params);
+			arg = deparseExpr(session, foreignrel, linitial(boolexpr->args), oraTable, params, is_check_only);
 			if (arg == NULL)
-				return NULL;
+				is_check_only = true;
 
-			initStringInfo(&result);
-			appendStringInfo(&result, "(%s%s",
-					boolexpr->boolop == NOT_EXPR ? "NOT " : "",
-					arg);
+			if (!is_check_only)
+			{
+				initStringInfo(&result);
+				appendStringInfo(&result, "(%s%s",
+						boolexpr->boolop == NOT_EXPR ? "NOT " : "",
+						arg);
+			}
 
 			do_each_cell(cell, boolexpr->args, list_next(boolexpr->args, list_head(boolexpr->args)))
 			{
-				arg = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
+				arg = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params, is_check_only);
 				if (arg == NULL)
-				{
-					pfree(result.data);
-					return NULL;
-				}
+					is_check_only = true;
 
-				appendStringInfo(&result, " %s %s",
-						boolexpr->boolop == AND_EXPR ? "AND" : "OR",
-						arg);
+				if (!is_check_only)
+					appendStringInfo(&result, " %s %s",
+							boolexpr->boolop == AND_EXPR ? "AND" : "OR",
+							arg);
 			}
-			appendStringInfo(&result, ")");
+			if (!is_check_only)
+				appendStringInfo(&result, ")");
 
 			break;
 		case T_RelabelType:
-			return deparseExpr(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params);
+			return deparseExpr(session, foreignrel, ((RelabelType *)expr)->arg, oraTable, params, is_check_only);
 			break;
 		case T_CoerceToDomain:
-			return deparseExpr(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params);
+			return deparseExpr(session, foreignrel, ((CoerceToDomain *)expr)->arg, oraTable, params, is_check_only);
 			break;
 		case T_CaseExpr:
 			caseexpr = (CaseExpr *)expr;
 
 			if (! canHandleType(caseexpr->casetype))
-				return NULL;
+				is_check_only = true;
 
-			initStringInfo(&result);
-			appendStringInfo(&result, "CASE");
-
-			/* for the form "CASE arg WHEN ...", add first expression */
+			/* for the form "CASE arg WHEN ...", try to deparse the argument */
 			if (caseexpr->arg != NULL)
 			{
-				arg = deparseExpr(session, foreignrel, caseexpr->arg, oraTable, params);
+				arg = deparseExpr(session, foreignrel, caseexpr->arg, oraTable, params, is_check_only);
 				if (arg == NULL)
-				{
-					pfree(result.data);
-					return NULL;
-				}
-				else
-				{
-					appendStringInfo(&result, " %s", arg);
-				}
+					is_check_only = true;
 			}
 
-			/* append WHEN ... THEN clauses */
+			list_len = list_length(caseexpr->args);
+			case_when = palloc(sizeof(char *) * list_len);
+			case_then = palloc(sizeof(char *) * list_len);
+
+			/* deparse WHEN ... THEN clauses */
+			index = -1;
 			foreach(cell, caseexpr->args)
 			{
 				CaseWhen *whenclause = (CaseWhen *)lfirst(cell);
+				Expr *arg_expr;
 
-				/* WHEN */
+				/*
+				 * For "CASE WHEN", use the whole expression.
+				 * For "CASE arg WHEN", use only the right branch of the equality comparison.
+				 */
 				if (caseexpr->arg == NULL)
-				{
-					/* for CASE WHEN ..., use the whole expression */
-					arg = deparseExpr(session, foreignrel, whenclause->expr, oraTable, params);
-				}
+					arg_expr = whenclause->expr;
 				else
-				{
-					/* for CASE arg WHEN ..., use only the right branch of the equality */
-					arg = deparseExpr(session, foreignrel, lsecond(((OpExpr *)whenclause->expr)->args), oraTable, params);
-				}
+					arg_expr = lsecond(((OpExpr *)whenclause->expr)->args);
 
-				if (arg == NULL)
-				{
-					pfree(result.data);
-					return NULL;
-				}
-				else
-				{
-					appendStringInfo(&result, " WHEN %s", arg);
-					pfree(arg);
-				}
+				case_when[++index] = deparseExpr(session, foreignrel, arg_expr, oraTable, params, is_check_only);
+				if (case_when[index] == NULL)
+					is_check_only = true;
 
-				/* THEN */
-				arg = deparseExpr(session, foreignrel, whenclause->result, oraTable, params);
-				if (arg == NULL)
-				{
-					pfree(result.data);
-					return NULL;
-				}
-				else
-				{
-					appendStringInfo(&result, " THEN %s", arg);
-					pfree(arg);
-				}
+				case_then[index] = deparseExpr(session, foreignrel, whenclause->result, oraTable, params, is_check_only);
+				if (case_then[index] == NULL)
+					is_check_only = true;
+			}
+
+			/* deparse ELSE clause if appropriate */
+			if (caseexpr->defresult != NULL)
+			{
+				case_else = deparseExpr(session, foreignrel, caseexpr->defresult, oraTable, params, is_check_only);
+				if (case_else == NULL)
+					is_check_only = true;
+			}
+
+			if (is_check_only)
+				return NULL;
+
+			/* compose the result string */
+			initStringInfo(&result);
+			appendStringInfo(&result, "CASE");
+
+			/* for the form "CASE arg WHEN", add the first expression */
+			if (caseexpr->arg != NULL)
+			{
+				appendStringInfo(&result, " %s", arg);
+				pfree(arg);
+			}
+
+			/* append WHEN ... THEN clauses */
+			for (index = 0; index < list_len; ++index)
+			{
+				appendStringInfo(&result, " WHEN %s", case_when[index]);
+				pfree(case_when[index]);
+
+				appendStringInfo(&result, " THEN %s", case_then[index]);
+				pfree(case_then[index]);
 			}
 
 			/* append ELSE clause if appropriate */
 			if (caseexpr->defresult != NULL)
 			{
-				arg = deparseExpr(session, foreignrel, caseexpr->defresult, oraTable, params);
-				if (arg == NULL)
-				{
-					pfree(result.data);
-					return NULL;
-				}
-				else
-				{
-					appendStringInfo(&result, " ELSE %s", arg);
-					pfree(arg);
-				}
+				appendStringInfo(&result, " ELSE %s", case_else);
+				pfree(case_else);
 			}
 
 			/* append END */
@@ -4460,31 +4478,36 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			coalesceexpr = (CoalesceExpr *)expr;
 
 			if (! canHandleType(coalesceexpr->coalescetype))
+				is_check_only = true;
+
+			list_len = list_length(coalesceexpr->args);
+			arg_list = palloc(sizeof(char *) * list_len);
+
+			index = -1;
+			foreach(cell, coalesceexpr->args)
+			{
+				arg_list[++index] = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params, is_check_only);
+				if (arg_list[index] == NULL)
+					is_check_only = true;
+			}
+
+			if (is_check_only)
 				return NULL;
 
 			initStringInfo(&result);
 			appendStringInfo(&result, "COALESCE(");
 
 			first_arg = true;
-			foreach(cell, coalesceexpr->args)
+			for (index = 0; index < list_len; ++index)
 			{
-				arg = deparseExpr(session, foreignrel, (Expr *)lfirst(cell), oraTable, params);
-				if (arg == NULL)
-				{
-					pfree(result.data);
-					return NULL;
-				}
-
 				if (first_arg)
 				{
-					appendStringInfo(&result, "%s", arg);
+					appendStringInfo(&result, "%s", arg_list[index]);
 					first_arg = false;
 				}
 				else
-				{
-					appendStringInfo(&result, ", %s", arg);
-				}
-				pfree(arg);
+					appendStringInfo(&result, ", %s", arg_list[index]);
+				pfree(arg_list[index]);
 			}
 
 			appendStringInfo(&result, ")");
@@ -4495,10 +4518,10 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 
 			/* since booleans are translated as (expr <> 0), we cannot push them down */
 			if (exprType((Node *)rightexpr) == BOOLOID)
-				return NULL;
+				is_check_only = true;
 
-			arg = deparseExpr(session, foreignrel, rightexpr, oraTable, params);
-			if (arg == NULL)
+			arg = deparseExpr(session, foreignrel, rightexpr, oraTable, params, is_check_only);
+			if (is_check_only || arg == NULL)
 				return NULL;
 
 			initStringInfo(&result);
@@ -4510,11 +4533,11 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			func = (FuncExpr *)expr;
 
 			if (! canHandleType(func->funcresulttype))
-				return NULL;
+				is_check_only = true;
 
 			/* do nothing for implicit casts */
 			if (func->funcformat == COERCE_IMPLICIT_CAST)
-				return deparseExpr(session, foreignrel, linitial(func->args), oraTable, params);
+				return deparseExpr(session, foreignrel, linitial(func->args), oraTable, params, is_check_only);
 
 			/* get function name and schema */
 			tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->funcid));
@@ -4528,6 +4551,20 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 
 			/* ignore functions in other than the pg_catalog schema */
 			if (schema != PG_CATALOG_NAMESPACE)
+				is_check_only = true;
+
+			list_len = list_length(func->args);
+			arg_list = palloc(sizeof(char *) * list_len);
+
+			index = -1;
+			foreach(cell, func->args)
+			{
+				arg_list[++index] = deparseExpr(session, foreignrel, lfirst(cell), oraTable, params, is_check_only);
+				if (arg_list[index] == NULL)
+					is_check_only = true;
+			}
+
+			if (is_check_only)
 				return NULL;
 
 			/* the "normal" functions that we can translate */
@@ -4592,26 +4629,16 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 					appendStringInfo(&result, "%s(", opername);
 
 				first_arg = true;
-				foreach(cell, func->args)
+				for (index = 0; index < list_len; ++index)
 				{
-					arg = deparseExpr(session, foreignrel, lfirst(cell), oraTable, params);
-					if (arg == NULL)
-					{
-						pfree(result.data);
-						pfree(opername);
-						return NULL;
-					}
-
 					if (first_arg)
 					{
 						first_arg = false;
-						appendStringInfo(&result, "%s", arg);
+						appendStringInfo(&result, "%s", arg_list[index]);
 					}
 					else
-					{
-						appendStringInfo(&result, ", %s", arg);
-					}
-					pfree(arg);
+						appendStringInfo(&result, ", %s", arg_list[index]);
+					pfree(arg_list[index]);
 				}
 
 				appendStringInfo(&result, ")");
@@ -4619,12 +4646,8 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			else if (strcmp(opername, "date_part") == 0)
 			{
 				/* special case: EXTRACT */
-				left = deparseExpr(session, foreignrel, linitial(func->args), oraTable, params);
-				if (left == NULL)
-				{
-					pfree(opername);
-					return NULL;
-				}
+
+				left = arg_list[0];
 
 				/* can only handle these fields in Oracle */
 				if (strcmp(left, "'year'") == 0
@@ -4639,26 +4662,13 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 					/* remove final quote */
 					left[strlen(left) - 1] = '\0';
 
-					right = deparseExpr(session, foreignrel, lsecond(func->args), oraTable, params);
-					if (right == NULL)
-					{
-						pfree(opername);
-						pfree(left);
-						return NULL;
-					}
+					right = arg_list[1];
 
 					initStringInfo(&result);
 					appendStringInfo(&result, "EXTRACT(%s FROM %s)", left + 1, right);
 				}
 				else
-				{
-					pfree(opername);
-					pfree(left);
 					return NULL;
-				}
-
-				pfree(left);
-				pfree(right);
 			}
 			else if (strcmp(opername, "now") == 0
 				|| strcmp(opername, "current_timestamp") == 0
@@ -4771,7 +4781,10 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 			return NULL;
 	}
 
-	return result.data;
+	if (is_check_only)
+		return NULL;
+	else
+		return result.data;
 }
 
 /*
@@ -5246,7 +5259,8 @@ deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, Lis
 					fdwState->session, baserel,
 					((RestrictInfo *)lfirst(cell))->clause,
 					fdwState->oraTable,
-					&(fdwState->params)
+					&(fdwState->params),
+					false
 				);
 		if (where != NULL) {
 			*remote_conds = lappend(*remote_conds, ((RestrictInfo *)lfirst(cell))->clause);
@@ -6997,7 +7011,14 @@ pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *f
 				|| em_type == TIMESTAMPOID || em_type == TIMESTAMPTZOID || em_type == INTERVALOID);
 
 		if (can_pushdown &&
-			((sort_clause = deparseExpr(fdwState->session, baserel, em_expr, fdwState->oraTable, &(fdwState->params))) != NULL))
+			((sort_clause = deparseExpr(fdwState->session,
+										baserel,
+										em_expr,
+										fdwState->oraTable,
+										&(fdwState->params),
+										false)
+			 ) != NULL)
+			)
 		{
 			/* keep usable_pathkeys for later use. */
 			usable_pathkeys = lappend(usable_pathkeys, pathkey);
