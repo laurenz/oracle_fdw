@@ -1,5 +1,12 @@
 Version 2.8.0
 
+  Bugfixes:
+  - Throw an error if "ctid" or other system columns are used in the WHERE
+    clause.  Since these columns have no meaning in Oracle, they are assigned
+    meaningless values, and using them in WHERE conditions would lead to
+    meaningless results.
+    Reported in https://stackoverflow.com/q/78823195/6464308
+
   Enhancements:
   - Raise the limit for "prefetch" to 10240 again, like it was before
     version 2.6.0.  Requested by Martin Nash, "AmebaBrain" and others.
