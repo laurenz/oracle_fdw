@@ -907,6 +907,9 @@ oracleGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid
 					NULL,  /* default pathtarget */
 #endif  /* PG_VERSION_NUM */
 					baserel->rows,
+#if PG_VERSION_NUM >= 180000
+					0,  /* no disabled plan nodes */
+#endif  /* PG_VERSION_NUM */
 					fdwState->startup_cost,
 					fdwState->total_cost,
 					fdwState->usable_pathkeys,
@@ -1023,6 +1026,9 @@ oracleGetForeignJoinPaths(PlannerInfo *root,
 									   joinrel,
 									   NULL,	/* default pathtarget */
 									   rows,
+#if PG_VERSION_NUM >= 180000
+									   0,	/* no disabled plan nodes */
+#endif  /* PG_VERSION_NUM */
 									   startup_cost,
 									   total_cost,
 									   NIL, 	/* no pathkeys */
