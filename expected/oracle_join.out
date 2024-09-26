@@ -628,14 +628,16 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON true ORDER BY
                                         QUERY PLAN                                         
 -------------------------------------------------------------------------------------------
  Sort
+   Disabled Nodes: 1
    Sort Key: t1.id, t2.id
    ->  Merge Full Join
+         Disabled Nodes: 1
          ->  Foreign Scan on typetest1 t1
                Oracle query: SELECT /*f9bcb8b1884a883a*/ r1."ID" FROM "TYPETEST1" r1
          ->  Materialize
                ->  Foreign Scan on typetest1 t2
                      Oracle query: SELECT /*4f4c2f8a10477927*/ r2."ID" FROM "TYPETEST1" r2
-(8 rows)
+(10 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN typetest1  t2 ON true ORDER BY t1.id, t2.id;
  id | id 
@@ -741,14 +743,16 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN (SELECT * FROM typetest1  WHER
                                                           QUERY PLAN                                                          
 ------------------------------------------------------------------------------------------------------------------------------
  Sort
+   Disabled Nodes: 1
    Sort Key: t1.id, typetest1.id
    ->  Merge Full Join
+         Disabled Nodes: 1
          ->  Foreign Scan on typetest1 t1
                Oracle query: SELECT /*f9bcb8b1884a883a*/ r1."ID" FROM "TYPETEST1" r1
          ->  Materialize
                ->  Foreign Scan on typetest1
                      Oracle query: SELECT /*ac186001cd96ffc9*/ r4."ID", r4."VC" FROM "TYPETEST1" r4 WHERE (r4."VC" = 'short')
-(8 rows)
+(10 rows)
 
 SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN (SELECT * FROM typetest1  WHERE vc = 'short') t2 ON true ORDER BY t1.id, t2.id;
  id | id 
