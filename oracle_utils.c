@@ -2331,6 +2331,7 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 	OCILobLocator *locp = *(OCILobLocator **)locptr;
 	oraub8 amount_byte, amount_char, lobsize;
 	sword result = OCI_SUCCESS;
+	unsigned long chars_received = 0;
 
 	/* initialize result buffer length */
 	*value_len = 0;
@@ -2410,6 +2411,13 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
 
 		/* update LOB length */
 		*value_len += (long)amount_byte;
+		chars_received += amount_char;
+
+		/* stop reading data if we got at least "trunc" bytes or characters */
+		if (trunc != 0 &&
+			((type == ORA_TYPE_CLOB && chars_received >= trunc) ||
+			 *value_len >= trunc))
+			break;
 	}
 	while (result == OCI_NEED_DATA);
 
