@@ -1110,13 +1110,15 @@ struct oraTable
 		{
 			case SQLT_AFC:
 				/* CHAR(n) */
-				reply->cols[i-1]->oratype = ORA_TYPE_CHAR;
+				reply->cols[i-1]->oratype =
+					(csfrm == SQLCS_NCHAR) ? ORA_TYPE_NCHAR : ORA_TYPE_CHAR;
 				reply->cols[i-1]->val_size = charsize * 4 + 1;
 				break;
 			case SQLT_CHR:
 			case SQLT_VCS:
 				/* VARCHAR(n) and VARCHAR2(n) */
-				reply->cols[i-1]->oratype = ORA_TYPE_VARCHAR2;
+				reply->cols[i-1]->oratype =
+					(csfrm == SQLCS_NCHAR) ? ORA_TYPE_NVARCHAR2 : ORA_TYPE_VARCHAR2;
 				reply->cols[i-1]->val_size = charsize * 4 + 1;
 				break;
 			case SQLT_BLOB:
