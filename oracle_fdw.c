@@ -5162,6 +5162,23 @@ getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 void
 checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname)
 {
+	/*
+	 * There is known bug with CLOBs and Oracle client 21.
+	 * Issue a warning for that combination.
+	 */
+	if (oratype == ORA_TYPE_CLOB)
+	{
+		int major, minor, update, patch, port_patch;
+
+		oracleClientVersion(&major, &minor, &update, &patch, &port_patch);
+
+		if (major == 21)
+			ereport(WARNING,
+					(errcode(ERRCODE_WARNING),
+					 errmsg("CLOBs may appear empty with Oracle client 21"),
+					 errhint("Use a different Oracle client version to avoid bad query results.")));
+	}
+
 	/* the binary Oracle types can be converted to bytea */
 	if ((oratype == ORA_TYPE_RAW
 			|| oratype == ORA_TYPE_BLOB
