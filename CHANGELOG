@@ -10,6 +10,9 @@ Version 2.8.0
     Due to an omission, that option never worked, and NCHAR and NVARCHAR2
     columns were converted wrongly even if "nchar" was "on".
     Report and analysis by Andrey Teplitskiy.
+  - Fix IMPORT FOREIGN SCHEMA so that it imports tables whose name is the same
+    as the name of an index.
+    Report by Leho Lehes.
 
   Enhancements:
   - Raise the limit for "prefetch" to 10240 again, like it was before

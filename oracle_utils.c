@@ -2543,6 +2543,7 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 		"             /* materialized views show up as TABLE and as MATERIALIZED VIEW */\n"
 		"             min(object_type) AS object_type\n"
 		"           FROM all_objects%s\n"
+		"           WHERE object_type <> 'INDEX'\n"
 		"           GROUP BY owner, object_name) obj\n"
 		"WHERE col.table_name = primkey_col.table_name(+)\n"
 		"  AND col.column_name = primkey_col.column_name(+)\n"
