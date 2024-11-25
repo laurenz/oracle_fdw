@@ -166,7 +166,9 @@ Foreign server options
 - **isolation_level** (optional, defaults to `serializable`)
 
   The transaction isolation level to use at the Oracle database.  
-  The value can be `serializable`, `read_committed` or `read_only`.
+  The value can be `serializable`, `read_committed` or `read_only`.  (READ ONLY
+  actually is a transaction access mode, not an isolation level, but we ignore
+  that distinction here.)
 
   Note that the Oracle table can be queried more than once during a single
   PostgreSQL statement (for example, during a nested loop join).  To make
