@@ -13,6 +13,9 @@ Version 2.8.0
   - Fix IMPORT FOREIGN SCHEMA so that it imports tables whose name is the same
     as the name of an index.
     Report by Leho Lehes.
+  - Don't push down ORDER BY and LIMIT clauses.
+    This is a regression, but was necessary because the existing support for
+    pushing down ORDER BY was buggy, as reported by "gytune74".
 
   Enhancements:
   - Raise the limit for "prefetch" to 10240 again, like it was before
