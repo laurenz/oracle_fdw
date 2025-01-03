@@ -517,6 +517,16 @@ COPY shorty FROM STDIN;
 ROLLBACK;
 
 /*
+ * Test ORDER BY pushdown.
+ */
+
+-- don't push down string data types
+EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY id, vc;
+-- push down complicated expressions
+EXPLAIN (COSTS off) SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+SELECT id FROM typetest1 ORDER BY length(vc), CASE WHEN vc IS NULL THEN 0 ELSE 1 END, ts DESC NULLS FIRST FOR UPDATE;
+
+/*
  * Test that incorrect type mapping throws an error.
  */
 
@@ -555,6 +565,31 @@ EXECUTE stmt('{varlena,nonsense}');
 EXECUTE stmt('{varlena,nonsense}');
 DEALLOCATE stmt;
 
+
+/*
+ * Test push-down of the LIMIT clause.
+ */
+
+-- the LIMIT clause is only pushed down with ORDER BY
+EXPLAIN (COSTS off) SELECT d FROM typetest1 LIMIT 2;
+EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY d LIMIT 2;
+SELECT d FROM typetest1 ORDER BY d LIMIT 2;
+-- the LIMIT clause is not pushed down because the ORDER BY is not
+EXPLAIN (COSTS off) SELECT d FROM typetest1 ORDER BY lc LIMIT 2;
+-- with an OFFSET clause, the offset value is added to the limit
+EXPLAIN (COSTS off) SELECT * FROM qtest ORDER BY id LIMIT 1 OFFSET 2;
+SELECT * FROM qtest ORDER BY id LIMIT 1 OFFSET 2;
+-- no LIMIT push-down if there is a GROUP BY clause
+EXPLAIN (COSTS off) SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
+SELECT d, count(*) FROM typetest1 GROUP BY d LIMIT 2;
+-- no LIMIT push-down if there is an aggregate function
+EXPLAIN (COSTS off) SELECT 12 - count(*) FROM typetest1 LIMIT 1;
+SELECT 12 - count(*) FROM typetest1 LIMIT 1;
+-- no LIMIT push-down if there is a local WHERE condition
+EXPLAIN (COSTS OFF) SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
+SELECT id FROM typetest1 WHERE vc < 'u' LIMIT 1;
+-- no LIMIT pushdown with FOR SHARE/UPDATE
+EXPLAIN (COSTS OFF) SELECT id FROM typetest1 ORDER BY id LIMIT 1 FOR UPDATE;
 
 /* test ANALYZE */
 
