@@ -13,6 +13,9 @@ Version 2.8.0
   - Fix IMPORT FOREIGN SCHEMA so that it imports tables whose name is the same
     as the name of an index.
     Report by Leho Lehes.
+  - Don't push down LIMIT.
+    This is a regression from older releases, but the current implementation
+    was incorrect, as reported by "gytune74".
 
   Enhancements:
   - Raise the limit for "prefetch" to 10240 again, like it was before
