@@ -435,8 +435,8 @@ setting the `set_timezone` option on the foreign server.
 If you need conversions exceeding the above, define an appropriate view in
 Oracle or PostgreSQL.
 
-WHERE conditions
-----------------
+WHERE conditions and ORDER BY clauses
+-------------------------------------
 
 PostgreSQL will use all applicable parts of the WHERE clause as a filter
 for the scan.  The Oracle query that oracle_fdw constructs will contain a WHERE
@@ -445,6 +445,11 @@ safely be translated to Oracle SQL.  This feature, also known as *push-down
 of WHERE clauses*, can greatly reduce the number of rows retrieved from Oracle
 and may enable Oracle's optimizer to choose a good plan for accessing the
 required tables.
+
+Similarly, ORDER BY clauses will be pushed down to Oracle wherever possible.
+Note that no ORDER BY condition that sorts by a character string will be
+pushed down as the sort orders in PostgreSQL and Oracle cannot be guaranteed
+to be the same.
 
 To make use of that, try to use simple conditions for the foreign table.
 Choose PostgreSQL column data types that correspond to Oracle's types,
