@@ -59,6 +59,7 @@ ORDER BY t.relname, a.attnum;
  typetest1 | vc      | character varying           | 
  typetest1 | nvc     | character varying           | 
  typetest1 | lc      | text                        | 
+ typetest1 | lnc     | text                        | 
  typetest1 | r       | bytea                       | 
  typetest1 | u       | bytea                       | 
  typetest1 | lb      | bytea                       | 
@@ -71,5 +72,5 @@ ORDER BY t.relname, a.attnum;
  typetest1 | ts      | timestamp with time zone    | 
  typetest1 | ids     | interval                    | 
  typetest1 | iym     | interval                    | 
-(24 rows)
+(25 rows)
 
