@@ -63,6 +63,7 @@ SELECT oracle_execute(
           '   vc  VARCHAR2(10 CHAR),\n'
           '   nvc NVARCHAR2(10),\n'
           '   lc  CLOB,\n'
+          '   lnc NCLOB,\n'
           '   r   RAW(10),\n'
           '   u   RAW(16),\n'
           '   lb  BLOB,\n'
@@ -152,6 +153,7 @@ CREATE FOREIGN TABLE typetest1 (
    vc  character varying(10),
    nvc character varying(10),
    lc  text,
+   lnc text,
    r   bytea,
    u   uuid,
    lb  bytea,
@@ -181,6 +183,7 @@ CREATE FOREIGN TABLE longy (
    vc  character varying(10),
    nvc character varying(10),
    lc  text,
+   lnc text,
    r   bytea,
    u   uuid,
    lb  bytea,
@@ -217,13 +220,14 @@ ALTER SERVER oracle OPTIONS (DROP isolation_level);
 SELECT oracle_close_connections();
 DELETE FROM typetest1;
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    1,
    'fixed char',
    'nat''l char',
    'varlena',
    'nat''l var',
    'character large object',
+   'character national large object',
    bytea('\xDEADBEEF'),
    uuid('055e26fa-f1d8-771f-e053-1645990add93'),
    bytea('\xDEADBEEF'),
@@ -243,12 +247,13 @@ SELECT oracle_execute('oracle', 'UPDATE typetest1 SET b = 2 WHERE id = 1');
 
 INSERT INTO shorty (id, c) VALUES (2, NULL);
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    3,
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
+   E'a\u001B\u0007\u000D\u007Fb ABC' || repeat('X', 9000),
    E'a\u001B\u0007\u000D\u007Fb ABC' || repeat('X', 9000),
    bytea('\xDEADF00D'),
    uuid('055f3b32-a02c-4532-e053-1645990a6db2'),
@@ -264,8 +269,9 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, 
    '-2 years -6 months'
 );
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
    4,
+   'short',
    'short',
    'short',
    'short',
@@ -436,8 +442,8 @@ DELETE FROM qtest WHERE id = 5;
 
 BEGIN;
 COPY typetest1 FROM STDIN;
-666	cöpy	variation	dynamo	ünicode	Not very long	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years
-777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year
+666	cöpy	variation	dynamo	ünicode	Not very long	n'Clobber	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years
+777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	Foo	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year
 \.
 ROLLBACK;
 
@@ -450,8 +456,8 @@ CREATE TABLE defpart PARTITION OF party DEFAULT;
 ALTER TABLE party ATTACH PARTITION typetest1 FOR VALUES FROM (1) TO (MAXVALUE);
 BEGIN;
 COPY party FROM STDIN;
-666	cöpy	variation	dynamo	ünicode	Not very long	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years
-777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year
+666	cöpy	variation	dynamo	ünicode	Not very long	n'Clobber	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years
+777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	Foo	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year
 \.
 INSERT INTO party (id, lc, lr, lb)
    VALUES (12, 'very long character', '\x0001020304', '\xFFFEFDFC');

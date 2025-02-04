@@ -1137,20 +1137,11 @@ struct oraTable
 			case SQLT_CFILE:
 				/* CLOB and CFILE */
 				if (csfrm == SQLCS_NCHAR)
-				{
-					/*
-					 * We don't support NCLOB because Oracle cannot
-					 * transform it to the client character set automatically.
-					 */
-					reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
-					reply->cols[i-1]->val_size = 0;
-				}
+					reply->cols[i-1]->oratype = ORA_TYPE_NCLOB;
 				else
-				{
 					reply->cols[i-1]->oratype = ORA_TYPE_CLOB;
-					/* for LOB columns, "val" will contain a pointer to the locator */
-					reply->cols[i-1]->val_size = sizeof(OCILobLocator *);
-				}
+				/* for LOB columns, "val" will contain a pointer to the locator */
+				reply->cols[i-1]->val_size = sizeof(OCILobLocator *);
 				break;
 			case SQLT_NUM:
 				/* NUMBER */
@@ -2877,6 +2868,8 @@ int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, ch
 			*type = ORA_TYPE_BLOB;
 		else if (strcmp(typename, "CLOB") == 0)
 			*type = ORA_TYPE_CLOB;
+		else if (strcmp(typename, "NCLOB") == 0)
+			*type = ORA_TYPE_NCLOB;
 		else if (strcmp(typename, "BFILE") == 0)
 			*type = ORA_TYPE_BFILE;
 		else if (strcmp(typename, "LONG") == 0)
@@ -3341,6 +3334,7 @@ getOraType(oraType arg)
 		case ORA_TYPE_BFILE:
 			return SQLT_BFILE;
 		case ORA_TYPE_CLOB:
+		case ORA_TYPE_NCLOB:
 			return SQLT_CLOB;
 		case ORA_TYPE_RAW:
 			return SQLT_BIN;
@@ -3366,7 +3360,10 @@ bind_out_callback(void *octxp, OCIBind *bindp, ub4 iter, ub4 index, void **bufpp
 {
 	struct oraColumn *column = (struct oraColumn *)octxp;
 
-	if (column->oratype == ORA_TYPE_BLOB || column->oratype == ORA_TYPE_CLOB || column->oratype == ORA_TYPE_BFILE)
+	if (column->oratype == ORA_TYPE_BLOB
+			|| column->oratype == ORA_TYPE_CLOB
+			|| column->oratype == ORA_TYPE_NCLOB
+			|| column->oratype == ORA_TYPE_BFILE)
 	{
 		/* for LOBs, data should be written to the LOB locator */
 		*bufpp = *((OCILobLocator **)column->val);

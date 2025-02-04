@@ -2590,6 +2590,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 					appendStringInfo(&buf, "character varying(%d)", charlen == 0 ? 1 : charlen);
 					break;
 				case ORA_TYPE_CLOB:
+				case ORA_TYPE_NCLOB:
 				case ORA_TYPE_LONG:
 					appendStringInfo(&buf, "text");
 					break;
@@ -2982,6 +2983,8 @@ char
 			else if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_TIMESTAMPLTZ)
 				/* convert TIMESTAMP WITH LOCAL TIME ZONE to TIMESTAMP WITH TIME ZONE */
 				format = "%s(%s%s AT TIME ZONE sessiontimezone)";
+			else if (fdwState->oraTable->cols[i]->oratype == ORA_TYPE_NCLOB)
+				format = "%sTO_CLOB(%s%s)";
 			else
 				/* select the column as it is */
 				format = "%s%s%s";
@@ -3665,8 +3668,11 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 			else
 				appendStringInfo(&query, ", ");
 
-			/* append column name */
-			appendStringInfo(&query, "%s", fdw_state->oraTable->cols[i]->name);
+			/* append column name/expression */
+			if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_NCLOB)
+				appendStringInfo(&query, "TO_CLOB(%s)", fdw_state->oraTable->cols[i]->name);
+			else
+				appendStringInfo(&query, "%s", fdw_state->oraTable->cols[i]->name);
 		}
 	}
 
@@ -5221,9 +5227,10 @@ checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, con
 			&& pgtype == GEOMETRYOID)
 		return;
 
-	/* VARCHAR2 and CLOB can be converted to json */
+	/* VARCHAR2, CLOB and NCLOB can be converted to JSON */
 	if ((oratype == ORA_TYPE_VARCHAR2
-			|| oratype == ORA_TYPE_CLOB)
+			|| oratype == ORA_TYPE_CLOB
+			|| oratype == ORA_TYPE_NCLOB)
 			&& pgtype == JSONOID)
 		return;
 
@@ -6018,6 +6025,7 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 			break;
 		case ORA_TYPE_LONG:
 		case ORA_TYPE_CLOB:
+		case ORA_TYPE_NCLOB:
 			param->bindType = BIND_LONG;
 			break;
 		case ORA_TYPE_RAW:
@@ -6685,7 +6693,8 @@ convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values
 		/* get the data and its length */
 		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
 				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BFILE
-				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_NCLOB)
 		{
 			/* for LOBs, get the actual LOB contents (palloc'ed), truncated if desired */
 			oracleGetLob(fdw_state->session,
@@ -6863,7 +6872,8 @@ convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values
 		/* free the data buffer for LOBs */
 		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
 				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BFILE
-				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB)
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_CLOB
+				|| fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_NCLOB)
 			pfree(value);
 	}
 }

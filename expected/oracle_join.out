@@ -84,7 +84,7 @@ SELECT id FROM typetest1  NATURAL JOIN shorty  ORDER BY id;
 -- table with column that does not exist in Oracle (should become NULL)
 EXPLAIN (COSTS off)
 SELECT t1.id, t2.x FROM typetest1  t1 JOIN longy t2  ON t1.c = t2.c ORDER BY t1.id, t2.x;
-WARNING:  column number 19 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
+WARNING:  column number 20 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
                                                            QUERY PLAN                                                           
 --------------------------------------------------------------------------------------------------------------------------------
  Sort
@@ -94,7 +94,7 @@ WARNING:  column number 19 of foreign table "longy" does not exist in foreign Or
 (4 rows)
 
 SELECT t1.id, t2.x FROM typetest1  t1 JOIN longy t2  ON t1.c = t2.c ORDER BY t1.id, t2.x;
-WARNING:  column number 19 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
+WARNING:  column number 20 of foreign table "longy" does not exist in foreign Oracle table, will be replaced by NULL
  id | x 
 ----+---
   1 |  
@@ -762,31 +762,31 @@ SELECT t1.id, t2.id FROM typetest1  t1 FULL  JOIN (SELECT * FROM typetest1  WHER
 
 -- update statement, not pushed down
 EXPLAIN (COSTS off) UPDATE typetest1 t1 SET c = NULL FROM typetest1 t2 WHERE t1.vc = t2.vc AND t2.num = 3.14159;
-                                                                                                                                  QUERY PLAN                                                                                                                                  
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                           QUERY PLAN                                                                                                                                            
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1 t1
    Oracle statement: UPDATE "TYPETEST1" SET "C" = :p3 WHERE "ID" = :k1
    ->  Hash Join
          Hash Cond: ((t1.vc)::text = (t2.vc)::text)
          ->  Foreign Scan on typetest1 t1
-               Oracle query: SELECT /*c1ce793ab752187b*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 FOR UPDATE
+               Oracle query: SELECT /*73991485dbd8316e*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", TO_CLOB(r1."LNC"), r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 FOR UPDATE
          ->  Hash
                ->  Foreign Scan on typetest1 t2
-                     Oracle query: SELECT /*5524a3d88704cd21*/ r2."ID", r2."C", r2."NC", r2."VC", r2."NVC", r2."LC", r2."R", r2."U", r2."LB", r2."LR", r2."B", r2."NUM", r2."FL", r2."DB", r2."D", r2."TS", r2."IDS", r2."IYM" FROM "TYPETEST1" r2 WHERE (r2."NUM" = 3.14159)
+                     Oracle query: SELECT /*32cf3321915865e4*/ r2."ID", r2."C", r2."NC", r2."VC", r2."NVC", r2."LC", TO_CLOB(r2."LNC"), r2."R", r2."U", r2."LB", r2."LR", r2."B", r2."NUM", r2."FL", r2."DB", r2."D", r2."TS", r2."IDS", r2."IYM" FROM "TYPETEST1" r2 WHERE (r2."NUM" = 3.14159)
 (9 rows)
 
 -- join with FOR UPDATE, not pushed down
 EXPLAIN (COSTS off) SELECT t1.id FROM typetest1 t1, typetest1 t2 WHERE t1.id = t2.id FOR UPDATE;
-                                                                                                                          QUERY PLAN                                                                                                                          
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                  QUERY PLAN                                                                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  LockRows
    ->  Hash Join
          Hash Cond: (t1.id = t2.id)
          ->  Foreign Scan on typetest1 t1
-               Oracle query: SELECT /*c1ce793ab752187b*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 FOR UPDATE
+               Oracle query: SELECT /*73991485dbd8316e*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", TO_CLOB(r1."LNC"), r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 FOR UPDATE
          ->  Hash
                ->  Foreign Scan on typetest1 t2
-                     Oracle query: SELECT /*37932a36ac6a193e*/ r2."ID", r2."C", r2."NC", r2."VC", r2."NVC", r2."LC", r2."R", r2."U", r2."LB", r2."LR", r2."B", r2."NUM", r2."FL", r2."DB", r2."D", r2."TS", r2."IDS", r2."IYM" FROM "TYPETEST1" r2 FOR UPDATE
+                     Oracle query: SELECT /*d06d574561c310*/ r2."ID", r2."C", r2."NC", r2."VC", r2."NVC", r2."LC", TO_CLOB(r2."LNC"), r2."R", r2."U", r2."LB", r2."LR", r2."B", r2."NUM", r2."FL", r2."DB", r2."D", r2."TS", r2."IDS", r2."IYM" FROM "TYPETEST1" r2 FOR UPDATE
 (8 rows)
 
 -- join in CTE

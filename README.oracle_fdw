@@ -399,6 +399,7 @@ These conversions are automatically handled by oracle_fdw:
     VARCHAR2                 | char, varchar, text, json
     NVARCHAR2                | char, varchar, text
     CLOB                     | char, varchar, text, json
+    NCLOB                    | char, varchar, text, json
     LONG                     | char, varchar, text
     RAW                      | uuid, bytea
     BLOB                     | bytea
@@ -426,8 +427,8 @@ Inserting or updating XMLTYPE only works with values that do not exceed the
 maximum length of the VARCHAR2 data type (4000 or 32767, depending on the
 `MAX_STRING_SIZE` parameter).
 
-NCLOB is currently not supported because Oracle cannot automatically convert
-it to the client encoding.
+If you want to convert TIMESTAMP WITH LOCAL TIME ZONE to `timestamp`, consider
+setting the `set_timezone` option on the foreign server.
 
 If you want to convert TIMESTAMP WITH LOCAL TIME ZONE to `timestamp`, consider
 setting the `set_timezone` option on the foreign server.
