@@ -3710,7 +3710,11 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 	while((index = oracleFetchNext(fdw_state->session, fdw_state->prefetch)) > 0)
 	{
 		/* allow user to interrupt ANALYZE */
+#if PG_VERSION_NUM >= 180000
+		vacuum_delay_point(true);
+#else
 		vacuum_delay_point();
+#endif  /* PG_VERSION_NUM */
 
 		++fdw_state->rowcount;
 
