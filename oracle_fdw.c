@@ -26,6 +26,9 @@
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "commands/explain.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#endif  /* PG_VERSION_NUM */
 #include "commands/vacuum.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
