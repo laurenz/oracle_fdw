@@ -5438,7 +5438,6 @@ oracleConnectServer(Name srvname)
 {
 	Oid srvId = InvalidOid;
 	HeapTuple tup;
-	Relation rel;
 	ForeignServer *server;
 	UserMapping *mapping;
 	ForeignDataWrapper *wrapper;
@@ -5449,8 +5448,6 @@ oracleConnectServer(Name srvname)
 	bool have_nchar = false;
 
 	/* look up foreign server with this name */
-	rel = table_open(ForeignServerRelationId, AccessShareLock);
-
 	tup = SearchSysCacheCopy1(FOREIGNSERVERNAME, NameGetDatum(srvname));
 	if (!HeapTupleIsValid(tup))
 		ereport(ERROR,
@@ -5462,8 +5459,6 @@ oracleConnectServer(Name srvname)
 #else
 	srvId = ((Form_pg_foreign_server)GETSTRUCT(tup))->oid;
 #endif
-
-	table_close(rel, AccessShareLock);
 
 	/* get the foreign server, the user mapping and the FDW */
 	server = GetForeignServer(srvId);
