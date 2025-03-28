@@ -2897,22 +2897,22 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 			oraTable->cols[index-1]->pgtype = att_tuple->atttypid;
 			oraTable->cols[index-1]->pgtypmod = att_tuple->atttypmod;
 			oraTable->cols[index-1]->pgname = pstrdup(NameStr(att_tuple->attname));
-		}
 
-		/* loop through column options */
-		options = GetForeignColumnOptions(foreigntableid, att_tuple->attnum);
-		foreach(option, options)
-		{
-			DefElem *def = (DefElem *)lfirst(option);
-
-			/* is it the "key" option and is it set to "true" ? */
-			if (strcmp(def->defname, OPT_KEY) == 0 && getBoolVal(def))
+			/* loop through column options */
+			options = GetForeignColumnOptions(foreigntableid, att_tuple->attnum);
+			foreach(option, options)
 			{
-				/* mark the column as primary key column */
-				oraTable->cols[index-1]->pkey = 1;
+				DefElem *def = (DefElem *)lfirst(option);
+
+				/* is it the "key" option and is it set to "true" ? */
+				if (strcmp(def->defname, OPT_KEY) == 0 && getBoolVal(def))
+				{
+					/* mark the column as primary key column */
+					oraTable->cols[index-1]->pkey = 1;
+				}
+				else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && getBoolVal(def))
+					oraTable->cols[index-1]->strip_zeros = 1;
 			}
-			else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && getBoolVal(def))
-				oraTable->cols[index-1]->strip_zeros = 1;
 		}
 	}
 

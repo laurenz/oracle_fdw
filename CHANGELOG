@@ -16,6 +16,11 @@ Version 2.8.0
   - Don't push down LIMIT.
     This is a regression from older releases, but the current implementation
     was incorrect, as reported by "gytune74".
+  - Fix a crash with column options on non-existing columns.
+    If the Oracle table has fewer columns than the PostgreSQL foreign table and
+    one of these extra columns has a column option set, oracle_fdw would
+    crashes.
+    Reported by "ganshinm", analysis by "ziva777".
 
   Enhancements:
   - Raise the limit for "prefetch" to 10240 again, like it was before
