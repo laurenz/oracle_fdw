@@ -1246,7 +1246,7 @@ struct oraTable
 	return reply;
 }
 
-#define EXPLAIN_LINE_SIZE 2000
+#define EXPLAIN_LINE_SIZE 3000
 
 /*
  * oracleExplain

@@ -21,6 +21,11 @@ Version 2.8.0
     one of these extra columns has a column option set, oracle_fdw would
     crashes.
     Reported by "ganshinm", analysis by "ziva777".
+  - Increase the size of the Oracle execution plan lines.
+    With the previous limit of 1000, EXPLAIN (VERBOSE) for some Oracle metadata
+    queries resulted in
+      ORA-01406: fetched column value was truncated
+    Report by "ganshinm" and Egor Chindyaskin.
 
   Enhancements:
   - Raise the limit for "prefetch" to 10240 again, like it was before
