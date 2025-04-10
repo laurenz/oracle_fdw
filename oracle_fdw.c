@@ -7049,7 +7049,11 @@ pushdownOrderBy(PlannerInfo *root, RelOptInfo *baserel, struct OracleFdwState *f
 			appendStringInfoString(&orderedquery, sort_clause);
 			delim = ", ";
 
+#if PG_VERSION_NUM >= 180000
+			if (pathkey->pk_cmptype == COMPARE_LT)
+#else
 			if (pathkey->pk_strategy == BTLessStrategyNumber)
+#endif  /* PG_VERSION_NUM */
 				appendStringInfoString(&orderedquery, " ASC");
 			else
 				appendStringInfoString(&orderedquery, " DESC");
