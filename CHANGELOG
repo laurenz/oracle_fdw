@@ -1,4 +1,4 @@
-Version 2.8.0
+Version 2.8.0, released 2025-05-10
 
   Bugfixes:
   - Throw an error if "ctid" or other system columns are used in the WHERE
