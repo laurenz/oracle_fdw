@@ -806,7 +806,7 @@ To install the extension in a database, connect as superuser and
 
 That will define the required functions and create a foreign data wrapper.
 
-To upgrade from an oracle_fdw version before 1.0.0, use
+To upgrade from an oracle_fdw version before 2.3.0, use
 
     ALTER EXTENSION oracle_fdw UPDATE;
 
