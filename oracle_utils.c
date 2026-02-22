@@ -23,6 +23,15 @@
 
 #include "oracle_fdw.h"
 
+/* a copy of the PostgreSQL macro for -Wimplicit-fallthrough level 5 */
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L) || (defined(__cplusplus) && __cplusplus >= 201703L)
+#define pg_fallthrough [[fallthrough]]
+#elif __has_attribute(fallthrough)
+#define pg_fallthrough __attribute__((fallthrough))
+#else
+#define pg_fallthrough /* fallthrough */
+#endif
+
 /* number of bytes to read per LOB chunk */
 #define LOB_CHUNK_SIZE 65536
 
@@ -1232,8 +1241,9 @@ struct oraTable
 					reply->cols[i-1]->val_size = max_long + 4;
 					break;
 				}
-				else
-					/* fall through */
+
+				pg_fallthrough;
+				/* fall through */
 			default:
 				reply->cols[i-1]->oratype = ORA_TYPE_OTHER;
 				reply->cols[i-1]->val_size = 0;

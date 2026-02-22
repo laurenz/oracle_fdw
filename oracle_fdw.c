@@ -2674,6 +2674,9 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 						appendStringInfo(&buf, "geometry");
 						break;
 					}
+#ifdef pg_fallthrough
+					pg_fallthrough;
+#endif
 					/* fall through */
 				default:
 					elog(DEBUG2, "column \"%s\" of table \"%s\" has an untranslatable data type", colname, tabname);
@@ -4301,7 +4304,10 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 					/* the actual array is here */
 					rightexpr = arraycoerce->arg;
 
-					/* fall through ! */
+#ifdef pg_fallthrough
+					pg_fallthrough;
+#endif
+					/* fall through */
 
 				case T_ArrayExpr:
 					/* the second (=last) argument is an ArrayExpr */
