@@ -11,7 +11,7 @@
     <PostgreSQL>C:\Daten\pgsql\pg10-x86</PostgreSQL>
   </PropertyGroup>
   <PropertyGroup>
-    <IncludePath>$(PostgreSQL)\include\server\port\win32_msvc;$(PostgreSQL)\include\server\port\win32;$(PostgreSQL)\include\server\port;$(PostgreSQL)\include\server;$(PostgreSQL)\include\internal;$(PostgreSQL)\include;$(OracleClient)\sdk\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(PostgreSQL)\include\postgresql\server\port\win32_msvc;$(PostgreSQL)\include\postgresql\server\port\win32;$(PostgreSQL)\include\postgresql\server\port;$(PostgreSQL)\include\postgresql\server;$(PostgreSQL)\include\postgresql\internal;$(PostgreSQL)\include\server\port\win32_msvc;$(PostgreSQL)\include\server\port\win32;$(PostgreSQL)\include\server\port;$(PostgreSQL)\include\server;$(PostgreSQL)\include\internal;$(PostgreSQL)\include;$(OracleClient)\sdk\include;$(IncludePath)</IncludePath>
     <LibraryPath>$(PostgreSQL)\lib;$(OracleClient)\sdk\lib\msvc;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup />
