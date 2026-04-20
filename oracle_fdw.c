@@ -6549,7 +6549,11 @@ oracleDie(SIGNAL_ARGS)
 	 * we have to call CHECK_FOR_INTERRUPTS() before we report that error;
 	 * this is done in oracleError_d.
 	 */
+#if PG_VERSION_NUM >= 190000
+	die(postgres_signal_arg, pg_siginfo);
+#else
 	die(postgres_signal_arg);
+#endif  /*PG_VERSION_NUM */
 }
 
 /*
