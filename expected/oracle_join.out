@@ -458,8 +458,9 @@ SELECT 1 FROM (SELECT 1 FROM typetest1  WHERE false) AS subq1 RIGHT JOIN typetes
    ->  Foreign Scan on typetest1 ref1
          Oracle query: SELECT /*5d60d3afb74ea0b8*/ r2."ID" FROM "TYPETEST1" r2 ORDER BY r2."ID" ASC NULLS LAST
    ->  Result
+         Replaces: Scan on typetest1
          One-Time Filter: false
-(6 rows)
+(7 rows)
 
 SELECT 1 FROM (SELECT 1 FROM typetest1  WHERE false) AS subq1 RIGHT JOIN typetest1  AS ref1 ON NULL ORDER BY ref1.id;
  ?column? 
@@ -474,14 +475,17 @@ EXPLAIN (COSTS off)
 SELECT t1.id FROM typetest1  t1 WHERE EXISTS (SELECT 1 FROM typetest1  t2 WHERE t1.d = t2.d) ORDER BY t1.id;
                                                       QUERY PLAN                                                       
 -----------------------------------------------------------------------------------------------------------------------
- Nested Loop Semi Join
+ Nested Loop
    Join Filter: (t1.d = t2.d)
    ->  Foreign Scan on typetest1 t1
          Oracle query: SELECT /*722ea528526f9891*/ r1."ID", r1."D" FROM "TYPETEST1" r1 ORDER BY r1."ID" ASC NULLS LAST
    ->  Materialize
-         ->  Foreign Scan on typetest1 t2
-               Oracle query: SELECT /*dc521fd7d7e55464*/ r2."D" FROM "TYPETEST1" r2
-(7 rows)
+         ->  Unique
+               ->  Sort
+                     Sort Key: t2.d
+                     ->  Foreign Scan on typetest1 t2
+                           Oracle query: SELECT /*dc521fd7d7e55464*/ r2."D" FROM "TYPETEST1" r2
+(10 rows)
 
 SELECT t1.id FROM typetest1  t1 WHERE EXISTS (SELECT 1 FROM typetest1  t2 WHERE t1.d = t2.d) ORDER BY t1.id;
  id 
