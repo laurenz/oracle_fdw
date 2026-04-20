@@ -406,6 +406,15 @@ EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-16
 DEALLOCATE stmt;
 -- test NULL parameters
 SELECT id FROM typetest1 WHERE vc = (SELECT NULL::text);
+-- test ten parameters (bug from issue #770)
+BEGIN;
+SET LOCAL plan_cache_mode = force_generic_plan;
+PREPARE tenpar(char, char, varchar, varchar, varchar, varchar, text, text, float8, integer) AS
+   SELECT id FROM typetest1
+   WHERE c > $1 AND nc > $2 AND vc > $3 AND nvc > $4 AND vc < $5
+     AND nvc < $6 AND lc > $7 AND lnc > $8 AND fl = $9 AND id = $10;
+EXECUTE tenpar('', '', '', '', '', '', '', '', 0, 1);
+ROLLBACK;
 
 /*
  * Test current_timestamp.

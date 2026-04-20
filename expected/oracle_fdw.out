@@ -420,10 +420,10 @@ SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varch
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT id FROM typetest1 WHERE vc = ANY (ARRAY['short', (SELECT 'varlena'::varchar)]) ORDER BY id;
-                                                                     QUERY PLAN                                                                     
-----------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                       QUERY PLAN                                                                       
+--------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*fdfac5fa5afb2dc8*/ r1."ID", r1."VC" FROM "TYPETEST1" r1 WHERE (r1."VC" IN ('short', :p1)) ORDER BY r1."ID" ASC NULLS LAST
+   Oracle query: SELECT /*e4d3d23eb05ef98f*/ r1."ID", r1."VC" FROM "TYPETEST1" r1 WHERE (r1."VC" IN ('short', :p00001)) ORDER BY r1."ID" ASC NULLS LAST
    InitPlan expr_1
      ->  Result
 (4 rows)
@@ -544,7 +544,7 @@ EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RET
                                                                                                                                        QUERY PLAN                                                                                                                                        
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1
-   Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p7 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
+   Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p00007 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
    ->  Foreign Scan on typetest1
          Oracle query: SELECT /*5d45d93cfb9f3bf9*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", TO_CLOB(r1."LNC"), r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
 (4 rows)
@@ -603,10 +603,10 @@ EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-16
 (1 row)
 
 EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
-                                                                                                     QUERY PLAN                                                                                                      
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                             QUERY PLAN                                                                                                              
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on typetest1
-   Oracle query: SELECT /*948d44ca5107f0d1*/ r1."ID", r1."U", r1."D", r1."TS" FROM "TYPETEST1" r1 WHERE (r1."D" < CAST (:p1 AS DATE)) AND (r1."TS" < CAST (:p2 AS TIMESTAMP)) AND (r1."ID" = :p3) AND (r1."U" = :p4)
+   Oracle query: SELECT /*ae0d9ceb6a0072fd*/ r1."ID", r1."U", r1."D", r1."TS" FROM "TYPETEST1" r1 WHERE (r1."D" < CAST (:p00001 AS DATE)) AND (r1."TS" < CAST (:p00002 AS TIMESTAMP)) AND (r1."ID" = :p00003) AND (r1."U" = :p00004)
 (2 rows)
 
 EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00', '055e26fa-f1d8-771f-e053-1645990add93');
@@ -622,6 +622,19 @@ SELECT id FROM typetest1 WHERE vc = (SELECT NULL::text);
 ----
 (0 rows)
 
+-- test ten parameters (bug from issue #770)
+BEGIN;
+SET LOCAL plan_cache_mode = force_generic_plan;
+PREPARE tenpar(char, char, varchar, varchar, varchar, varchar, text, text, float8, integer) AS
+   SELECT id FROM typetest1
+   WHERE c > $1 AND nc > $2 AND vc > $3 AND nvc > $4 AND vc < $5
+     AND nvc < $6 AND lc > $7 AND lnc > $8 AND fl = $9 AND id = $10;
+EXECUTE tenpar('', '', '', '', '', '', '', '', 0, 1);
+ id 
+----
+(0 rows)
+
+ROLLBACK;
 /*
  * Test current_timestamp.
  */

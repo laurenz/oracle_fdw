@@ -5,6 +5,11 @@ Version 2.9.0
       ORA-03127: no new operations allowed until the active operation ends
     if the table contains larger LOBs.
     Report by "MMFERNANDEZC".
+  - Queries with ten or more parameters could, under certain circumstances,
+    cause the error
+      ERROR: error executing query: OCIBindByName failed to bind parameter
+      DETAIL: ORA-01036: illegal variable name/number
+    Report by Cheolyeon Byun.
 
   Enhancements:
   - Support pg_get_loaded_modules() by setting PG_MODULE_MAGIC_EXT.

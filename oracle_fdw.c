@@ -1295,7 +1295,7 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 
 		/* create a new entry in the parameter list */
 		paramDesc = (struct paramDesc *)palloc(sizeof(struct paramDesc));
-		snprintf(parname, 10, ":p%d", index);
+		snprintf(parname, 10, ":p%.5d", index);
 		paramDesc->name = pstrdup(parname);
 		paramDesc->type = exprType((Node *)(expr->expr));
 
@@ -3057,7 +3057,7 @@ char
 	foreach(cell, fdwState->params)
 	{
 		++index;
-		snprintf(parname, 10, ":p%d", index);
+		snprintf(parname, 10, ":p%.5d", index);
 		if (strstr(wherecopy, parname) == NULL)
 		{
 			/* set the element to NULL to indicate it's gone */
@@ -3924,8 +3924,8 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 				*params = lappend(*params, param);
 			}
 
-			/* parameters will be called :p1, :p2 etc. */
-			snprintf(parname, 10, ":p%d", index);
+			/* parameters will be called :p00001, :p00002 etc. */
+			snprintf(parname, 10, ":p%.5d", index);
 			initStringInfo(&result);
 			appendAsType(&result, parname, param->paramtype);
 
@@ -3982,7 +3982,7 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 				 * Allow boolean columns here.
 				 * They will be rendered as ("COL" <> 0).
 				 */
-				if (! (canHandleType(variable->vartype) || variable->vartype == BOOLOID))
+				if (is_check_only || !(canHandleType(variable->vartype) || variable->vartype == BOOLOID))
 					return NULL;
 
 				/* get var_table column index corresponding to this column (-1 if none) */
@@ -4051,9 +4051,9 @@ deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const st
 					*params = lappend(*params, variable);
 				}
 
-				/* parameters will be called :p1, :p2 etc. */
+				/* parameters will be called :p00001, :p00002 etc. */
 				initStringInfo(&result);
-				appendStringInfo(&result, ":p%d", index);
+				appendStringInfo(&result, ":p%.5d", index);
 			}
 
 			break;
@@ -6336,7 +6336,7 @@ buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState)
 		);
 
 		/* add a parameter description for the column */
-		snprintf(paramName, 9, ":p%d", fdwState->oraTable->cols[i]->pgattnum);
+		snprintf(paramName, 9, ":p%.5d", fdwState->oraTable->cols[i]->pgattnum);
 		addParam(&fdwState->paramList, paramName, fdwState->oraTable->cols[i]->pgtype,
 			fdwState->oraTable->cols[i]->oratype, i);
 
@@ -6386,7 +6386,7 @@ buildUpdateQuery(StringInfo sql, struct OracleFdwState *fdwState, List *targetAt
 		);
 
 		/* add a parameter description for the column */
-		snprintf(paramName, 9, ":p%d", lfirst_int(cell));
+		snprintf(paramName, 9, ":p%.5d", lfirst_int(cell));
 		addParam(&fdwState->paramList, paramName, fdwState->oraTable->cols[i]->pgtype,
 			fdwState->oraTable->cols[i]->oratype, i);
 
