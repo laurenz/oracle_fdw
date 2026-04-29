@@ -36,3 +36,11 @@ msvc/*.suo
 msvc/*.vcxproj.filters
 msvc/Win32
 msvc/x64
+
+# language servers
+**/compile_commands.json
+.cache
+.clangd
+
+# vscode settings
+.vscode

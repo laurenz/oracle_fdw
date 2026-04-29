@@ -8,7 +8,7 @@ SET client_min_messages = WARNING;
 CREATE EXTENSION oracle_fdw;
 
 -- TWO_TASK or ORACLE_HOME and ORACLE_SID must be set in the server's environment for this to work
-CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true', set_timezone 'true');
+CREATE SERVER oracle FOREIGN DATA WRAPPER oracle_fdw OPTIONS (dbserver '', isolation_level 'read_committed', nchar 'true', set_timezone 'true', date_timezone 'Europe/Moscow');
 
 CREATE USER MAPPING FOR CURRENT_ROLE SERVER oracle OPTIONS (user 'SCOTT', password 'tiger');
 
@@ -40,6 +40,14 @@ END;$$;
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest2 PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest3 PURGE');
 EXCEPTION
    WHEN OTHERS THEN
       NULL;
@@ -95,6 +103,16 @@ SELECT oracle_execute(
           '   ts3 TIMESTAMP WITH LOCAL TIME ZONE\n'
           ') SEGMENT CREATION IMMEDIATE'
        );
+       
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE TABLE scott.typetest3 (\n'
+          '   id  NUMBER(5)\n'
+          '     CONSTRAINT typetest3_pkey PRIMARY KEY,\n'
+          '   d DATE,\n'
+          '   ts TIMESTAMP\n'
+          ') SEGMENT CREATION IMMEDIATE'
+       );
 
 SELECT oracle_execute(
           'oracle',
@@ -122,6 +140,13 @@ SELECT oracle_execute(
 SELECT oracle_execute(
           'oracle',
           E'BEGIN\n'
+          '   DBMS_STATS.GATHER_TABLE_STATS (''SCOTT'', ''TYPETEST3'', NULL, 100);\n'
+          'END;'
+       );
+
+SELECT oracle_execute(
+          'oracle',
+          E'BEGIN\n'
           '   DBMS_STATS.GATHER_TABLE_STATS (''SCOTT'', ''GIS'', NULL, 100);\n'
           'END;'
        );
@@ -134,6 +159,16 @@ SELECT oracle_execute(
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC''),\n'
           '   FROM_TZ(CAST (''2002-08-01 00:00:00 AD'' AS timestamp), ''UTC'')\n'
+          ')'
+       );
+
+-- initial data for typetest3
+SELECT oracle_execute(
+          'oracle',
+          E'INSERT INTO scott.typetest3 (id, d, ts) VALUES (\n'
+          '   1,\n'
+          '   CAST(''2002-08-01 00:00:00 AD'' AS date),\n'
+          '   CAST(''2002-08-01 00:00:00 AD'' AS timestamp)\n'
           ')'
        );
 
@@ -205,6 +240,12 @@ CREATE FOREIGN TABLE typetest2 (
    ts2 timestamp without time zone,
    ts3 date
 ) SERVER oracle OPTIONS (table 'TYPETEST2');
+
+CREATE FOREIGN TABLE typetest3 (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   d timestamp with time zone,
+   ts timestamp with time zone
+) SERVER oracle OPTIONS (table 'TYPETEST3');
 
 /*
  * INSERT some rows into "typetest1".
@@ -643,3 +684,58 @@ SELECT * FROM typetest2 ORDER BY id;
 COMMIT;
 -- we need to re-establish the connection after changing "timezone"
 SELECT oracle_close_connections();
+
+/* test DATE to timestamp with time zone conversion 
+PDT = -07:00
+PST = -08:00
+Europe/Moscow = +03:00 (+04:00 for summer 2002)
+Asia/Kolkata = +05:30
+*/
+INSERT INTO typetest3 (id, d, ts) VALUES (
+   2,
+   '2020-12-31 00:00:00 UTC',
+   '2020-12-31 00:00:00 UTC'
+);
+SELECT * FROM typetest3 ORDER BY id;
+/* 
+row 1 was midnight Moscow time (+04:00). Viewed from default Postgres time zone (Los Angeles, -07:00 for summer or -08:00 for winter) the time should be decreased by 11 hours
+row 2 was inserted as midnight UTC. Viewed from Los Angeles (-08:00 for winter time, PDT) the time should decrease by 8 hours
+*/
+BEGIN;
+alter server oracle options (set date_timezone 'Asia/Kolkata');
+INSERT INTO typetest3 (id, d, ts) VALUES (
+   3,
+   '2020-12-31 00:00:00 UTC',
+   '2020-12-31 00:00:00 UTC'
+);
+SELECT * FROM typetest3 ORDER BY id;
+/* 
+row 1 is now midnight Kolkata, viewed from Los Angeles. So the time should decrease by 1:30
+row 2 was inserted as 03:00 Moscow time (+03:00). It is now 03:00 Kolkata (+05:30), so should decrease by 2:30
+row 3 should be Dec 30 16:00 as viewed from PST
+*/
+COMMIT;
+
+/* table to check dates as they are stored on the Oracle side */
+CREATE FOREIGN TABLE typetest3_raw (
+   id  integer OPTIONS (key 'yes') NOT NULL,
+   d timestamp without time zone,
+   ts timestamp without time zone
+) SERVER oracle OPTIONS (table 'TYPETEST3');
+
+SELECT * FROM typetest3_raw ORDER BY id;
+
+/* check conditions on converted columns working */
+EXPLAIN(costs off)
+SELECT * FROM typetest3 WHERE d = '2020-12-31 00:00:00 UTC' ORDER BY id;
+SELECT * FROM typetest3 WHERE d = '2020-12-31 00:00:00 UTC' ORDER BY id;
+
+PREPARE stmt(integer, date, timestamp) AS SELECT d FROM typetest3 WHERE id = $1 AND d < $2 AND $3 > ts;
+-- six executions to switch to generic plan
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+EXPLAIN (COSTS off) EXECUTE stmt(1, '2011-03-09', '2011-03-09 05:00:00');
+DEALLOCATE stmt;
