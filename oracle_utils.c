@@ -1500,7 +1500,8 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
 {
 	int child_nr, i;
 	const char * const sql_id_query = "SELECT sql_id, child_number FROM (SELECT sql_id, child_number FROM v$sql WHERE sql_text LIKE :sql ORDER BY last_active_time DESC) WHERE rownum=1";
-	char sql_id[20], query_head[50], *p;
+	char sql_id[20], query_head[50];
+	const char *p;
 	OCIStmt *stmthp = NULL;
 	OCIDefine *defnhp;
 	OCIBind *bndhp;
