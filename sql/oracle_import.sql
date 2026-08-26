@@ -38,3 +38,19 @@ WHERE t.relname IN ('typetest1', 'ttv', 'mattest2')
   AND t.relnamespace = 'import'::regnamespace
   AND NOT a.attisdropped
 ORDER BY t.relname, a.attnum;
+
+/* import date/timestamp as timestamp with time zone (relies on date_timezone server option) */
+IMPORT FOREIGN SCHEMA "SCOTT"
+   LIMIT TO (typetest3)
+   FROM SERVER oracle
+   INTO import
+   OPTIONS (date_as_timestamptz 'true', timestamp_as_timestamptz 'true');
+
+SELECT t.relname, a.attname, a.atttypid::regtype, a.attfdwoptions
+FROM pg_attribute AS a
+   JOIN pg_class AS t ON t.oid = a.attrelid
+WHERE t.relname IN ('typetest3')
+  AND a.attnum > 0
+  AND t.relnamespace = 'import'::regnamespace
+  AND NOT a.attisdropped
+ORDER BY t.relname, a.attnum;

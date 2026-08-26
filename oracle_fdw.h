@@ -103,6 +103,13 @@ typedef enum
 	ORA_TYPE_OTHER
 } oraType;
 
+/* [max] value lengths of some Oracle types */
+/* date and timestamp can be converted/presented as timestamp with time zone for Postgres, so the length needs to be adjusted */
+#define ORA_TYPE_DATE_LEN 23
+#define ORA_TYPE_TIMESTAMP_LEN 34
+#define ORA_TYPE_TIMESTAMPTZ_LEN 40
+#define ORA_TYPE_TIMESTAMPLTZ_LEN 40
+
 /* Some PostgreSQL versions have no constant definition for the OID of type uuid */
 #ifndef UUIDOID
 #define UUIDOID 2950

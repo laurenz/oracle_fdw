@@ -218,6 +218,19 @@ Foreign server options
   In that case, either use a different `timezone` or leave the option set `off`
   and set the environment variable ORA_SDTZ to an appropriate value in the
   environment of the PostgreSQL server.
+  
+- **date_timezone** (string, optional)
+  
+  Time zone for automatic conversion of DATE and TIMESTAMP (without time zone) 
+  Oracle types to `timestamptz` Postgres type and back, if that type is 
+  specifiend in the foreign table. Without this option, the time zone part is 
+  dropped if DATE or TIMESTAMP is converted/coerced into/from `timestamptz`. 
+  
+  The option's value must be a valid Oracle time zone (it is substituted into 
+  query code). Empty value is disallowed. Automatic server timezone detection
+  is not supported (yet).
+  
+  This option is unrelated to **set_timezone**.
 
 User mapping options
 --------------------
@@ -433,6 +446,11 @@ setting the `set_timezone` option on the foreign server.
 If you want to convert TIMESTAMP WITH LOCAL TIME ZONE to `timestamp`, consider
 setting the `set_timezone` option on the foreign server.
 
+If you want to convert DATE and TIMESTAMP to `timestamptz`, consider
+setting the `date_timezone` option on the foreign server. Additionally, use
+`date_as_timestamptz` and `timestamp_as_timestamptz` options for IMPORT FOREIGN
+SCHEMA, or set PostgreSQL type to `timestamptz` in foreign table definition.
+
 If you need conversions exceeding the above, define an appropriate view in
 Oracle or PostgreSQL.
 
@@ -642,6 +660,14 @@ following:
   - **set_timezone**: sets the **set_timezone** option on all imported tables
 
     See the [Options](#3-options) section for details.
+
+  - **date_as_timestamptz**: converts DATE columns to `timestamptz`. 
+    
+    Requires **date_timezone** server option
+  
+  - **timestamp_as_timestamptz**: converts TIMESTAMP columns to `timestamptz`. 
+    
+    Requires **date_timezone** server option
 
 - The Oracle schema name must be written exactly as it is in Oracle, so
   normally in upper case.  Since PostgreSQL translates names to lower case

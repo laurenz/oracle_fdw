@@ -6,8 +6,8 @@ DOCS = README.oracle_fdw
 REGRESS = oracle_fdw oracle_gis oracle_import oracle_join
 
 # try to find Instant Client installations installed in standard paths
-FIND_INCLUDE := $(wildcard /usr/include/oracle/*/client64 /usr/include/oracle/*/client)
-FIND_LIBDIRS := $(wildcard /usr/lib/oracle/*/client64/lib /usr/lib/oracle/*/client/lib)
+FIND_INCLUDE := $(wildcard /usr/include/oracle/*/client64 /usr/include/oracle/*/client /usr/include/oracle)
+FIND_LIBDIRS := $(wildcard /usr/lib/oracle/*/client64/lib /usr/lib/oracle/*/client/lib /usr/lib/oracle)
 
 FIND_CPPFLAGS = $(foreach DIR,$(FIND_INCLUDE),-I$(DIR))
 FIND_LDFLAGS = $(foreach DIR,$(FIND_LIBDIRS),-L$(DIR))
@@ -29,6 +29,8 @@ PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 endif
+
+$(OBJS): CFLAGS += $(PERMIT_DECLARATION_AFTER_STATEMENT)
 
 # Oracle's shared library is oci.dll on Windows and libclntsh elsewhere
 ifeq ($(PORTNAME),win32)
