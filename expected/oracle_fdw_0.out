@@ -980,3 +980,31 @@ SELECT oracle_close_connections();
  
 (1 row)
 
+-- Modifying two targets in one statement must preserve each target's output functions.
+BEGIN;
+CREATE FOREIGN TABLE padded (
+   id integer OPTIONS (key 'yes') NOT NULL,
+   padding bigint,
+   c character(10)
+) SERVER oracle OPTIONS (table '(SELECT id, 42, c FROM typetest1)');
+WITH a AS (
+   UPDATE typetest1
+   SET c = 'upd1'
+   WHERE id = 1
+   RETURNING id, c
+), b AS (
+   UPDATE padded
+   SET c = 'upd3'
+   WHERE id = 3
+   RETURNING id, c
+)
+SELECT * FROM a
+UNION ALL
+SELECT * FROM b;
+ id |     c      
+----+------------
+  1 | upd1      
+  3 | upd3      
+(2 rows)
+
+ROLLBACK;

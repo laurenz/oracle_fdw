@@ -248,14 +248,6 @@ static struct OracleFdwOption valid_options[] = {
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
 
 /*
- * Array to hold the type output functions during table modification.
- * It is ok to hold this cache in a static variable because there cannot
- * be more than one foreign table modified at the same time.
- */
-
-static regproc *output_funcs;
-
-/*
  * FDW-specific information for RelOptInfo.fdw_private and ForeignScanState.fdw_state.
  * The same structure is used to hold information for query planning and execution.
  * The structure is initialized during query planning and passed on to the execution
@@ -1829,7 +1821,7 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	struct OracleFdwState *fdw_state = deserializePlanData(fdw_private);
 	EState *estate = mtstate->ps.state;
 	struct paramDesc *param;
-	HeapTuple tuple;
+	bool varlena;
 	int i;
 #if PG_VERSION_NUM < 140000
 	Plan *subplan = mtstate->mt_plans[subplan_index]->plan;
@@ -1857,18 +1849,13 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 1, fdw_state->lob_prefetch);
 
 	/* get the type output functions for the parameters */
-	output_funcs = (regproc *)palloc0(fdw_state->oraTable->ncols * sizeof(regproc *));
 	for (param=fdw_state->paramList; param!=NULL; param=param->next)
 	{
 		/* ignore output parameters */
 		if (param->bindType == BIND_OUTPUT)
 			continue;
 
-		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[param->colnum]->pgtype));
-		if (!HeapTupleIsValid(tuple))
-			elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[param->colnum]->pgtype);
-		output_funcs[param->colnum] = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
-		ReleaseSysCache(tuple);
+		getTypeOutputInfo(param->type, &param->output_func, &varlena);
 	}
 
 	/* loop through table columns */
@@ -1906,7 +1893,7 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 #endif  /* PG_VERSION_NUM < 160000 */
 	StringInfoData buf;
 	struct paramDesc *param;
-	HeapTuple tuple;
+	bool varlena;
 	int i;
 	Oid check_user;
 
@@ -2021,18 +2008,13 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 	fdw_state->query = pstrdup(buf.data);
 
 	/* get the type output functions for the parameters */
-	output_funcs = (regproc *)palloc0(fdw_state->oraTable->ncols * sizeof(regproc *));
 	for (param=fdw_state->paramList; param!=NULL; param=param->next)
 	{
 		/* ignore output parameters */
 		if (param->bindType == BIND_OUTPUT)
 			continue;
 
-		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(fdw_state->oraTable->cols[param->colnum]->pgtype));
-		if (!HeapTupleIsValid(tuple))
-			elog(ERROR, "cache lookup failed for type %u", fdw_state->oraTable->cols[param->colnum]->pgtype);
-		output_funcs[param->colnum] = ((Form_pg_type)GETSTRUCT(tuple))->typoutput;
-		ReleaseSysCache(tuple);
+		getTypeOutputInfo(param->type, &param->output_func, &varlena);
 	}
 
 	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, 1, fdw_state->lob_prefetch);
@@ -6205,7 +6187,7 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 				}
 
 				/* convert the parameter value into a string */
-				param->value = DatumGetCString(OidFunctionCall1(output_funcs[param->colnum], datum));
+				param->value = DatumGetCString(OidFunctionCall1(param->output_func, datum));
 
 				/* some data types need additional processing */
 				switch (oraTable->cols[param->colnum]->pgtype)

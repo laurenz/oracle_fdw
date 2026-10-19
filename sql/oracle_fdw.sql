@@ -643,3 +643,29 @@ SELECT * FROM typetest2 ORDER BY id;
 COMMIT;
 -- we need to re-establish the connection after changing "timezone"
 SELECT oracle_close_connections();
+
+-- Modifying two targets in one statement must preserve each target's output functions.
+BEGIN;
+
+CREATE FOREIGN TABLE padded (
+   id integer OPTIONS (key 'yes') NOT NULL,
+   padding bigint,
+   c character(10)
+) SERVER oracle OPTIONS (table '(SELECT id, 42, c FROM typetest1)');
+
+WITH a AS (
+   UPDATE typetest1
+   SET c = 'upd1'
+   WHERE id = 1
+   RETURNING id, c
+), b AS (
+   UPDATE padded
+   SET c = 'upd3'
+   WHERE id = 3
+   RETURNING id, c
+)
+SELECT * FROM a
+UNION ALL
+SELECT * FROM b;
+
+ROLLBACK;
