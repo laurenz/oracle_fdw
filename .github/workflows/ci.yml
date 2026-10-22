@@ -4,57 +4,46 @@
 name: CI
 
 on:
+  # Test development branches as well as pull requests.
   push:
   pull_request:
-  workflow_dispatch:
-    inputs:
-      pg_version:
-        description: 'PostgreSQL major version (default 18, e.g. 17)'
-        type: string
-        default: ''
-      oracle_image:
-        description: 'Oracle server image (default XE 21, e.g. gvenzl/oracle-xe:21.3.0-faststart)'
-        type: string
-        default: ''
-      oracle_service:
-        description: 'Oracle service/PDB name (default XEPDB1, e.g. XEPDB1)'
-        type: string
-        default: ''
-      oracle_client:
-        description: 'Instant Client version (default 19.32.0.0.0, e.g. 23.26.3.0.0)'
-        type: string
-        default: ''
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # A new push supersedes the previous run for the same branch or PR.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   regression:
-    name: 'regression (PG ${{ inputs.pg_version || matrix.pg }}, ${{ inputs.oracle_image || matrix.oracle-image }})'
+    name: 'regression (PG ${{ matrix.pg }}, ${{ matrix.oracle-image }})'
+    # Ubuntu 22.04 provides libaio1 with the library name these clients require.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     strategy:
+      # Keep diagnostics from both configurations when one fails.
       fail-fast: false
       matrix:
-        # Manual runs use one configuration; push/PR runs test both.
         # Client 19 avoids the LOB failures seen with client 21.
-        include: >-
-          ${{ fromJSON(github.event_name == 'workflow_dispatch' && '
-            [{"pg":"18","oracle-image":"gvenzl/oracle-xe:21.3.0-faststart",
-              "oracle-service":"XEPDB1","oracle-client":"19.32.0.0.0"}]
-          ' || '
-            [{"pg":"18","oracle-image":"gvenzl/oracle-xe:21.3.0-faststart",
-              "oracle-service":"XEPDB1","oracle-client":"19.32.0.0.0"},
-             {"pg":"18","oracle-image":"gvenzl/oracle-free:23.26.3-faststart",
-              "oracle-service":"FREEPDB1","oracle-client":"23.26.3.0.0"}]
-          ') }}
+        # Each entry pairs a server image, its PDB service, and an OCI client.
+        # When adding versions, check regression output against expected/ too:
+        # PostgreSQL plans and Oracle error messages can vary by version.
+        include:
+          - pg: '18'
+            oracle-image: gvenzl/oracle-xe:21.3.0-faststart
+            oracle-service: XEPDB1
+            oracle-client: '19.32.0.0.0'
+          - pg: '18'
+            oracle-image: gvenzl/oracle-free:23.26.3-faststart
+            oracle-service: FREEPDB1
+            oracle-client: '23.26.3.0.0'
     services:
       oracle:
-        image: ${{ inputs.oracle_image || matrix.oracle-image }}
+        # These images provide SQL*Plus for setup and healthcheck.sh for readiness.
+        image: ${{ matrix.oracle-image }}
         env:
           ORACLE_PASSWORD: oracle
         ports:
+          # Job steps run on the host and reach the PDB through localhost:1521.
           - 1521:1521
         # Wait for the PDB to open before running initialization SQL.
         options: >-
@@ -63,10 +52,10 @@ jobs:
           --health-timeout 5s
           --health-retries 90
     env:
-      PG_VERSION: ${{ inputs.pg_version || matrix.pg }}
-      ORACLE_SERVICE: ${{ inputs.oracle_service || matrix.oracle-service }}
-      ORACLE_CLIENT: ${{ inputs.oracle_client || matrix.oracle-client }}
-      # Connect as the runner user, which owns the test cluster.
+      PG_VERSION: ${{ matrix.pg }}
+      ORACLE_SERVICE: ${{ matrix.oracle-service }}
+      ORACLE_CLIENT: ${{ matrix.oracle-client }}
+      # Use the runner-owned cluster's socket; libpq defaults to the runner user.
       PGPORT: '5432'
       PGHOST: /tmp
     steps:
@@ -74,90 +63,45 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install PostgreSQL and PostGIS from PGDG
-        run: |
-          set -euxo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-common ca-certificates
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get install -y -qq \
-            postgresql-"$PG_VERSION" \
-            postgresql-server-dev-"$PG_VERSION" \
-            postgresql-"$PG_VERSION"-postgis-3 \
-            libaio1 \
-            unzip
-          echo "/usr/lib/postgresql/$PG_VERSION/bin" >> "$GITHUB_PATH"
+        # Server headers/PGXS build the extension; PostGIS serves oracle_gis.
+        run: bash .github/ci/install-postgres.sh
 
       - name: Install Oracle Instant Client
-        run: |
-          set -euxo pipefail
-          # Oracle's URL uses 2326300 for 23.26.3.0.0; 19/21 ZIPs add "dbru".
-          IFS=. read -r MAJ MIN PATCH _ <<< "$ORACLE_CLIENT"
-          VERDIR="${MAJ}${MIN}${PATCH}00"
-          ICDIR="/opt/oracle/instantclient_${MAJ}_${MIN}"
-          SUFFIX=''
-          if [ "$MAJ" -le 21 ]; then SUFFIX='dbru'; fi
-          BASE="https://download.oracle.com/otn_software/linux/instantclient/${VERDIR}"
-          curl -fsSL -o /tmp/ic-basiclite.zip "$BASE/instantclient-basiclite-linux.x64-${ORACLE_CLIENT}${SUFFIX}.zip"
-          curl -fsSL -o /tmp/ic-sdk.zip        "$BASE/instantclient-sdk-linux.x64-${ORACLE_CLIENT}${SUFFIX}.zip"
-          sudo mkdir -p /opt/oracle
-          # Both ZIPs contain META-INF files; overwrite them without prompting.
-          sudo unzip -qo /tmp/ic-basiclite.zip -d /opt/oracle
-          sudo unzip -qo /tmp/ic-sdk.zip -d /opt/oracle
-          # Backends load libclntsh when they load the extension.
-          echo "$ICDIR" | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf >/dev/null
-          sudo ldconfig
-          echo "ORACLE_HOME=$ICDIR" >> "$GITHUB_ENV"
+        # Basic Light supplies OCI runtime libraries; SDK supplies build headers.
+        run: bash .github/ci/install-oracle-client.sh
 
       - name: Build and install oracle_fdw
         run: |
           set -euxo pipefail
+          # Pin PGXS to the selected major even if other versions are installed.
           PGCBIN="/usr/lib/postgresql/$PG_VERSION/bin/pg_config"
           make -j"$(nproc)" ORACLE_HOME="$ORACLE_HOME" PG_CONFIG="$PGCBIN"
           sudo make install ORACLE_HOME="$ORACLE_HOME" PG_CONFIG="$PGCBIN"
 
       - name: Initialize the Oracle test environment
         env:
+          # Use the actual container ID assigned by Actions for docker exec.
           ORACLE_CONTAINER_ID: ${{ job.services.oracle.id }}
-        run: |
-          set -euxo pipefail
-          # The container's oracle OS user authenticates locally as SYSDBA.
-          {
-            echo 'WHENEVER SQLERROR EXIT SQL.SQLCODE'
-            echo "ALTER SESSION SET CONTAINER = $ORACLE_SERVICE;"
-            cat .github/ci/oracle_setup.sql
-          } | docker exec -i "$ORACLE_CONTAINER_ID" sqlplus -s / as sysdba
-          # Check SCOTT login and the views used by EXPLAIN VERBOSE.
-          docker exec -i "$ORACLE_CONTAINER_ID" sqlplus -s "scott/tiger@localhost/$ORACLE_SERVICE" <<'SQL'
-          WHENEVER SQLERROR EXIT SQL.SQLCODE
-          SELECT COUNT(*) FROM v$sql;
-          SELECT COUNT(*) FROM v$sql_plan;
-          EXIT
-          SQL
+        run: bash .github/ci/setup-oracle.sh
 
       - name: Initialize and start PostgreSQL
-        run: |
-          set -euxo pipefail
-          # UTF8 preserves the multibyte data used by the tests.
-          initdb -D "$HOME/pgdata" --locale=C.UTF-8 -E UTF8 --auth=trust
-          # Backends inherit TWO_TASK from the postmaster; the FDW sets NLS_LANG.
-          export TWO_TASK="//localhost:1521/$ORACLE_SERVICE"
-          pg_ctl -D "$HOME/pgdata" -l "$HOME/pgdata.log" -o "-p $PGPORT -k $PGHOST" start
-          pg_isready -q
-          # Check runtime dependencies before starting the regression suite.
-          psql -X -v ON_ERROR_STOP=1 -d postgres -c "LOAD 'oracle_fdw';"
+        run: bash .github/ci/start-postgres.sh
 
       - name: Run the regression tests
         run: |
           set -euxo pipefail
           # Later suites use the server and Oracle objects created by oracle_fdw.
+          # Keep REGRESS in Makefile as the suite list and execution order.
           make installcheck PG_CONFIG="/usr/lib/postgresql/$PG_VERSION/bin/pg_config"
 
       - name: Collect failure diagnostics
+        # Also collect partial logs on cancellation or an early setup failure.
         if: failure() || cancelled()
         env:
           ORACLE_CONTAINER_ID: ${{ job.services.oracle.id }}
         run: |
           set -u
+          # Missing files/containers are expected when setup stops early.
           cp "$HOME/pgdata.log" ./pgdata.log 2>/dev/null || true
           docker logs --tail 300 "$ORACLE_CONTAINER_ID" > ./oracle-container.log 2>&1 || true
           cat regression.out 2>/dev/null || true
@@ -168,6 +112,7 @@ jobs:
         if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
+          # The matrix job index distinguishes configurations within the run.
           name: regression-pg${{ env.PG_VERSION }}-run${{ github.run_id }}-job${{ strategy.job-index }}
           # Replace diagnostics from earlier attempts of the same job.
           overwrite: true
