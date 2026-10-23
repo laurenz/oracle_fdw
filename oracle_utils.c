@@ -1179,22 +1179,22 @@ struct oraTable
 			case SQLT_DAT:
 				/* DATE */
 				reply->cols[i-1]->oratype = ORA_TYPE_DATE;
-				reply->cols[i-1]->val_size = 23;
+				reply->cols[i-1]->val_size = ORA_TYPE_DATE_LEN;
 				break;
 			case SQLT_TIMESTAMP:
 				/* TIMESTAMP */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMP;
-				reply->cols[i-1]->val_size = 34;
+				reply->cols[i-1]->val_size = ORA_TYPE_TIMESTAMP_LEN;
 				break;
 			case SQLT_TIMESTAMP_TZ:
 				/* TIMESTAMP WITH TIMEZONE */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMPTZ;
-				reply->cols[i-1]->val_size = 40;
+				reply->cols[i-1]->val_size = ORA_TYPE_TIMESTAMPTZ_LEN;
 				break;
 			case SQLT_TIMESTAMP_LTZ:
 				/* TIMESTAMP WITH LOCAL TIMEZONE */
 				reply->cols[i-1]->oratype = ORA_TYPE_TIMESTAMPLTZ;
-				reply->cols[i-1]->val_size = 40;
+				reply->cols[i-1]->val_size = ORA_TYPE_TIMESTAMPLTZ_LEN;
 				break;
 			case SQLT_INTERVAL_YM:
 				/* INTERVAL YEAR TO MONTH */
