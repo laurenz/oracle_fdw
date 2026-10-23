@@ -278,6 +278,8 @@ struct OracleFdwState {
 	char *order_clause;            /* for ORDER BY pushdown */
 	List *usable_pathkeys;         /* for ORDER BY pushdown */
 	char *where_clause;            /* deparsed where clause */
+	int nconvertcols;              /* number of positions in the conversion arrays */
+	int *convertcols;              /* Oracle column indexes, or -1 for unmapped positions */
 
 	/*
 	 * Restriction clauses, divided into safe and unsafe to pushdown subsets.
@@ -404,6 +406,7 @@ static void transactionCallback(XactEvent event, void *arg);
 static void exitHook(int code, Datum arg);
 static void oracleDie(SIGNAL_ARGS);
 static char *setSelectParameters(struct paramDesc *paramList, ExprContext *econtext);
+static void initConversionMap(struct OracleFdwState *fdw_state);
 static void convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values, bool *nulls);
 static void errorContextCallback(void *arg);
 static bool hasTrigger(Relation rel, CmdType cmdtype);
@@ -2000,6 +2003,8 @@ void oracleBeginForeignInsert(ModifyTableState *mtstate, ResultRelInfo *rinfo)
 				fdw_state->oraTable->cols[i]->used = 1;
 			}
 	}
+
+	initConversionMap(fdw_state);
 
 	/* construct an INSERT query */
 	initStringInfo(&buf);
@@ -3699,6 +3704,8 @@ acquireSampleRowsFunc(Relation relation, int elevel, HeapTuple *rows, int targro
 				fdw_state->oraTable->pgname,
 				fdw_state->oraTable->cols[i]->pgname
 			);
+
+	initConversionMap(fdw_state);
 
 	/* execute the query */
 	oraclePrepareQuery(fdw_state->session, fdw_state->query, fdw_state->oraTable, fdw_state->prefetch, fdw_state->lob_prefetch);
@@ -5716,6 +5723,7 @@ struct OracleFdwState
 		state->oraTable->cols[i]->val_len4 = 0;
 		state->oraTable->cols[i]->val_null = (int16 *)palloc(sizeof(int16) * state->prefetch);
 	}
+	initConversionMap(state);
 
 	/* length of parameter list */
 	len = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
@@ -5988,6 +5996,8 @@ struct OracleFdwState
 	copy->order_clause = NULL;
 	copy->prefetch = orig->prefetch;
 	copy->lob_prefetch = orig->lob_prefetch;
+	copy->nconvertcols = 0;
+	copy->convertcols = NULL;
 
 	return copy;
 }
@@ -6636,17 +6646,45 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 }
 
 /*
+ * initConversionMap
+ * 		Map conversion array positions to Oracle column descriptors.
+ * 		Preserve table attribute positions, including dropped columns.
+ */
+static void
+initConversionMap(struct OracleFdwState *fdw_state)
+{
+	struct oraTable *table;
+	int i;
+
+	table = fdw_state->oraTable;
+	fdw_state->nconvertcols = table->npgcols;
+
+	fdw_state->convertcols = palloc(sizeof(int) * fdw_state->nconvertcols);
+	for (i = 0; i < fdw_state->nconvertcols; ++i)
+		fdw_state->convertcols[i] = -1;
+
+	for (i = 0; i < table->ncols; ++i)
+	{
+		struct oraColumn *col;
+
+		col = table->cols[i];
+		if (col->pgattnum > 0 && col->pgattnum <= table->npgcols)
+			fdw_state->convertcols[col->pgattnum - 1] = i;
+	}
+}
+
+/*
  * convertTuple
- * 		Convert a result row from Oracle stored in oraTable
- * 		into arrays of values and null indicators.
- * 		"index" is the (1 based) index into the array of results.
+ * 		Convert a fetched row to Datum and null-indicator arrays,
+ * 		using the layout defined by initConversionMap().
+ * 		"index" is the one-based row number in the prefetch buffer.
  */
 void
 convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values, bool *nulls)
 {
 	char *value = NULL, *oraval;
 	long value_len = 0;
-	int j, i = -1;
+	int j;
 	unsigned short oralen;
 	ErrorContextCallback errcb;
 	Oid pgtype;
@@ -6655,28 +6693,18 @@ convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values
 	errcb.callback = errorContextCallback;
 	errcb.arg = (void *)fdw_state;
 
-	/* assign result values */
-	for (j=0; j<fdw_state->oraTable->npgcols; ++j)
+	/* assign result values in the initialized conversion layout */
+	for (j = 0; j < fdw_state->nconvertcols; ++j)
 	{
-		/* for dropped columns, insert a NULL */
-		if ((i + 1 < fdw_state->oraTable->ncols)
-				&& (fdw_state->oraTable->cols[i + 1]->pgattnum > j + 1))
-		{
-			nulls[j] = true;
-			values[j] = PointerGetDatum(NULL);
-			continue;
-		}
-		else
-			++i;
+		int i;
 
+		i = fdw_state->convertcols[j];
 		/*
-		 * Columns exceeding the length of the Oracle table will be NULL,
-		 * as well as columns that are not used in the query.
+		 * Unmapped columns and columns not used in the query are NULL.
 		 * Geometry columns are NULL if the value is NULL,
 		 * for all other types use the NULL indicator.
 		 */
-		if (i >= fdw_state->oraTable->ncols
-			|| fdw_state->oraTable->cols[i]->used == 0
+		if (i < 0 || fdw_state->oraTable->cols[i]->used == 0
 			|| (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_GEOMETRY
 				&& ((ora_geometry *)fdw_state->oraTable->cols[i]->val)->geometry == NULL)
 			|| fdw_state->oraTable->cols[i]->val_null[index-1] == -1)
