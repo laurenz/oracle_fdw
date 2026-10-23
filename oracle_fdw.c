@@ -248,9 +248,13 @@ static struct OracleFdwOption valid_options[] = {
 
 #define option_count (sizeof(valid_options)/sizeof(struct OracleFdwOption))
 
+/* attribute number and junk name for the hidden Oracle ROWID */
+#define ORACLE_IDENTITY_ATTRIBUTE SelfItemPointerAttributeNumber
+#define ORACLE_IDENTITY_JUNK_NAME "oracle_fdw_rowid"
+
 /* execution-time mapping from converted columns to the base scan tuple */
 struct OracleScanSlotMap {
-	int ncols;                    /* number of table columns copied */
+	int ncols;                    /* number of columns copied, including ROWID */
 	int *src;                     /* indexes in scan_values and scan_nulls */
 	int *dst;                     /* corresponding scan slot indexes */
 	List *tableoid;               /* scan slot indexes for tableoid */
@@ -291,7 +295,7 @@ struct OracleFdwState {
 	int nconvertcols;              /* number of positions in the conversion arrays */
 	int *convertcols;              /* Oracle column indexes, or -1 for unmapped positions */
 	struct OracleScanSlotMap *scan_slot_map; /* custom base scan layout, valid during execution */
-	Datum *scan_values;            /* converted table columns */
+	Datum *scan_values;            /* table columns followed by the hidden ROWID */
 	bool *scan_nulls;
 
 	Relation rel;                  /* scan relation, valid during execution */
@@ -415,8 +419,11 @@ static char *deparseInterval(Datum datum);
 static char *convertUUID(char *uuid);
 static struct OracleFdwState *copyPlanData(struct OracleFdwState *orig);
 static void subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
-static void addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
+static struct paramDesc *addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum);
 static void setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleTableSlot *oldslot, struct oraTable *oraTable, oracleSession *session);
+#if PG_VERSION_NUM >= 90500
+static List *buildScanTlistWithRowid(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, List *tlist, List *local_conds);
+#endif
 static void transactionCallback(XactEvent event, void *arg);
 static void exitHook(int code, Datum arg);
 static void oracleDie(SIGNAL_ARGS);
@@ -428,6 +435,8 @@ static bool hasTrigger(Relation rel, CmdType cmdtype);
 static void buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState);
 static void buildUpdateQuery(StringInfo sql, struct OracleFdwState *fdwState, List *targetAttrs);
 static void appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState);
+static struct oraColumn *findColumnByAttnum(const struct oraTable *table, int attnum);
+static struct oraColumn *getRowidColumn(struct OracleFdwState *fdwState);
 #ifdef IMPORT_API
 static char *fold_case(char *name, fold_t foldcase, int collation);
 #endif  /* IMPORT_API */
@@ -1068,7 +1077,7 @@ ForeignScan
 	struct OracleFdwState *fdwState = (struct OracleFdwState *)foreignrel->fdw_private;
 	List *fdw_private = NIL;
 	int i;
-	bool need_keys = false, for_update = false, has_trigger;
+	bool need_rowid = false, for_update = false, has_trigger;
 	Relation rel;
 	Index scan_relid;  /* will be 0 for join relations */
 	List *local_exprs = fdwState->local_conds;
@@ -1095,23 +1104,27 @@ ForeignScan
 			root->parse->commandType == CMD_DELETE))
 #endif  /* PG_VERSION_NUM */
 		{
-			/* we need the table's primary key columns */
-			need_keys = true;
+			/* we need the ROWID to identify the row to modify */
+			need_rowid = true;
 		}
 
 		/* check if FOR [KEY] SHARE/UPDATE was specified */
-		if (need_keys || get_parse_rowmark(root->parse, foreignrel->relid))
+		if (need_rowid || get_parse_rowmark(root->parse, foreignrel->relid))
 		{
 			/* we should add FOR UPDATE */
 			for_update = true;
 		}
 
-		if (need_keys)
+		if (need_rowid)
 		{
-			/* we need to fetch all primary key columns */
-			for (i=0; i<fdwState->oraTable->ncols; ++i)
-				if (fdwState->oraTable->cols[i]->pkey)
-					fdwState->oraTable->cols[i]->used = 1;
+			struct oraColumn *rowid;
+
+			/* include ROWID in the remote query and the scan tuple */
+			rowid = getRowidColumn(fdwState);
+			rowid->varno = foreignrel->relid;
+#if PG_VERSION_NUM >= 90500
+			fdw_scan_tlist = buildScanTlistWithRowid(fdwState, foreignrel, tlist, local_exprs);
+#endif
 		}
 
 		/*
@@ -1311,8 +1324,10 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 				map->wholerow = lappend_int(map->wholerow, k);
 			else
 			{
-				Assert(var->varattno > 0);
-				map->src[map->ncols] = var->varattno - 1;
+				if (var->varattno == ORACLE_IDENTITY_ATTRIBUTE)
+					map->src[map->ncols] = fdw_state->nconvertcols - 1;
+				else
+					map->src[map->ncols] = var->varattno - 1;
 				map->dst[map->ncols++] = k;
 			}
 			++k;
@@ -1360,6 +1375,8 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		paramDesc->node = expr;
 		paramDesc->bindh = NULL;
 		paramDesc->colnum = -1;
+		paramDesc->junk_name = NULL;
+		paramDesc->junk_attno = InvalidAttrNumber;
 		paramDesc->next = fdw_state->paramList;
 		fdw_state->paramList = paramDesc;
 	}
@@ -1375,6 +1392,8 @@ oracleBeginForeignScan(ForeignScanState *node, int eflags)
 		paramDesc->node = NULL;
 		paramDesc->bindh = NULL;
 		paramDesc->colnum = -1;
+		paramDesc->junk_name = NULL;
+		paramDesc->junk_attno = InvalidAttrNumber;
 		paramDesc->next = fdw_state->paramList;
 		fdw_state->paramList = paramDesc;
 	}
@@ -1539,7 +1558,7 @@ oracleReScanForeignScan(ForeignScanState *node)
 
 /*
  * oracleAddForeignUpdateTargets
- * 		Add the primary key columns as resjunk entries.
+ * 		Register the hidden Oracle ROWID as a resjunk entry.
  */
 void
 oracleAddForeignUpdateTargets(
@@ -1553,82 +1572,34 @@ oracleAddForeignUpdateTargets(
 	Relation target_relation
 )
 {
-	Oid relid = RelationGetRelid(target_relation);
-	TupleDesc tupdesc = target_relation->rd_att;
-	int i;
-	bool has_key = false;
+#if PG_VERSION_NUM >= 90500
+	Oid relid;
+	Var *var;
 
+	relid = RelationGetRelid(target_relation);
 	elog(DEBUG1, "oracle_fdw: add target columns for update on %d", relid);
 
-	/* loop through all columns of the foreign table */
-	for (i=0; i<tupdesc->natts; ++i)
-	{
-		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
-		AttrNumber attrno = att->attnum;
-		List *options;
-		ListCell *option;
-
-		/* look for the "key" option on this column */
-		options = GetForeignColumnOptions(relid, attrno);
-		foreach(option, options)
-		{
-			DefElem *def = (DefElem *)lfirst(option);
-
-			/* if "key" is set, add a resjunk for this column */
-			if (strcmp(def->defname, OPT_KEY) == 0)
-			{
-				if (getBoolVal(def))
-				{
-					Var *var;
-#if PG_VERSION_NUM < 140000
-					TargetEntry *tle;
-
-					/* Make a Var representing the desired value */
-					var = makeVar(
-							parsetree->resultRelation,
-							attrno,
-							att->atttypid,
-							att->atttypmod,
-							att->attcollation,
-							0);
-
-					/* Wrap it in a resjunk TLE with the right name ... */
-					tle = makeTargetEntry((Expr *)var,
-							list_length(parsetree->targetList) + 1,
-							pstrdup(NameStr(att->attname)),
-							true);
-
-					/* ... and add it to the query's targetlist */
-					parsetree->targetList = lappend(parsetree->targetList, tle);
+	var = makeVar(
+#if PG_VERSION_NUM >= 140000
+			rtindex,
 #else
-					/* Make a Var representing the desired value */
-					var = makeVar(
-							rtindex,
-							attrno,
-							att->atttypid,
-							att->atttypmod,
-							att->attcollation,
-							0);
+			parsetree->resultRelation,
+#endif
+			ORACLE_IDENTITY_ATTRIBUTE, TEXTOID, -1, InvalidOid, 0);
 
-					add_row_identity_var(root, var, rtindex, NameStr(att->attname));
+#if PG_VERSION_NUM >= 140000
+	add_row_identity_var(root, var, rtindex, ORACLE_IDENTITY_JUNK_NAME);
+#else
+	parsetree->targetList = lappend(parsetree->targetList,
+		makeTargetEntry((Expr *)var, list_length(parsetree->targetList) + 1,
+			pstrdup(ORACLE_IDENTITY_JUNK_NAME), true));
+#endif
+#else
+	ereport(ERROR,
+			(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+			 errmsg("cannot update or delete on foreign Oracle table"),
+			 errdetail("UPDATE and DELETE require PostgreSQL 9.5 or later.")));
 #endif  /* PG_VERSION_NUM */
-
-					has_key = true;
-				}
-			}
-			else if (strcmp(def->defname, OPT_STRIP_ZEROS) != 0)
-			{
-				elog(ERROR, "impossible column option \"%s\"", def->defname);
-			}
-		}
-	}
-
-	if (! has_key)
-		ereport(ERROR,
-				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
-				errmsg("no primary key column specified for foreign Oracle table"),
-				errdetail("For UPDATE or DELETE, at least one foreign table column must be marked as primary key column."),
-				errhint("Set the option \"%s\" on the columns that belong to the primary key.", OPT_KEY)));
 }
 
 /*
@@ -1647,9 +1618,10 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 	List *targetAttrs = NIL;
 	List *returningList = NIL;
 	struct OracleFdwState *fdwState;
+	struct paramDesc *param;
+	struct oraColumn *rowid;
 	int attnum, i;
-	bool has_trigger = false, firstcol;
-	char paramName[10];
+	bool has_trigger = false;
 	TupleDesc tupdesc;
 	Bitmapset *updated_cols = NULL;
 	Oid check_user;
@@ -1708,6 +1680,13 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 		 * should be used (if invalid, the current user is used).
 		 */
 		fdwState = getFdwState(rte->relid, NULL, check_user);
+
+	if (operation == CMD_UPDATE || operation == CMD_DELETE)
+	{
+		/* ROWID is an input parameter and is not needed in RETURNING */
+		rowid = getRowidColumn(fdwState);
+		rowid->used = 0;
+	}
 
 	initStringInfo(&sql);
 
@@ -1866,31 +1845,12 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 	if (operation == CMD_UPDATE || operation == CMD_DELETE)
 	{
-		/* add WHERE clause with the primary key columns */
+		/* identify the row using the ROWID fetched by the scan */
+		appendStringInfo(&sql, " WHERE ROWID = :ora_rowid");
 
-		firstcol = true;
-		for (i=0; i<fdwState->oraTable->ncols; ++i)
-		{
-			if (fdwState->oraTable->cols[i]->pkey)
-			{
-				/* add a parameter description */
-				snprintf(paramName, 9, ":k%d", fdwState->oraTable->cols[i]->pgattnum);
-				addParam(&fdwState->paramList, paramName, fdwState->oraTable->cols[i]->pgtype,
-					fdwState->oraTable->cols[i]->oratype, i);
-
-				/* add column and parameter name to query */
-				if (firstcol)
-				{
-					appendStringInfo(&sql, " WHERE");
-					firstcol = false;
-				}
-				else
-					appendStringInfo(&sql, " AND");
-
-				appendStringInfo(&sql, " %s = ", fdwState->oraTable->cols[i]->name);
-				appendAsType(&sql, paramName, fdwState->oraTable->cols[i]->pgtype);
-			}
-		}
+		rowid = findColumnByAttnum(fdwState->oraTable, ORACLE_IDENTITY_ATTRIBUTE);
+		param = addParam(&fdwState->paramList, ":ora_rowid", rowid->pgtype, rowid->oratype, -1);
+		param->junk_name = pstrdup(ORACLE_IDENTITY_JUNK_NAME);
 	}
 
 	appendReturningClause(&sql, fdwState);
@@ -1905,10 +1865,8 @@ oraclePlanForeignModify(PlannerInfo *root, ModifyTable *plan, Index resultRelati
 
 /*
  * oracleBeginForeignModify
- * 		Prepare everything for the DML query:
- * 		The SQL statement is prepared, the type output functions for
- * 		the parameters are fetched, and the column numbers of the
- * 		resjunk attributes are stored in the "pkey" field.
+ * 		Prepare the Oracle statement and parameter output functions.
+ * 		Find the ROWID junk attribute for UPDATE and DELETE.
  */
 void
 oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *fdw_private, int subplan_index, int eflags)
@@ -1917,7 +1875,6 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	EState *estate = mtstate->ps.state;
 	struct paramDesc *param;
 	bool varlena;
-	int i;
 #if PG_VERSION_NUM < 140000
 	Plan *subplan = mtstate->mt_plans[subplan_index]->plan;
 #else
@@ -1947,22 +1904,25 @@ oracleBeginForeignModify(ModifyTableState *mtstate, ResultRelInfo *rinfo, List *
 	for (param=fdw_state->paramList; param!=NULL; param=param->next)
 	{
 		/* ignore output parameters */
-		if (param->bindType == BIND_OUTPUT)
+		if (param->bindType == BIND_OUTPUT || param->colnum < 0)
 			continue;
 
 		getTypeOutputInfo(param->type, &param->output_func, &varlena);
 	}
 
-	/* loop through table columns */
-	for (i=0; i<fdw_state->oraTable->ncols; ++i)
+	/* find the junk attributes for hidden input parameters */
+	for (param=fdw_state->paramList; param!=NULL; param=param->next)
 	{
-		if (! fdw_state->oraTable->cols[i]->pkey)
+		if (param->junk_name == NULL)
 			continue;
 
-		/* for primary key columns, get the resjunk attribute number and store it in "pkey" */
-		fdw_state->oraTable->cols[i]->pkey =
-			ExecFindJunkAttributeInTlist(subplan->targetlist,
-				fdw_state->oraTable->cols[i]->pgname);
+		param->junk_attno = ExecFindJunkAttributeInTlist(subplan->targetlist, param->junk_name);
+		if (param->junk_attno == InvalidAttrNumber)
+			ereport(ERROR,
+					(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+					 errmsg("could not find the row identity for foreign table \"%s\"",
+							fdw_state->oraTable->pgname),
+					 errdetail("The scan must supply the junk attribute \"%s\".", param->junk_name)));
 	}
 
 	/* create a memory context for short-lived memory */
@@ -2217,8 +2177,9 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	if (rows > 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
-				errmsg("UPDATE on Oracle table changed %d rows instead of one in iteration %lu", rows, fdw_state->rowcount),
-				errhint("This probably means that you did not set the \"key\" option on all primary key columns.")));
+				errmsg("UPDATE on Oracle table \"%s\" changed %d rows instead of one in iteration %lu",
+					   fdw_state->oraTable->pgname, rows, fdw_state->rowcount),
+				errdetail("The statement was \"%s\".", fdw_state->query)));
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -2267,8 +2228,9 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	if (rows > 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
-				errmsg("DELETE on Oracle table removed %d rows instead of one in iteration %lu", rows, fdw_state->rowcount),
-				errhint("This probably means that you did not set the \"key\" option on all primary key columns.")));
+				errmsg("DELETE on Oracle table \"%s\" removed %d rows instead of one in iteration %lu",
+					   fdw_state->oraTable->pgname, rows, fdw_state->rowcount),
+				errdetail("The statement was \"%s\".", fdw_state->query)));
 
 	MemoryContextSwitchTo(oldcontext);
 
@@ -2359,7 +2321,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		 *sample_percent = NULL, *prefetch = NULL, *lob_prefetch = NULL,
 		 *limit_to = NULL;
 	oraType type;
-	int charlen, typeprec, typescale, nullable, key, rc;
+	int charlen, typeprec, typescale, nullable, rc;
 	List *options, *result = NIL;
 	ListCell *cell;
 	oracleSession *session;
@@ -2600,7 +2562,6 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			&typeprec,
 			&typescale,
 			&nullable,
-			&key,
 			(int)skip_tables,
 			(int)skip_views,
 			(int)skip_matviews
@@ -2761,10 +2722,6 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 					elog(DEBUG2, "column \"%s\" of table \"%s\" has an untranslatable data type", colname, tabname);
 					appendStringInfo(&buf, "text");
 			}
-
-			/* part of the primary key */
-			if (key)
-				appendStringInfo(&buf, " OPTIONS (key 'true')");
 
 			/* not nullable */
 			if (!nullable)
@@ -2954,7 +2911,6 @@ oracleGetOptions(Oid foreigntableid, Oid userid, List **options)
  * getColumnData
  * 		Get PostgreSQL column name and number, data type and data type modifier.
  * 		Set oraTable->npgcols.
- * 		For PostgreSQL 9.2 and better, find the primary key columns and mark them in oraTable.
  */
 void
 getColumnData(Oid foreigntableid, struct oraTable *oraTable)
@@ -2996,13 +2952,7 @@ getColumnData(Oid foreigntableid, struct oraTable *oraTable)
 			{
 				DefElem *def = (DefElem *)lfirst(option);
 
-				/* is it the "key" option and is it set to "true" ? */
-				if (strcmp(def->defname, OPT_KEY) == 0 && getBoolVal(def))
-				{
-					/* mark the column as primary key column */
-					oraTable->cols[index-1]->pkey = 1;
-				}
-				else if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && getBoolVal(def))
+				if (strcmp(def->defname, OPT_STRIP_ZEROS) == 0 && getBoolVal(def))
 					oraTable->cols[index-1]->strip_zeros = 1;
 			}
 		}
@@ -5644,7 +5594,7 @@ List
 	result = lappend(result, serializeString(fdwState->oraTable->name));
 	/* PostgreSQL table name */
 	result = lappend(result, serializeString(fdwState->oraTable->pgname));
-	/* number of columns in Oracle table */
+	/* number of column descriptors */
 	result = lappend(result, serializeInt(fdwState->oraTable->ncols));
 	/* number of columns in PostgreSQL table */
 	result = lappend(result, serializeInt(fdwState->oraTable->npgcols));
@@ -5660,9 +5610,7 @@ List
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pgtypmod));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->used));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->strip_zeros));
-		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->pkey));
 		result = lappend(result, serializeInt(fdwState->oraTable->cols[i]->val_size));
-		/* don't serialize val, val_len, val_len4, val_null and varno */
 	}
 
 	/* find length of parameter list */
@@ -5677,7 +5625,7 @@ List
 		result = lappend(result, serializeOid(param->type));
 		result = lappend(result, serializeInt((int)param->bindType));
 		result = lappend(result, serializeInt((int)param->colnum));
-		/* don't serialize value, node and bindh */
+		result = lappend(result, serializeString(param->junk_name));
 	}
 	/*
 	 * Don't serialize params, startup_cost, total_cost, rowcount, columnindex,
@@ -5802,8 +5750,6 @@ struct OracleFdwState
 		cell = list_next(list, cell);
 		state->oraTable->cols[i]->strip_zeros = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
-		state->oraTable->cols[i]->pkey = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
-		cell = list_next(list, cell);
 		state->oraTable->cols[i]->val_size = DatumGetInt32(((Const *)lfirst(cell))->constvalue);
 		cell = list_next(list, cell);
 		/*
@@ -5843,6 +5789,9 @@ struct OracleFdwState
 		param->node = NULL;
 		param->bindh = NULL;
 		param->colnum = (int)DatumGetInt32(((Const *)lfirst(cell))->constvalue);
+		cell = list_next(list, cell);
+		param->junk_name = deserializeString(lfirst(cell));
+		param->junk_attno = InvalidAttrNumber;
 		cell = list_next(list, cell);
 		param->next = state->paramList;
 		state->paramList = param;
@@ -6076,7 +6025,6 @@ struct OracleFdwState
 		copy->oraTable->cols[i]->pgtypmod = orig->oraTable->cols[i]->pgtypmod;
 		copy->oraTable->cols[i]->used = 0;
 		copy->oraTable->cols[i]->strip_zeros = orig->oraTable->cols[i]->strip_zeros;
-		copy->oraTable->cols[i]->pkey = orig->oraTable->cols[i]->pkey;
 		/* these are not needed for planning */
 		copy->oraTable->cols[i]->val = NULL;
 		copy->oraTable->cols[i]->val_size = orig->oraTable->cols[i]->val_size;
@@ -6117,9 +6065,9 @@ subtransactionCallback(SubXactEvent event, SubTransactionId mySubid, SubTransact
 /*
  * addParam
  * 		Creates a new struct paramDesc with the given values and adds it to the list.
- * 		A palloc'ed copy of "name" is used.
+ * 		Copies "name" into the new entry and returns the entry.
  */
-void
+struct paramDesc *
 addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, int colnum)
 {
 	struct paramDesc *param;
@@ -6163,8 +6111,12 @@ addParam(struct paramDesc **paramList, char *name, Oid pgtype, oraType oratype, 
 	param->node = NULL;
 	param->bindh = NULL;
 	param->colnum = colnum;
+	param->junk_name = NULL;
+	param->junk_attno = InvalidAttrNumber;
 	param->next = *paramList;
 	*paramList = param;
+
+	return param;
 }
 
 /*
@@ -6189,10 +6141,18 @@ setModifyParameters(struct paramDesc *paramList, TupleTableSlot *newslot, TupleT
 		if (param->bindType == BIND_OUTPUT)
 			continue;
 
-		if (param->name[1] == 'k')
+		if (param->junk_attno != InvalidAttrNumber)
 		{
-			/* for primary key parameters extract the resjunk entry */
-			datum = ExecGetJunkAttribute(oldslot, oraTable->cols[param->colnum]->pkey, &isnull);
+			/* get the hidden row identity from the original plan slot */
+			datum = ExecGetJunkAttribute(oldslot, param->junk_attno, &isnull);
+			if (isnull)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+						errmsg("cannot locate the row to be modified in Oracle table \"%s\"", oraTable->pgname),
+						errdetail("The row identity parameter \"%s\" is NULL.", param->name)));
+
+			param->value = TextDatumGetCString(datum);
+			continue;
 		}
 		else
 		{
@@ -6386,6 +6346,119 @@ hasTrigger(Relation rel, CmdType cmdtype)
 				|| (cmdtype == CMD_DELETE && rel->trigdesc->trig_delete_after_row));
 }
 
+/*
+ * findColumnByAttnum
+ * 		Return the Oracle column for a PostgreSQL attribute number,
+ * 		or NULL if the attribute is not mapped.
+ */
+static struct oraColumn *
+findColumnByAttnum(const struct oraTable *table, int attnum)
+{
+	int i;
+
+	for (i = 0; i < table->ncols; ++i)
+		if (table->cols[i]->pgattnum == attnum)
+			return table->cols[i];
+	return NULL;
+}
+
+/*
+ * getRowidColumn
+ * 		Return the hidden ROWID column, adding it if necessary,
+ * 		and mark it as used.
+ */
+static struct oraColumn *
+getRowidColumn(struct OracleFdwState *fdwState)
+{
+	struct oraTable *table;
+	struct oraColumn *rowid;
+
+	table = fdwState->oraTable;
+	rowid = findColumnByAttnum(table, ORACLE_IDENTITY_ATTRIBUTE);
+	if (rowid == NULL)
+	{
+		rowid = palloc0(sizeof(*rowid));
+		rowid->name = pstrdup("ROWID");
+		rowid->pgattnum = ORACLE_IDENTITY_ATTRIBUTE;
+		rowid->pgtypmod = -1;
+		rowid->oratype = ORA_TYPE_VARCHAR2;
+		rowid->pgtype = TEXTOID;
+		rowid->val_size = ORACLE_UROWID_TEXT_CAPACITY;
+		table->cols = repalloc(table->cols, sizeof(*table->cols) * (table->ncols + 1));
+		table->cols[table->ncols++] = rowid;
+	}
+	rowid->used = 1;
+	return rowid;
+}
+
+#if PG_VERSION_NUM >= 90500
+/*
+ * buildScanTlistWithRowid
+ * 		Build a flat scan target list with the hidden ROWID for UPDATE/DELETE.
+ * 		Retain each Var's type to distinguish named whole-row values
+ * 		from RECORD-typed row identities.
+ */
+static List *
+buildScanTlistWithRowid(struct OracleFdwState *fdwState, RelOptInfo *foreignrel, List *tlist, List *local_conds)
+{
+	List *vars = NIL;
+	List *result = NIL;
+	ListCell *lc;
+	Index varno;
+	struct oraColumn *rowid;
+
+	varno = foreignrel->relid;
+	rowid = findColumnByAttnum(fdwState->oraTable, ORACLE_IDENTITY_ATTRIBUTE);
+#if PG_VERSION_NUM >= 90600
+	vars = pull_var_clause((Node *)foreignrel->reltarget->exprs, PVC_RECURSE_PLACEHOLDERS);
+#else
+	vars = pull_var_clause((Node *)foreignrel->reltargetlist,
+		PVC_REJECT_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+#endif
+#if PG_VERSION_NUM >= 90600
+	vars = list_concat(vars, pull_var_clause((Node *)tlist, PVC_RECURSE_PLACEHOLDERS));
+	vars = list_concat(vars, pull_var_clause((Node *)local_conds, PVC_RECURSE_PLACEHOLDERS));
+	vars = list_concat(vars, pull_var_clause((Node *)fdwState->remote_conds, PVC_RECURSE_PLACEHOLDERS));
+#else
+	vars = list_concat(vars, pull_var_clause((Node *)tlist, PVC_REJECT_AGGREGATES, PVC_RECURSE_PLACEHOLDERS));
+	vars = list_concat(vars, pull_var_clause((Node *)local_conds, PVC_REJECT_AGGREGATES, PVC_RECURSE_PLACEHOLDERS));
+	vars = list_concat(vars, pull_var_clause((Node *)fdwState->remote_conds, PVC_REJECT_AGGREGATES, PVC_RECURSE_PLACEHOLDERS));
+#endif
+	foreach(lc, vars)
+	{
+		Var *var;
+		struct oraColumn *col;
+		int i;
+
+		var = lfirst_node(Var, lc);
+		if (var->varno != varno || var->varlevelsup != 0)
+			continue;
+		if (var->varattno == InvalidAttrNumber)
+		{
+			/* a whole-row reference needs all mapped table columns */
+			for (i = 0; i < fdwState->oraTable->ncols; ++i)
+				if (fdwState->oraTable->cols[i]->pgattnum > 0)
+					fdwState->oraTable->cols[i]->used = 1;
+		}
+		else if (var->varattno > 0)
+		{
+			col = findColumnByAttnum(fdwState->oraTable, var->varattno);
+			if (col != NULL)
+				col->used = 1;
+		}
+		else if ((var->varattno == ORACLE_IDENTITY_ATTRIBUTE && var->vartype != rowid->pgtype)
+			|| (var->varattno != ORACLE_IDENTITY_ATTRIBUTE && var->varattno != TableOidAttributeNumber))
+			ereport(ERROR,
+				(errcode(ERRCODE_FDW_COLUMN_NAME_NOT_FOUND),
+				 errmsg("system column with attribute number %d is not supported", var->varattno)));
+		result = add_to_flat_tlist(result, list_make1(copyObject(var)));
+	}
+
+	return add_to_flat_tlist(result, list_make1(makeVar(varno,
+		ORACLE_IDENTITY_ATTRIBUTE, rowid->pgtype, -1, InvalidOid, 0)));
+}
+#endif
+
 void
 buildInsertQuery(StringInfo sql, struct OracleFdwState *fdwState)
 {
@@ -6550,6 +6623,8 @@ appendReturningClause(StringInfo sql, struct OracleFdwState *fdwState)
 			param->node = NULL;
 			param->bindh = NULL;
 			param->colnum = i;
+			param->junk_name = NULL;
+			param->junk_attno = InvalidAttrNumber;
 			param->next = fdwState->paramList;
 			fdwState->paramList = param;
 
@@ -6748,16 +6823,21 @@ setSelectParameters(struct paramDesc *paramList, ExprContext *econtext)
 /*
  * initConversionMap
  * 		Map conversion array positions to Oracle column descriptors.
- * 		Preserve table attribute positions, including dropped columns.
+ * 		Preserve table attribute positions, including dropped columns,
+ * 		and append the hidden ROWID if it is used.
  */
 static void
 initConversionMap(struct OracleFdwState *fdw_state)
 {
 	struct oraTable *table;
+	struct oraColumn *rowid;
 	int i;
 
 	table = fdw_state->oraTable;
+	rowid = findColumnByAttnum(table, ORACLE_IDENTITY_ATTRIBUTE);
 	fdw_state->nconvertcols = table->npgcols;
+	if (rowid != NULL && rowid->used)
+		++fdw_state->nconvertcols;
 
 	fdw_state->convertcols = palloc(sizeof(int) * fdw_state->nconvertcols);
 	for (i = 0; i < fdw_state->nconvertcols; ++i)
@@ -6770,6 +6850,8 @@ initConversionMap(struct OracleFdwState *fdw_state)
 		col = table->cols[i];
 		if (col->pgattnum > 0 && col->pgattnum <= table->npgcols)
 			fdw_state->convertcols[col->pgattnum - 1] = i;
+		else if (col->pgattnum == ORACLE_IDENTITY_ATTRIBUTE && col->used)
+			fdw_state->convertcols[table->npgcols] = i;
 	}
 }
 
@@ -6822,6 +6904,16 @@ convertTuple(struct OracleFdwState *fdw_state, unsigned int index, Datum *values
 		oraval = fdw_state->oraTable->cols[i]->val +
 			(index - 1) * fdw_state->oraTable->cols[i]->val_size;
 		oralen = (fdw_state->oraTable->cols[i]->val_len)[index - 1];
+
+		if (fdw_state->oraTable->cols[i]->pgattnum == ORACLE_IDENTITY_ATTRIBUTE)
+		{
+			if (fdw_state->oraTable->cols[i]->val_null[index - 1] != 0
+				|| oralen >= fdw_state->oraTable->cols[i]->val_size
+				|| memchr(oraval, '\0', fdw_state->oraTable->cols[i]->val_size) == NULL)
+				ereport(ERROR,
+						(errcode(ERRCODE_FDW_INVALID_ATTRIBUTE_VALUE),
+						 errmsg("Oracle row identity is truncated")));
+		}
 
 		/* get the data and its length */
 		if (fdw_state->oraTable->cols[i]->oratype == ORA_TYPE_BLOB
@@ -7020,9 +7112,11 @@ void
 errorContextCallback(void *arg)
 {
 	struct OracleFdwState *fdw_state = (struct OracleFdwState *)arg;
+	const struct oraColumn *column;
 
+	column = fdw_state->oraTable->cols[fdw_state->columnindex];
 	errcontext("converting column \"%s\" for foreign table scan of \"%s\", row %lu",
-		quote_identifier(fdw_state->oraTable->cols[fdw_state->columnindex]->pgname),
+		quote_identifier(column->pgname ? column->pgname : column->name),
 		quote_identifier(fdw_state->oraTable->pgname),
 		fdw_state->rowcount);
 }

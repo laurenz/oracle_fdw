@@ -18,6 +18,10 @@
 /* oracle_fdw version */
 #define ORACLE_FDW_VERSION "2.10.0devel"
 
+/* UROWID text buffer capacity, including the trailing zero byte */
+/* 1 prefix + ceil(3999 * 8 / 6) base64 characters + 1 terminator */
+#define ORACLE_UROWID_TEXT_CAPACITY 5334
+
 /* definitions that need OCI */
 #ifdef OCI_ORACLE
 /*
@@ -125,7 +129,6 @@ struct oraColumn
 	int pgtypmod;       /* PostgreSQL type modifier */
 	int used;           /* is the column used in the query? */
 	int strip_zeros;    /* should ASCII zero be removed from Oracle strings? */
-	int pkey;           /* nonzero for primary keys, later set to the resjunk attribute number */
 	char *val;          /* buffer for Oracle to return results in (LOB locators for LOBs) */
 	int32_t val_size;   /* allocated size of one element in val */
 	uint16_t *val_len;  /* array of actual lengths of val */
@@ -138,7 +141,7 @@ struct oraTable
 {
 	char *name;    /* name in Oracle */
 	char *pgname;  /* for error messages */
-	int ncols;     /* number of columns */
+	int ncols;     /* number of entries in cols, including hidden columns */
 	int npgcols;   /* number of columns (including dropped) in the PostgreSQL foreign table */
 	struct oraColumn **cols;
 };
@@ -162,7 +165,9 @@ struct paramDesc
 	char *value;           /* value rendered for Oracle */
 	void *node;            /* the executable expression */
 	Oid output_func;       /* runtime type output function for a DML input */
-	int colnum;            /* corresponding column in oraTable (-1 in SELECT queries unless output column) */
+	int colnum;            /* corresponding column in oraTable, or -1 for non-column inputs */
+	char *junk_name;       /* source junk attribute for a hidden input, or NULL */
+	int junk_attno;        /* runtime attribute number in the original plan slot, or 0 */
 	void *bindh;           /* bind handle */
 	struct paramDesc *next;
 };
@@ -225,7 +230,7 @@ extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, cha
 extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void *oracleGetGeometryType(oracleSession *session);
-extern int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int *key, int skip_tables, int skip_views, int skip_matviews);
+extern int oracleGetImportColumn(oracleSession *session, char *dblink, char *schema, char *limit_to, char **tabname, char **colname, oraType *type, int *charlen, int *typeprec, int *typescale, int *nullable, int skip_tables, int skip_views, int skip_matviews);
 
 /*
  * functions defined in oracle_fdw.c
