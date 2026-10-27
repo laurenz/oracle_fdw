@@ -5505,7 +5505,12 @@ oracleConnectServer(Name srvname)
 	/* guess a good NLS_LANG environment setting */
 	nls_lang = guessNlsLang(nls_lang);
 
-	/* connect to Oracle database */
+	/*
+	 * Connect to Oracle database.
+	 * Pass the current transaction nest level so that savepoints are set
+	 * up correctly when the first Oracle call happens inside a subtransaction;
+	 * otherwise oracleEndSubtransaction would not roll back to the savepoint.
+	 */
 	return oracleGetSession(
 		dbserver,
 		isolation_level,
@@ -5515,7 +5520,7 @@ oracleConnectServer(Name srvname)
 		timezone,
 		(int)have_nchar,
 		NULL,
-		1
+		Max(1, GetCurrentTransactionNestLevel())
 	);
 }
 

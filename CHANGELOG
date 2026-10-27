@@ -8,6 +8,10 @@ Version 2.10.0
   - Fix a remote cursor leak after a failed oracle_execute call.
     A few hundred failed calls in the same transaction could exhaust the
     Oracle cursor limit with ORA-01000.
+  - Fix transaction rollback when the first Oracle call in a transaction
+    happens inside a subtransaction.  Remote DML executed there survived
+    the subtransaction abort.  Also don't report ORA-01086 when rolling
+    back to a savepoint that a remote DDL statement implicitly committed.
 
   Enhancements:
   - Add a CI workflow that automatically tests new commits against PostgreSQL

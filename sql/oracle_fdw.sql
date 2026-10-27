@@ -659,3 +659,37 @@ UNION ALL
 SELECT * FROM b;
 
 ROLLBACK;
+
+/*
+ * Test transactional behavior of oracle_execute.
+ */
+
+-- remote DML is rolled back when the local transaction rolls back
+BEGIN;
+SELECT oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+ROLLBACK;
+SELECT count(*) FROM shorty WHERE id = 999;
+
+-- the first Oracle call in a transaction can happen inside a subtransaction;
+-- remote DML must still be rolled back when that subtransaction aborts
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+SELECT count(*) FROM shorty WHERE id = 999;
+ROLLBACK;
+
+-- a failed remote DDL implicitly commits the remote transaction; rolling
+-- back to the savepoint must not mask the original error with ORA-01086
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP VIEW scott.no_such_view_xyz');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;

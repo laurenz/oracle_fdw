@@ -846,6 +846,19 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
 		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
+		/*
+		 * ORA-01086 means that the savepoint no longer exists because an
+		 * implicit COMMIT (e.g. a DDL statement) has ended the remote
+		 * transaction; then there is nothing left to roll back, and we
+		 * must not mask the error that caused the subtransaction abort.
+		 */
+		if (err_code == 1086)
+		{
+			oracleDebug2("oracle_fdw: remote transaction was ended by an implicit commit, nothing to roll back");
+			freeStmt(stmthp, connp, envp->errhp);
+			return;
+		}
+
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error rolling back to savepoint: OCIStmtExecute failed on ROLLBACK TO SAVEPOINT",
 			oraMessage);
