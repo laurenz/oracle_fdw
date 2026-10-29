@@ -2289,11 +2289,18 @@ oracleFetchNext(oracleSession *session, unsigned int prefetch)
 void
 oracleExecuteCall(oracleSession *session, char * const stmt)
 {
-	OCIStmt *stmthp = NULL;
+	/*
+	 * The statement handle must be stored in the session: oracleCloseStatement()
+	 * can only release session->stmthp, and that is the only way to reclaim the
+	 * handle when an error unwinds the stack.  A handle that is kept in a local
+	 * variable stays open on the remote server until the transaction ends.
+	 */
+	if (session->stmthp != NULL)
+		oracleError(FDW_ERROR, "oracleExecuteCall internal error: statement handle is not NULL");
 
 	/* prepare the query */
 	if (checkerr(
-		OCIStmtPrepare2(session->connp->svchp, &stmthp, session->envp->errhp,
+		OCIStmtPrepare2(session->connp->svchp, &(session->stmthp), session->envp->errhp,
 			(text *)stmt, (ub4)strlen(stmt), (text *)NULL, (ub4)0,
 			(ub4) OCI_NTV_SYNTAX, (ub4) OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
@@ -2304,10 +2311,10 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 	}
 
 	/* register statement handle */
-	registerStmt(stmthp, session->envp->envhp, session->connp);
+	registerStmt(session->stmthp, session->envp->envhp, session->connp);
 
 	if (checkerr(
-		OCIStmtExecute(session->connp->svchp, stmthp, session->envp->errhp, (ub4)1, (ub4)0,
+		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
 		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
 	{
@@ -2320,8 +2327,8 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 				oraMessage);
 	}
 
-	/* free the statement handle */
-	freeStmt(stmthp, session->connp, session->envp->errhp);
+	/* free the statement handle (the connection will be cached) */
+	oracleCloseStatement(session);
 }
 
 /*
