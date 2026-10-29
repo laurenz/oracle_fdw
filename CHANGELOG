@@ -5,6 +5,9 @@ Version 2.10.0
     If the tables have different column layouts, this could cause the error
       cache lookup failed for function 0
     Patch by Ziming Zhang.
+  - Fix a remote cursor leak after a failed oracle_execute call.
+    A few hundred failed calls in the same transaction could exhaust the
+    Oracle cursor limit with ORA-01000.
 
   Enhancements:
   - Add a CI workflow that automatically tests new commits against PostgreSQL

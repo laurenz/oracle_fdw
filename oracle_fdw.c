@@ -745,7 +745,22 @@ oracle_execute(PG_FUNCTION_ARGS)
 	char *stmt = text_to_cstring(PG_GETARG_TEXT_PP(1));
 	oracleSession *session = oracleConnectServer(srvname);
 
-	oracleExecuteCall(session, stmt);
+	PG_TRY();
+	{
+		oracleExecuteCall(session, stmt);
+	}
+	PG_CATCH();
+	{
+		/*
+		 * The statement may still be open on the cached session: close it
+		 * before the error is re-thrown, otherwise the remote cursor stays
+		 * open until the end of the transaction.
+		 */
+		oracleCloseStatement(session);
+		pfree(session);
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
 
 	/* free the session (connection will be cached) */
 	pfree(session);
