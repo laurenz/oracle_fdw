@@ -78,7 +78,7 @@ Then you can connect to PostgreSQL as `pguser` and define:
 see below.)
 
     pgdb=> CREATE FOREIGN TABLE oratab (
-              id        integer           OPTIONS (key 'true')  NOT NULL,
+              id        integer          NOT NULL,
               text      character varying(30),
               floating  double precision  NOT NULL
            ) SERVER oradb OPTIONS (schema 'ORAUSER', table 'ORATAB');
@@ -302,6 +302,8 @@ Foreign table options
   PostgreSQL server and can lead to out-of-memory errors there.  High values
   usually won't offer any benefit unless the table rows are very small. Be
   careful with high values; you have been warned.
+  UPDATE and DELETE scans allocate 5334 bytes per prefetched row for the
+  Oracle row identity.
 
   Note that there is no prefetching if the Oracle table contains columns of
   the type `MDSYS.SDO_GEOMETRY`.
@@ -317,13 +319,6 @@ Foreign table options
 
 Column options
 --------------
-
-- **key** (optional, defaults to "false")
-
-  If set to yes/on/true, the corresponding column on the foreign Oracle table
-  is considered a primary key column.  
-  For UPDATE and DELETE to work, you must set this option on all columns
-  that belong to the table's primary key.
 
 - **strip_zeros** (optional, defaults to "false")
 
@@ -373,10 +368,6 @@ actually needed by the PostgreSQL query.
 The PostgreSQL table can have more or less columns than the Oracle table.
 If it has more columns, and these columns are used, you will receive a warning
 and NULL values will be returned.
-
-If you want to UPDATE or DELETE, make sure that the `key` option is set on all
-columns that belong to the table's primary key.  Failure to do so will result
-in errors.
 
 Data types
 ----------
@@ -489,10 +480,14 @@ This is allowed by default (also in databases upgraded from an earlier
 PostgreSQL release) and can be disabled by setting the **readonly**
 table option.
 
-For UPDATE and DELETE to work, the columns corresponding to the primary
-key columns of the Oracle table must have the **key** column option set.
-These columns are used to identify a foreign table row, so make sure that
-the option is set on *all* columns that belong to the primary key.
+UPDATE and DELETE require PostgreSQL 9.5 or later. Reads and INSERT are
+available on PostgreSQL 9.3 and 9.4.
+
+For UPDATE and DELETE, rows are identified by Oracle's ROWID, so no primary
+key or special column option is required.  This also allows modifying tables
+that have duplicate rows.
+Legacy **key** column options are accepted for existing table definitions
+and are ignored.
 
 If you omit a foreign table column during INSERT, that column is set to
 the value defined in the DEFAULT clause on the PostgreSQL foreign table
