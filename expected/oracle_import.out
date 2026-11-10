@@ -47,13 +47,13 @@ WHERE t.relname IN ('typetest1', 'ttv', 'mattest2')
 ORDER BY t.relname, a.attnum;
   relname  | attname |          atttypid           | attfdwoptions 
 -----------+---------+-----------------------------+---------------
- mattest2  | id      | integer                     | {key=true}
+ mattest2  | id      | integer                     | 
  mattest2  | ts1     | timestamp with time zone    | 
  mattest2  | ts2     | timestamp with time zone    | 
  mattest2  | ts3     | timestamp with time zone    | 
  ttv       | id      | integer                     | 
  ttv       | vc      | character varying           | 
- typetest1 | id      | integer                     | {key=true}
+ typetest1 | id      | integer                     | 
  typetest1 | c       | character                   | 
  typetest1 | nc      | character                   | 
  typetest1 | vc      | character varying           | 
@@ -74,3 +74,13 @@ ORDER BY t.relname, a.attnum;
  typetest1 | iym     | interval                    | 
 (25 rows)
 
+-- Update a row through an imported table without key options.
+BEGIN;
+INSERT INTO import.typetest1 (id, c) VALUES (9999, 'before');
+UPDATE import.typetest1 SET c = 'after' WHERE id = 9999 RETURNING id;
+  id  
+------
+ 9999
+(1 row)
+
+ROLLBACK;

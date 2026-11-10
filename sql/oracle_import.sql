@@ -38,3 +38,9 @@ WHERE t.relname IN ('typetest1', 'ttv', 'mattest2')
   AND t.relnamespace = 'import'::regnamespace
   AND NOT a.attisdropped
 ORDER BY t.relname, a.attnum;
+
+-- Update a row through an imported table without key options.
+BEGIN;
+INSERT INTO import.typetest1 (id, c) VALUES (9999, 'before');
+UPDATE import.typetest1 SET c = 'after' WHERE id = 9999 RETURNING id;
+ROLLBACK;

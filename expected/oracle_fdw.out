@@ -43,6 +43,13 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+DO
+$$BEGIN
+   SELECT oracle_execute('oracle', 'DROP TABLE scott.rowidtest PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
 SELECT oracle_execute(
           'oracle',
           E'CREATE TABLE scott.typetest1 (\n'
@@ -509,12 +516,12 @@ DELETE FROM typetest1 WHERE id = 5;
  * Test EXPLAIN support.
  */
 EXPLAIN (COSTS off) UPDATE typetest1 SET lc = current_timestamp WHERE id < 4 RETURNING id + 1;
-                                                                                                                                       QUERY PLAN                                                                                                                                        
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                            QUERY PLAN                                                                                                                                             
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Update on typetest1
-   Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p00007 WHERE "ID" = :k1 RETURNING "ID" INTO :r1
+   Oracle statement: UPDATE "TYPETEST1" SET "LC" = :p00007 WHERE ROWID = :ora_rowid RETURNING "ID" INTO :r1
    ->  Foreign Scan on typetest1
-         Oracle query: SELECT /*5d45d93cfb9f3bf9*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", TO_CLOB(r1."LNC"), r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM" FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
+         Oracle query: SELECT /*62ec8b8e5f592e48*/ r1."ID", r1."C", r1."NC", r1."VC", r1."NVC", r1."LC", TO_CLOB(r1."LNC"), r1."R", r1."U", r1."LB", r1."LR", r1."B", r1."NUM", r1."FL", r1."DB", r1."D", r1."TS", r1."IDS", r1."IYM", r1.ROWID FROM "TYPETEST1" r1 WHERE (r1."ID" < 4) FOR UPDATE
 (4 rows)
 
 EXPLAIN (VERBOSE on, COSTS off) SELECT * FROM shorty;
@@ -976,3 +983,115 @@ SELECT * FROM b;
 (2 rows)
 
 ROLLBACK;
+/*
+ * Test ROWID-based row identity for UPDATE and DELETE.
+ * A heap table needs no key columns, even when rows are identical.
+ */
+SELECT oracle_execute(
+          'oracle',
+          'CREATE TABLE scott.rowidtest (id NUMBER(5), note VARCHAR2(20))'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+SELECT oracle_execute(
+          'oracle',
+          'INSERT INTO scott.rowidtest SELECT 1, ''same'' FROM DUAL CONNECT BY LEVEL <= 3'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+CREATE FOREIGN TABLE rowidtest (
+   id     integer NOT NULL,
+   unused integer,
+   note   character varying(20)
+) SERVER oracle OPTIONS (table 'ROWIDTEST');
+-- Keep a dropped attribute throughout the heap DML tests.
+ALTER FOREIGN TABLE rowidtest DROP COLUMN unused;
+EXPLAIN (COSTS off)
+UPDATE rowidtest SET note = note || '!' WHERE id = 1;
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Update on rowidtest
+   Oracle statement: UPDATE "ROWIDTEST" SET "NOTE" = :p00003 WHERE ROWID = :ora_rowid
+   ->  Foreign Scan on rowidtest
+         Oracle query: SELECT /*9665b47610001f6f*/ r1."ID", r1."NOTE", r1.ROWID FROM "ROWIDTEST" r1 WHERE (r1."ID" = 1) FOR UPDATE
+(4 rows)
+
+-- Each duplicate is updated exactly once, including when id changes.
+UPDATE rowidtest SET note = note || '!' WHERE id = 1;
+SELECT note, count(*) FROM rowidtest GROUP BY note ORDER BY note;
+ note  | count 
+-------+-------
+ same! |     3
+(1 row)
+
+UPDATE rowidtest SET id = 2 WHERE id = 1 RETURNING id, note;
+ id | note  
+----+-------
+  2 | same!
+  2 | same!
+  2 | same!
+(3 rows)
+
+-- Expected error: explicit ctid references are unsupported.
+UPDATE rowidtest SET note = ctid::text WHERE id = 2;
+ERROR:  system column with attribute number -1 is not supported
+DELETE FROM rowidtest WHERE id = 2 RETURNING id, note;
+ id | note  
+----+-------
+  2 | same!
+  2 | same!
+  2 | same!
+(3 rows)
+
+DROP FOREIGN TABLE rowidtest;
+SELECT oracle_execute('oracle', 'DROP TABLE scott.rowidtest PURGE');
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+-- An index-organized table with a wide key uses a long logical UROWID.
+SELECT oracle_execute(
+          'oracle',
+          E'CREATE TABLE scott.rowidtest (\n'
+          '   id VARCHAR2(3000 BYTE) PRIMARY KEY,\n'
+          '   note VARCHAR2(20)\n'
+          ') SEGMENT CREATION IMMEDIATE ORGANIZATION INDEX'
+       );
+ oracle_execute 
+----------------
+ 
+(1 row)
+
+CREATE FOREIGN TABLE rowidtest (
+   id   character varying(3000) NOT NULL,
+   note character varying(20)
+) SERVER oracle OPTIONS (table 'ROWIDTEST');
+INSERT INTO rowidtest VALUES (repeat('a', 3000), 'before');
+UPDATE rowidtest SET id = repeat('b', 3000), note = 'after'
+WHERE id = repeat('a', 3000) RETURNING note;
+ note  
+-------
+ after
+(1 row)
+
+DELETE FROM rowidtest WHERE id = repeat('b', 3000)
+RETURNING note;
+ note  
+-------
+ after
+(1 row)
+
+DROP FOREIGN TABLE rowidtest;
+SELECT oracle_execute('oracle', 'DROP TABLE scott.rowidtest PURGE');
+ oracle_execute 
+----------------
+ 
+(1 row)
+
