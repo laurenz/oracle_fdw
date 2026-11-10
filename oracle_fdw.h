@@ -243,6 +243,7 @@ extern void oracleError_ssdh(oraError sqlstate, const char *message, const char 
 extern void oracleError_ii(oraError sqlstate, const char *message, int arg1, int arg2);
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
+extern void oracleWarning(const char *message, const char *detail);
 extern void oracleDebug2(const char *message);
 extern void initializePostGIS(void);
 
