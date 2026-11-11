@@ -747,7 +747,8 @@ oracle_execute(PG_FUNCTION_ARGS)
 
 	PG_TRY();
 	{
-		oracleExecuteCall(session, stmt);
+		if (oracleExecuteCall(session, stmt))
+			oracleSetDmlInTransaction(session);
 	}
 	PG_CATCH();
 	{
@@ -2073,6 +2074,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table insert on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	dml_in_transaction = true;
+	oracleSetDmlInTransaction(fdw_state->session);
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -2122,6 +2124,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table update on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	dml_in_transaction = true;
+	oracleSetDmlInTransaction(fdw_state->session);
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -2172,6 +2175,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table delete on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	dml_in_transaction = true;
+	oracleSetDmlInTransaction(fdw_state->session);
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);

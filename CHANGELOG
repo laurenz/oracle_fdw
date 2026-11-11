@@ -6,7 +6,8 @@ Version 2.10.0
     Remote DML executed there survived the abort of the subtransaction.
   - If a remote DDL statement ends the Oracle transaction and a subtransaction
     is aborted afterwards, report a WARNING that the rollback to the savepoint
-    failed, instead of silently ignoring it.
+    failed.  If the subtransaction had modified data, refuse to commit the
+    top-level transaction, because those changes cannot be rolled back.
   - Fix an error when modifying multiple foreign tables in a single statement.
     If the tables have different column layouts, this could cause the error
       cache lookup failed for function 0

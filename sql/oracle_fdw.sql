@@ -704,3 +704,25 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+
+-- DML after DDL in an aborted subtransaction cannot be rolled back, so the
+-- top-level transaction must not be committed
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'CREATE TABLE scott.subx_ddl (v number)');
+   PERFORM oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+COMMIT;
+SELECT count(*) FROM shorty WHERE id = 999;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;

@@ -522,6 +522,8 @@ oracleSession
 		connp->geomtype = NULL;
 		connp->stmtlist = NULL;
 		connp->xact_level = 0;
+		connp->dml_level = 0;
+		connp->savepoint_lost = 0;
 		connp->next = srvp->connlist;
 		srvp->connlist = connp;
 
@@ -585,6 +587,19 @@ oracleSession
 	oracleSetSavepoint(session, curlevel);
 
 	return session;
+}
+
+/*
+ * oracleSetDmlInTransaction
+ * 		Remember that DML was executed at the current transaction level.
+ * 		This is used to tell whether a lost savepoint may have covered
+ * 		changes that cannot be rolled back any more.
+ */
+void
+oracleSetDmlInTransaction(oracleSession *session)
+{
+	if (session->connp->xact_level > session->connp->dml_level)
+		session->connp->dml_level = session->connp->xact_level;
 }
 
 /*
@@ -719,9 +734,26 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
 
 	/* do nothing if there is no transaction */
 	if (connarg->xact_level == 0)
+	{
+		connarg->dml_level = 0;
+		connarg->savepoint_lost = 0;
 		return;
-	else
-		connarg->xact_level = 0;
+	}
+
+	/*
+	 * If a savepoint was lost and DML may have been committed by an implicit
+	 * commit, the transaction cannot be committed.  Raising an error during
+	 * the subtransaction abort would interrupt the cleanup, so reject the
+	 * commit here instead.  The abort callback will roll back the remote
+	 * transaction.
+	 */
+	if (is_commit && !noerror && connarg->savepoint_lost)
+		oracleError(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"cannot commit: a savepoint of the remote Oracle transaction was lost");
+
+	connarg->xact_level = 0;
+	connarg->dml_level = 0;
+	connarg->savepoint_lost = 0;
 
 	/* commit or rollback */
 	if (is_commit)
@@ -785,6 +817,12 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 
 	if (is_commit)
 	{
+		/*
+		 * DML in the committed subtransaction now belongs to its parent.
+		 */
+		if (ce->dml_level > nest_level - 1)
+			ce->dml_level = nest_level - 1;
+
 		/*
 		 * There is nothing to do as savepoints don't get released in Oracle:
 		 * Setting the same savepoint again just overwrites the previous one.
@@ -854,6 +892,15 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 		 */
 		if (err_code == 1086)
 		{
+			/*
+			 * If the subtransaction had modified data, that data may have
+			 * been committed by the implicit commit and can no longer be
+			 * rolled back.  Remember that, so that the top-level transaction
+			 * is not committed.
+			 */
+			if (ce->dml_level >= nest_level)
+				ce->savepoint_lost = 1;
+
 			freeStmt(stmthp, connp, envp->errhp);
 			oracleWarning("could not roll back to a savepoint of the remote Oracle transaction",
 				"The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.");
@@ -864,6 +911,10 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 			"error rolling back to savepoint: OCIStmtExecute failed on ROLLBACK TO SAVEPOINT",
 			oraMessage);
 	}
+
+	/* the aborted subtransaction's changes have been rolled back */
+	if (ce->dml_level > nest_level - 1)
+		ce->dml_level = nest_level - 1;
 
 	/* free the statement handle */
 	freeStmt(stmthp, connp, envp->errhp);
@@ -2297,12 +2348,37 @@ oracleFetchNext(oracleSession *session, unsigned int prefetch)
 }
 
 /*
+ * oracleStatementIsDml
+ * 		Return 1 if a prepared statement may modify data.
+ * 		PL/SQL blocks and unknown statement types are treated as DML,
+ * 		because they may contain DML.
+ */
+static int
+oracleStatementIsDml(ub2 stmt_type)
+{
+	switch (stmt_type)
+	{
+		case OCI_STMT_SELECT:
+		case OCI_STMT_CREATE:
+		case OCI_STMT_DROP:
+		case OCI_STMT_ALTER:
+			return 0;
+		default:
+			return 1;
+	}
+}
+
+/*
  * oracleExecuteCall
  * 		Execute an Oracle statement that has no results.
+ * 		Return 1 if the statement may modify data, else 0.
  */
-void
+int
 oracleExecuteCall(oracleSession *session, char * const stmt)
 {
+	ub2 stmt_type;
+	int is_dml;
+
 	/*
 	 * The statement handle must be stored in the session: oracleCloseStatement()
 	 * can only release session->stmthp, and that is the only way to reclaim the
@@ -2327,6 +2403,20 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 	/* register statement handle */
 	registerStmt(session->stmthp, session->envp->envhp, session->connp);
 
+	/* find out whether the statement may modify data */
+	if (checkerr(
+		OCIAttrGet((dvoid *)session->stmthp, OCI_HTYPE_STMT, (dvoid *)&stmt_type, (ub4)0,
+			OCI_ATTR_STMT_TYPE, session->envp->errhp),
+		(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
+	{
+		oracleCloseStatement(session);
+		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
+			"error executing statement: OCIAttrGet failed to get statement type",
+			oraMessage);
+	}
+
+	is_dml = oracleStatementIsDml(stmt_type);
+
 	if (checkerr(
 		OCIStmtExecute(session->connp->svchp, session->stmthp, session->envp->errhp, (ub4)1, (ub4)0,
 			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
@@ -2343,6 +2433,8 @@ oracleExecuteCall(oracleSession *session, char * const stmt)
 
 	/* free the statement handle (the connection will be cached) */
 	oracleCloseStatement(session);
+
+	return is_dml;
 }
 
 /*
