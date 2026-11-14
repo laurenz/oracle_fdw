@@ -2500,7 +2500,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		NULL,  /* don't need time zone */
 		(int)have_nchar,
 		NULL,
-		1
+		GetCurrentTransactionNestLevel()
 	);
 
 	initStringInfo(&buf);
@@ -5515,7 +5515,7 @@ oracleConnectServer(Name srvname)
 		timezone,
 		(int)have_nchar,
 		NULL,
-		1
+		GetCurrentTransactionNestLevel()
 	);
 }
 
@@ -7308,6 +7308,18 @@ oracleError(oraError sqlstate, const char *message)
 				(errcode(to_sqlstate(sqlstate)),
 				errmsg("%s", message)));
 	}
+}
+
+/*
+ * oracleWarning
+ * 		Report a PostgreSQL warning with a detail message.
+ */
+void
+oracleWarning(const char *message, const char *detail)
+{
+	ereport(WARNING,
+			(errmsg("%s", message),
+			errdetail("%s", detail)));
 }
 
 /*
