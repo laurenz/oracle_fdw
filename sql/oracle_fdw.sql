@@ -659,3 +659,70 @@ UNION ALL
 SELECT * FROM b;
 
 ROLLBACK;
+
+/*
+ * Test subtransactions with oracle_execute.
+ */
+
+-- the first Oracle call in a transaction can happen inside a subtransaction;
+-- remote DML must be rolled back when that subtransaction aborts
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+SELECT count(*) FROM shorty WHERE id = 999;
+ROLLBACK;
+
+-- a DDL statement implicitly commits the remote transaction; if a subtransaction
+-- is aborted afterwards, a warning is issued because the rollback is impossible
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'CREATE TABLE scott.subx_ddl (v number)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+COMMIT;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+
+-- DML after DDL in an aborted subtransaction cannot be rolled back, so the
+-- top-level transaction must not be committed
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'CREATE TABLE scott.subx_ddl (v number)');
+   PERFORM oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+COMMIT;
+SELECT count(*) FROM shorty WHERE id = 999;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;

@@ -15,6 +15,8 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest1 PURGE');
@@ -22,6 +24,8 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP MATERIALIZED VIEW scott.mattest2');
@@ -29,6 +33,8 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.typetest2 PURGE');
@@ -36,6 +42,8 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
 DO
 $$BEGIN
    SELECT oracle_execute('oracle', 'DROP TABLE scott.gis PURGE');
@@ -43,6 +51,8 @@ EXCEPTION
    WHEN OTHERS THEN
       NULL;
 END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
 SELECT oracle_execute(
           'oracle',
           E'CREATE TABLE scott.typetest1 (\n'
@@ -976,3 +986,83 @@ SELECT * FROM b;
 (2 rows)
 
 ROLLBACK;
+/*
+ * Test subtransactions with oracle_execute.
+ */
+-- the first Oracle call in a transaction can happen inside a subtransaction;
+-- remote DML must be rolled back when that subtransaction aborts
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+SELECT count(*) FROM shorty WHERE id = 999;
+ count 
+-------
+     0
+(1 row)
+
+ROLLBACK;
+-- a DDL statement implicitly commits the remote transaction; if a subtransaction
+-- is aborted afterwards, a warning is issued because the rollback is impossible
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'CREATE TABLE scott.subx_ddl (v number)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
+COMMIT;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+-- DML after DDL in an aborted subtransaction cannot be rolled back, so the
+-- top-level transaction must not be committed
+BEGIN;
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'CREATE TABLE scott.subx_ddl (v number)');
+   PERFORM oracle_execute('oracle', 'INSERT INTO scott.typetest1 (id) VALUES (999)');
+   RAISE EXCEPTION 'abort';
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;
+WARNING:  could not roll back to a savepoint of the remote Oracle transaction
+DETAIL:  The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.
+COMMIT;
+ERROR:  cannot commit: a savepoint of the remote Oracle transaction was lost
+SELECT count(*) FROM shorty WHERE id = 999;
+ count 
+-------
+     0
+(1 row)
+
+DO
+$$BEGIN
+   PERFORM oracle_execute('oracle', 'DROP TABLE scott.subx_ddl PURGE');
+EXCEPTION
+   WHEN OTHERS THEN
+      NULL;
+END;$$;

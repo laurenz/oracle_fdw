@@ -32,6 +32,8 @@ struct connEntry
 	OCIType *geomtype;
 	struct stmtHandleEntry *stmtlist;
 	int xact_level;  /* 0 = none, 1 = main, else subtransaction */
+	int dml_level;  /* highest subtransaction level with active DML */
+	int savepoint_lost;  /* a savepoint was lost by an implicit commit */
 	struct connEntry *next;
 };
 
@@ -209,6 +211,7 @@ typedef enum
  */
 extern oracleSession *oracleGetSession(const char *connectstring, oraIsoLevel isolation_level, char *user, char *password, const char *nls_lang, const char *timezone, int have_nchar, const char *tablename, int curlevel);
 extern void oracleCloseStatement(oracleSession *session);
+extern void oracleSetDmlInTransaction(oracleSession *session);
 extern void oracleCloseConnections(void);
 extern void oracleShutdown(void);
 extern void oracleCancel(void);
@@ -220,7 +223,7 @@ extern void oracleExplain(oracleSession *session, const char *query, int *nrows,
 extern void oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTable *oraTable, unsigned int prefetch, unsigned int lob_prefetch);
 extern unsigned int oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, struct paramDesc *paramList, unsigned int prefetch);
 extern unsigned int oracleFetchNext(oracleSession *session, unsigned int prefetch);
-extern void oracleExecuteCall(oracleSession *session, char * const stmt);
+extern int oracleExecuteCall(oracleSession *session, char * const stmt);
 extern void oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, long *value_len);
 extern void oracleClientVersion(int *major, int *minor, int *update, int *patch, int *port_patch);
 extern void oracleServerVersion(oracleSession *session, int *major, int *minor, int *update, int *patch, int *port_patch);
@@ -243,6 +246,7 @@ extern void oracleError_ssdh(oraError sqlstate, const char *message, const char 
 extern void oracleError_ii(oraError sqlstate, const char *message, int arg1, int arg2);
 extern void oracleError_i(oraError sqlstate, const char *message, int arg);
 extern void oracleError(oraError sqlstate, const char *message);
+extern void oracleWarning(const char *message, const char *detail);
 extern void oracleDebug2(const char *message);
 extern void initializePostGIS(void);
 

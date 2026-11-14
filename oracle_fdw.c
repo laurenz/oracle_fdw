@@ -747,7 +747,8 @@ oracle_execute(PG_FUNCTION_ARGS)
 
 	PG_TRY();
 	{
-		oracleExecuteCall(session, stmt);
+		if (oracleExecuteCall(session, stmt))
+			oracleSetDmlInTransaction(session);
 	}
 	PG_CATCH();
 	{
@@ -2073,6 +2074,7 @@ oracleExecForeignInsert(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table insert on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	dml_in_transaction = true;
+	oracleSetDmlInTransaction(fdw_state->session);
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -2122,6 +2124,7 @@ oracleExecForeignUpdate(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table update on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	dml_in_transaction = true;
+	oracleSetDmlInTransaction(fdw_state->session);
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -2172,6 +2175,7 @@ oracleExecForeignDelete(EState *estate, ResultRelInfo *rinfo, TupleTableSlot *sl
 	elog(DEBUG3, "oracle_fdw: execute foreign table delete on %d", RelationGetRelid(rinfo->ri_RelationDesc));
 
 	dml_in_transaction = true;
+	oracleSetDmlInTransaction(fdw_state->session);
 
 	MemoryContextReset(fdw_state->temp_cxt);
 	oldcontext = MemoryContextSwitchTo(fdw_state->temp_cxt);
@@ -2500,7 +2504,7 @@ oracleImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 		NULL,  /* don't need time zone */
 		(int)have_nchar,
 		NULL,
-		1
+		GetCurrentTransactionNestLevel()
 	);
 
 	initStringInfo(&buf);
@@ -5515,7 +5519,7 @@ oracleConnectServer(Name srvname)
 		timezone,
 		(int)have_nchar,
 		NULL,
-		1
+		GetCurrentTransactionNestLevel()
 	);
 }
 
@@ -7308,6 +7312,18 @@ oracleError(oraError sqlstate, const char *message)
 				(errcode(to_sqlstate(sqlstate)),
 				errmsg("%s", message)));
 	}
+}
+
+/*
+ * oracleWarning
+ * 		Report a PostgreSQL warning with a detail message.
+ */
+void
+oracleWarning(const char *message, const char *detail)
+{
+	ereport(WARNING,
+			(errmsg("%s", message),
+			errdetail("%s", detail)));
 }
 
 /*
