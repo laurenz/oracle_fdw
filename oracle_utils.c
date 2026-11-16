@@ -768,6 +768,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 	struct envEntry *envp = NULL;
 	OCIStmt *stmthp = NULL;
 	int found = 0;
+	sword rc;
 
 	/* do nothing if the transaction level is lower than nest_level */
 	if (ce->xact_level < nest_level)
@@ -841,32 +842,26 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
 	registerStmt(stmthp, envp->envhp, connp);
 
 	/* rollback to savepoint */
-	if (checkerr(
-		OCIStmtExecute(connp->svchp, stmthp, envp->errhp, (ub4)1, (ub4)0,
-			(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
-		(dvoid *)envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-	{
-		/*
-		 * ORA-01086 means that the savepoint no longer exists because an
-		 * implicit COMMIT (e.g. a DDL statement) has ended the remote
-		 * transaction.  Warn instead of raising an error, because an error
-		 * here would mask the error that caused the subtransaction abort.
-		 */
-		if (err_code == 1086)
-		{
-			freeStmt(stmthp, connp, envp->errhp);
-			oracleWarning("could not roll back to a savepoint of the remote Oracle transaction",
-				"The remote transaction was ended by an implicit commit, for example by a DDL statement, so changes of the aborted subtransaction may have been committed.");
-			return;
-		}
-
+	rc = checkerr(
+			OCIStmtExecute(connp->svchp, stmthp, envp->errhp, (ub4)1, (ub4)0,
+				(CONST OCISnapshot *)NULL, (OCISnapshot *)NULL, OCI_DEFAULT),
+			(dvoid *)envp->errhp, OCI_HTYPE_ERROR);
+	if (rc != OCI_SUCCESS && err_code != 1086)
 		oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
 			"error rolling back to savepoint: OCIStmtExecute failed on ROLLBACK TO SAVEPOINT",
 			oraMessage);
-	}
 
 	/* free the statement handle */
 	freeStmt(stmthp, connp, envp->errhp);
+
+	/*
+	 * ORA-01086 means that the savepoint no longer exists because an
+	 * implicit COMMIT (e.g. a DDL statement) has ended the remote
+	 * transaction.  Alert the user with a warning.
+	 */
+	if (err_code == 1086)
+		oracleWarning("could not roll back to a savepoint in Oracle database",
+			"A DDL or TRUNCATE statement in Oracle implicitly ended the transaction.");
 }
 
 /*
