@@ -72,5 +72,6 @@ ORDER BY t.relname, a.attnum;
  typetest1 | ts      | timestamp with time zone    | 
  typetest1 | ids     | interval                    | 
  typetest1 | iym     | interval                    | 
-(25 rows)
+ typetest1 | j       | character varying           | 
+(26 rows)
 

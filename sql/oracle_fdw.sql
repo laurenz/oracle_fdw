@@ -80,7 +80,8 @@ SELECT oracle_execute(
           '   d   DATE,\n'
           '   ts  TIMESTAMP WITH TIME ZONE,\n'
           '   ids INTERVAL DAY TO SECOND,\n'
-          '   iym INTERVAL YEAR TO MONTH\n'
+          '   iym INTERVAL YEAR TO MONTH,\n'
+          '   j   VARCHAR2(100 CHAR)\n'
           ') SEGMENT CREATION IMMEDIATE'
        );
 
@@ -170,7 +171,8 @@ CREATE FOREIGN TABLE typetest1 (
    d   date,
    ts  timestamp with time zone,
    ids interval,
-   iym interval
+   iym interval,
+   j   json
 ) SERVER oracle OPTIONS (table 'TYPETEST1', prefetch '2', lob_prefetch '5000');
 ALTER FOREIGN TABLE typetest1 DROP q;
 
@@ -201,6 +203,7 @@ CREATE FOREIGN TABLE longy (
    ts  timestamp with time zone,
    ids interval,
    iym interval,
+   j   json,
    x   integer
 ) SERVER oracle OPTIONS (table 'TYPETEST1');
 
@@ -220,7 +223,7 @@ ALTER SERVER oracle OPTIONS (DROP isolation_level);
 SELECT oracle_close_connections();
 DELETE FROM typetest1;
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym, j) VALUES (
    1,
    'fixed char',
    'nat''l char',
@@ -239,7 +242,8 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db
    '1968-10-20',
    '2009-01-26 15:02:54.893532 PST',
    '1 day 2 hours 30 seconds 1 microsecond',
-   '-6 months'
+   '-6 months',
+   '{ "key": 1, "value": "one" }'
 );
 
 -- change the "boolean" in Oracle to "2"
@@ -247,7 +251,7 @@ SELECT oracle_execute('oracle', 'UPDATE typetest1 SET b = 2 WHERE id = 1');
 
 INSERT INTO shorty (id, c) VALUES (2, NULL);
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym, j) VALUES (
    3,
    E'a\u001B\u0007\u000D\u007Fb',
    E'a\u001B\u0007\u000D\u007Fb',
@@ -266,10 +270,11 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db
    '0044-03-15 BC',
    '0044-03-15 12:00:00 BC',
    '-2 days -12 hours -30 minutes',
-   '-2 years -6 months'
+   '-2 years -6 months',
+   '{ "key": 3, "value": "three", "valid": false }'
 );
 
-INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym) VALUES (
+INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym, j) VALUES (
    4,
    'short',
    'short',
@@ -288,7 +293,8 @@ INSERT INTO typetest1 (id, c, nc, vc, nvc, lc, lnc, r, u, lb, lr, b, num, fl, db
    NULL,
    NULL,
    '23:59:59.999999',
-   '3 years'
+   '3 years',
+   '{ "key": 4, "value": "four" }'
 );
 
 -- try inserting an empty string into a CLOB (will become NULL)
@@ -302,7 +308,7 @@ ROLLBACK;
  */
 
 -- simple SELECT
-SELECT id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym, x FROM longy ORDER BY id;
+SELECT id, c, nc, vc, nvc, lc, r, u, lb, lr, b, num, fl, db, d, ts, ids, iym, j, x FROM longy ORDER BY id;
 -- mass UPDATE
 WITH upd (id, c, lb, d, ts) AS
    (UPDATE longy SET c = substr(c, 1, 9) || 'u',
@@ -359,6 +365,8 @@ DELETE FROM gen WHERE id = 6;
 DROP FOREIGN TABLE gen;
 -- test for "ctid" in the WHERE clause (should fail)
 SELECT id FROM typetest1 WHERE ctid = '(0, 1)';
+-- test usedColumnWalker() with JSON expressions
+SELECT id, j->'value' FROM typetest1 WHERE json_exists(j, '$.key') ORDER BY id;
 
 /*
  * Test "strip_zeros" column option.
@@ -446,8 +454,8 @@ DELETE FROM qtest WHERE id = 5;
 
 BEGIN;
 COPY typetest1 FROM STDIN;
-666	cöpy	variation	dynamo	ünicode	Not very long	n'Clobber	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years
-777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	Foo	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year
+666	cöpy	variation	dynamo	ünicode	Not very long	n'Clobber	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years	{ "key": 666, "value": "satan" }
+777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	Foo	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year	777
 \.
 ROLLBACK;
 
@@ -460,8 +468,8 @@ CREATE TABLE defpart PARTITION OF party DEFAULT;
 ALTER TABLE party ATTACH PARTITION typetest1 FOR VALUES FROM (1) TO (MAXVALUE);
 BEGIN;
 COPY party FROM STDIN;
-666	cöpy	variation	dynamo	ünicode	Not very long	n'Clobber	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years
-777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	Foo	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year
+666	cöpy	variation	dynamo	ünicode	Not very long	n'Clobber	DEADF00D	9a0cf1eb-02e2-4b1f-bbe0-449fa4a99969	\\x01020304	\\xFFFF	\N	0.11111	0.43211	0.01010	2100-01-29	2050-04-01 19:30:00	12 hours	0 years	42
+777	fdjkl	r89809rew	^ß[]#~	\N	Das also ist des Pudels Kern.	Foo	00	fe288446-05f6-4074-9e9e-6ee41af7b377	\\x00	\\x00	FALSE	10	1002	1003	2019-05-01	2019-05-01 0:00:00	0 seconds	1 year	"test"
 \.
 INSERT INTO party (id, lc, lr, lb)
    VALUES (12, 'very long character', '\x0001020304', '\xFFFEFDFC');

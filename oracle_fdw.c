@@ -303,6 +303,15 @@ struct OracleFdwState {
 };
 
 /*
+ * Needed for usedColumnWalker().
+ */
+struct oratab_relid
+{
+	struct oraTable *oraTable;
+	int foreignrelid;
+};
+
+/*
  * SQL functions
  */
 extern PGDLLEXPORT Datum oracle_fdw_handler(PG_FUNCTION_ARGS);
@@ -381,6 +390,7 @@ static int acquireSampleRowsFunc (Relation relation, int elevel, HeapTuple *rows
 static void appendAsType(StringInfoData *dest, const char *s, Oid type);
 static char *deparseExpr(oracleSession *session, RelOptInfo *foreignrel, Expr *expr, const struct oraTable *oraTable, List **params, bool check_only);
 static char *datumToString(Datum datum, Oid type);
+static bool usedColumnWalker(Node *node, struct oratab_relid *ctx);
 static void getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid);
 static void checkDataType(oraType oratype, int scale, Oid pgtype, const char *tablename, const char *colname);
 static char *deparseWhereConditions(struct OracleFdwState *fdwState, RelOptInfo *baserel, List **local_conds, List **remote_conds);
@@ -4895,269 +4905,74 @@ static char
 }
 
 /*
+ * usedColumnWalker
+ * 		Node tree walker for getUsedColumns().
+ * 		Set "used=true" in oraTable for all columns used in the expression.
+ */
+bool
+usedColumnWalker(Node *node, struct oratab_relid *ctx)
+{
+	struct oraTable *oraTable = ctx->oraTable;
+	int foreignrelid = ctx->foreignrelid;
+	int index;
+
+	if (node == NULL)
+		return false;
+
+	if (IsA(node, Var))
+	{
+		Var *variable = (Var *)node;
+
+		/* ignore columns belonging to a different foreign table */
+		if (variable->varno != foreignrelid)
+			return false;
+
+		/* ignore system columns */
+		if (variable->varattno < 0)
+			return false;
+
+		/* if this is a wholerow reference, we need all columns */
+		if (variable->varattno == 0) {
+			for (index=0; index<oraTable->ncols; ++index)
+				if (oraTable->cols[index]->pgname)
+					oraTable->cols[index]->used = 1;
+			return false;
+		}
+
+		/* get oraTable column index corresponding to this column (-1 if none) */
+		index = oraTable->ncols - 1;
+		while (index >= 0 && oraTable->cols[index]->pgattnum != variable->varattno)
+			--index;
+
+		if (index == -1)
+			ereport(WARNING,
+					(errcode(ERRCODE_WARNING),
+					errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", variable->varattno, oraTable->pgname)));
+		else
+			oraTable->cols[index]->used = 1;
+	}
+
+	/* expression_tree_walker doesn't handle RestrictInfos */
+	if (IsA(node, RestrictInfo))
+		return expression_tree_walker((Node *)((RestrictInfo *)node)->clause, usedColumnWalker, ctx);
+
+	/* expression_tree_walker doesn't descend into subqueries */
+	if (IsA(node, Query))
+		return query_tree_walker((Query *)node, usedColumnWalker, ctx, 0);
+
+	return expression_tree_walker(node, usedColumnWalker, ctx);
+}
+
+/*
  * getUsedColumns
  * 		Set "used=true" in oraTable for all columns used in the expression.
  */
 void
 getUsedColumns(Expr *expr, struct oraTable *oraTable, int foreignrelid)
 {
-	ListCell *cell;
-	Var *variable;
-	int index;
+	struct oratab_relid ctx = { oraTable, foreignrelid };
 
-	if (expr == NULL)
-		return;
-
-	switch(expr->type)
-	{
-		case T_RestrictInfo:
-			getUsedColumns(((RestrictInfo *)expr)->clause, oraTable, foreignrelid);
-			break;
-		case T_TargetEntry:
-			getUsedColumns(((TargetEntry *)expr)->expr, oraTable, foreignrelid);
-			break;
-		case T_Const:
-		case T_Param:
-		case T_CaseTestExpr:
-		case T_CoerceToDomainValue:
-		case T_CurrentOfExpr:
-#if PG_VERSION_NUM >= 100000
-		case T_NextValueExpr:
-#endif
-			break;
-		case T_Var:
-			variable = (Var *)expr;
-
-			/* ignore columns belonging to a different foreign table */
-			if (variable->varno != foreignrelid)
-				break;
-
-			/* ignore system columns */
-			if (variable->varattno < 0)
-				break;
-
-			/* if this is a wholerow reference, we need all columns */
-			if (variable->varattno == 0) {
-				for (index=0; index<oraTable->ncols; ++index)
-					if (oraTable->cols[index]->pgname)
-						oraTable->cols[index]->used = 1;
-				break;
-			}
-
-			/* get oraTable column index corresponding to this column (-1 if none) */
-			index = oraTable->ncols - 1;
-			while (index >= 0 && oraTable->cols[index]->pgattnum != variable->varattno)
-				--index;
-
-			if (index == -1)
-			{
-				ereport(WARNING,
-						(errcode(ERRCODE_WARNING),
-						errmsg("column number %d of foreign table \"%s\" does not exist in foreign Oracle table, will be replaced by NULL", variable->varattno, oraTable->pgname)));
-			}
-			else
-			{
-				oraTable->cols[index]->used = 1;
-			}
-			break;
-		case T_Aggref:
-			foreach(cell, ((Aggref *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			foreach(cell, ((Aggref *)expr)->aggorder)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			foreach(cell, ((Aggref *)expr)->aggdistinct)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_WindowFunc:
-			foreach(cell, ((WindowFunc *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-#if PG_VERSION_NUM < 120000
-		case T_ArrayRef:
-			{
-				ArrayRef *ref = (ArrayRef *)expr;
-#else
-		case T_SubscriptingRef:
-			{
-				SubscriptingRef *ref = (SubscriptingRef *)expr;
-#endif
-
-				foreach(cell, ref->refupperindexpr)
-				{
-					getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-				}
-				foreach(cell, ref->reflowerindexpr)
-				{
-					getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-				}
-				getUsedColumns(ref->refexpr, oraTable, foreignrelid);
-				getUsedColumns(ref->refassgnexpr, oraTable, foreignrelid);
-				break;
-			}
-		case T_FuncExpr:
-			foreach(cell, ((FuncExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_OpExpr:
-			foreach(cell, ((OpExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_DistinctExpr:
-			foreach(cell, ((DistinctExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_NullIfExpr:
-			foreach(cell, ((NullIfExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_ScalarArrayOpExpr:
-			foreach(cell, ((ScalarArrayOpExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_BoolExpr:
-			foreach(cell, ((BoolExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_SubPlan:
-			{
-				SubPlan *subplan = (SubPlan *)expr;
-
-				getUsedColumns((Expr *)(subplan->testexpr), oraTable, foreignrelid);
-
-				foreach(cell, subplan->args)
-				{
-					getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-				}
-			}
-			break;
-		case T_AlternativeSubPlan:
-			/* examine only first alternative */
-			getUsedColumns((Expr *)linitial(((AlternativeSubPlan *)expr)->subplans), oraTable, foreignrelid);
-			break;
-		case T_NamedArgExpr:
-			getUsedColumns(((NamedArgExpr *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_FieldSelect:
-			getUsedColumns(((FieldSelect *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_RelabelType:
-			getUsedColumns(((RelabelType *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_CoerceViaIO:
-			getUsedColumns(((CoerceViaIO *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_ArrayCoerceExpr:
-			getUsedColumns(((ArrayCoerceExpr *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_ConvertRowtypeExpr:
-			getUsedColumns(((ConvertRowtypeExpr *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_CollateExpr:
-			getUsedColumns(((CollateExpr *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_CaseExpr:
-			foreach(cell, ((CaseExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			getUsedColumns(((CaseExpr *)expr)->arg, oraTable, foreignrelid);
-			getUsedColumns(((CaseExpr *)expr)->defresult, oraTable, foreignrelid);
-			break;
-		case T_CaseWhen:
-			getUsedColumns(((CaseWhen *)expr)->expr, oraTable, foreignrelid);
-			getUsedColumns(((CaseWhen *)expr)->result, oraTable, foreignrelid);
-			break;
-		case T_ArrayExpr:
-			foreach(cell, ((ArrayExpr *)expr)->elements)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_RowExpr:
-			foreach(cell, ((RowExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_RowCompareExpr:
-			foreach(cell, ((RowCompareExpr *)expr)->largs)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			foreach(cell, ((RowCompareExpr *)expr)->rargs)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_CoalesceExpr:
-			foreach(cell, ((CoalesceExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_MinMaxExpr:
-			foreach(cell, ((MinMaxExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_XmlExpr:
-			foreach(cell, ((XmlExpr *)expr)->named_args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			foreach(cell, ((XmlExpr *)expr)->args)
-			{
-				getUsedColumns((Expr *)lfirst(cell), oraTable, foreignrelid);
-			}
-			break;
-		case T_NullTest:
-			getUsedColumns(((NullTest *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_BooleanTest:
-			getUsedColumns(((BooleanTest *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_CoerceToDomain:
-			getUsedColumns(((CoerceToDomain *)expr)->arg, oraTable, foreignrelid);
-			break;
-		case T_PlaceHolderVar:
-			getUsedColumns(((PlaceHolderVar *)expr)->phexpr, oraTable, foreignrelid);
-			break;
-#if PG_VERSION_NUM >= 100000
-		case T_SQLValueFunction:
-			break;  /* contains no column references */
-#endif  /* PG_VERSION_NUM */
-		default:
-			/*
-			 * We must be able to handle all node types that can
-			 * appear because we cannot omit a column from the remote
-			 * query that will be needed.
-			 * Throw an error if we encounter an unexpected node type.
-			 */
-			ereport(ERROR,
-					(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_REPLY),
-					errmsg("Internal oracle_fdw error: encountered unknown node type %d.", expr->type)));
-	}
+	(void)usedColumnWalker((Node *)expr, &ctx);
 }
 
 /*
